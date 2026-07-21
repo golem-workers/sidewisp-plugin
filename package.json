@@ -9,6 +9,7 @@
     "config.js",
     "openclaw.plugin.json",
     "README.md",
+    "ROADMAP.md",
     "LICENSE"
   ],
   "scripts": {
