@@ -38,7 +38,7 @@ openclaw config set plugins.entries.sidewisp.config.setupToken sw_setup_REPLACE_
 openclaw gateway restart
 ```
 
-The setup token will be exchanged for a per-installation credential in the production implementation. Never commit a real token.
+The setup token is exchanged once for a per-installation credential and then removed from active configuration. Never commit a real token.
 
 ## Safety model
 
@@ -54,7 +54,10 @@ The setup token will be exchanged for a per-installation credential in the produ
 npm test
 npm run check
 npm run pack:check
+./scripts/verify-release.sh
 ```
+
+See [COMPATIBILITY.md](COMPATIBILITY.md) for supported runtimes, pinned-release installation, upgrade, and rollback rules.
 
 ## License
 
