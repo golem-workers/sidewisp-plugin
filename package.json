@@ -1,0 +1,38 @@
+{
+  "name": "@sidewisp/openclaw-plugin",
+  "version": "0.1.0",
+  "description": "Zero-LLM telemetry collector for monitoring OpenClaw agents with Sidewisp",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "index.js",
+    "config.js",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check index.js && node --test",
+    "pack:check": "npm pack --dry-run"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.7.1"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.7.1",
+      "minGatewayVersion": "2026.7.1"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/golem-workers/sidewisp-openclaw-plugin.git"
+  },
+  "engines": {
+    "node": ">=22.22.3"
+  }
+}

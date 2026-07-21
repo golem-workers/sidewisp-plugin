@@ -1,0 +1,35 @@
+{
+  "id": "sidewisp",
+  "name": "Sidewisp",
+  "description": "Deterministic, zero-LLM health and failure telemetry for OpenClaw agents",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "endpoint": {
+        "type": "string",
+        "description": "Sidewisp ingestion API base URL"
+      },
+      "setupToken": {
+        "type": "string",
+        "description": "One-time installation token"
+      },
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  },
+  "uiHints": {
+    "setupToken": {
+      "label": "Setup token",
+      "sensitive": true
+    },
+    "endpoint": {
+      "label": "Ingestion endpoint"
+    }
+  }
+}
