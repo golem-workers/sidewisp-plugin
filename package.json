@@ -9,6 +9,7 @@
     "config.js",
     "src",
     "hermes/sidewisp/__init__.py",
+    "hermes/sidewisp/recovery.py",
     "hermes/sidewisp/plugin.yaml",
     "openclaw.plugin.json",
     "README.md",

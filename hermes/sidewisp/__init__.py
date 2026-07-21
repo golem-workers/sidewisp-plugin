@@ -6,6 +6,7 @@ completions, commands, tool arguments/results, or approval descriptions.
 from __future__ import annotations
 
 import time
+import hashlib
 from typing import Any, Callable
 
 _sink: Callable[[dict[str, Any]], None] = lambda _fact: None
@@ -33,6 +34,9 @@ def _emit(kind: str, outcome: str = "success", **kwargs: Any) -> None:
             correlation[target] = value
     if correlation:
         fact["correlation"] = correlation
+    identity = "|".join(f"{key}={correlation[key]}" for key in sorted(correlation)) or str(fact["observed_at_ms"])
+    digest = hashlib.sha256(f"hermes\0{kind}\0{identity}".encode()).hexdigest()[:32]
+    fact["event_key"] = f"hermes:{digest}"
     status = kwargs.get("status")
     if isinstance(status, int) and 100 <= status <= 599:
         fact["httpStatus"] = status
