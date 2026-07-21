@@ -5,12 +5,14 @@ export const RUNTIME_MAPPING_VERSION = "sidewisp.runtime-map.v1";
 export const RUNTIME_MAPPINGS = Object.freeze({
   openclaw: Object.freeze({
     runtime_start: "runtime-start", runtime_crash: "runtime-crash", gateway_up: "gateway-up", gateway_down: "gateway-down",
-    turn_end: "turn-end", tool_end: "tool-end", delivery_end: "delivery-end", provider_error: "provider-error",
+    turn_start: "turn-start", turn_end: "turn-end", tool_start: "tool-start", tool_end: "tool-end",
+    message_received: "message-received", delivery_end: "delivery-end", provider_error: "provider-error",
     config_invalid: "config-invalid", queue_stuck: "queue-stuck", context_exhausted: "context-exhausted",
   }),
   hermes: Object.freeze({
     session_started: "runtime-start", session_crashed: "runtime-crash", gateway_connected: "gateway-up", gateway_disconnected: "gateway-down",
-    llm_call_end: "turn-end", tool_call_end: "tool-end", message_delivery_end: "delivery-end", llm_provider_error: "provider-error",
+    llm_call_start: "turn-start", llm_call_end: "turn-end", tool_call_start: "tool-start", tool_call_end: "tool-end",
+    message_received: "message-received", message_delivery_end: "delivery-end", llm_provider_error: "provider-error",
     configuration_error: "config-invalid", task_queue_stalled: "queue-stuck", context_limit_reached: "context-exhausted",
   }),
 });
@@ -20,6 +22,8 @@ const FIXED = Object.freeze({
   "gateway-up": ["gateway.connected", "success"], "gateway-down": ["gateway.disconnected", "failure"],
   "config-invalid": ["config.invalid", "failure"], "queue-stuck": ["queue.stuck", "failure"],
   "context-exhausted": ["context.exhausted", "failure"],
+  "turn-start": ["turn.started", "info"], "tool-start": ["tool.started", "info"],
+  "message-received": ["message.received", "info"],
 });
 
 function variableFact(kind, input) {
