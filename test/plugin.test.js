@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-import { resolveConfig } from "../config.js";
+import { readSetupToken, resolveConfig } from "../config.js";
 
 test("manifest declares an on-startup Sidewisp plugin", () => {
   const manifest = JSON.parse(fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url)));
@@ -20,6 +20,7 @@ test("configuration never exposes the setup token", () => {
     endpoint: "https://example.test",
   });
   assert.equal(JSON.stringify(config).includes("sw_setup_secret"), false);
+  assert.equal(readSetupToken({ setupToken: "sw_setup_secret" }), "sw_setup_secret");
 });
 
 test("defaults to zero-configuration pending setup", () => {

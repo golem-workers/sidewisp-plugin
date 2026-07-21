@@ -15,7 +15,7 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check index.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --check src/core/health.js && node --check src/core/sanitize.js && node --test",
+    "check": "node --check index.js && node --check src/auth/credentials.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --check src/core/health.js && node --check src/core/sanitize.js && node --test",
     "pack:check": "npm pack --dry-run"
   },
   "peerDependencies": {

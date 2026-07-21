@@ -9,3 +9,8 @@ export function resolveConfig(value) {
         : "https://api.sidewisp.com",
   };
 }
+
+export function readSetupToken(value) {
+  const token = value && typeof value === "object" ? value.setupToken : undefined;
+  return typeof token === "string" && token.startsWith("sw_setup_") ? token : null;
+}
