@@ -25,6 +25,7 @@ test("secret is never transmitted and partial acknowledgements retain order", as
   } });
   assert.deepEqual(await uploader.sendOnce(), { status: "sent", sent: 1, remaining: 1 });
   assert.equal(JSON.stringify(request).includes(credential.secret), false);
+  assert.equal(request.headers["x-sidewisp-algorithm"], "hmac-sha256-v1");
   assert.deepEqual(spool.pending(10).map(({ eventId }) => eventId), ["b"]);
 });
 

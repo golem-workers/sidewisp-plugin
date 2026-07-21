@@ -35,6 +35,7 @@ export function createUploader({
         headers: {
           "content-type": "application/json", "content-length": String(Buffer.byteLength(body)),
           authorization: `Sidewisp ${credential.installationId}:${signature}`,
+          "x-sidewisp-algorithm": "hmac-sha256-v1",
           "x-sidewisp-timestamp": timestamp, "x-sidewisp-nonce": requestNonce,
         },
       });
