@@ -70,12 +70,18 @@ export function createEnrollmentManager({ endpoint, store, fetchImpl = globalThi
         if (!response.ok) throw new Error(`enrollment failed (${response.status})`);
         const body = await response.json();
         await persist(validateCredential({ ...body, status: "active" }));
-        await clearSetupToken();
+        try { await clearSetupToken(); }
+        catch { return { installationId: credential.installationId, status: state, setupTokenCleanupPending: true }; }
         return { installationId: credential.installationId, status: state };
       } catch (error) {
         state = "enrollment-failed";
         throw error;
       }
+    },
+    async clearStoredSetupToken() {
+      if (state !== "active") return false;
+      await clearSetupToken();
+      return true;
     },
     async rotate(nextSecret) {
       if (!credential || state !== "active") throw new Error("installation is not active");

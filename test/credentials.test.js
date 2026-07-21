@@ -58,3 +58,26 @@ test("failed exchange keeps token clearing disabled and recovers on retry", asyn
   await manager.enroll("sw_setup_retry_secret");
   assert.equal(manager.canSend(), true);
 });
+
+test("credential remains active when config cleanup fails and cleanup can be retried", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sidewisp-auth-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let cleanupAttempts = 0;
+  const manager = createEnrollmentManager({
+    endpoint: "https://sidewisp.test",
+    store: createFileCredentialStore({ stateDir: root }),
+    clearSetupToken: async () => {
+      cleanupAttempts += 1;
+      if (cleanupAttempts === 1) throw new Error("config busy");
+    },
+    fetchImpl: async () => ({ ok: true, json: async () => credential }),
+  });
+  assert.deepEqual(await manager.enroll("sw_setup_cleanup_retry"), {
+    installationId: credential.installationId,
+    status: "active",
+    setupTokenCleanupPending: true,
+  });
+  assert.equal(manager.canSend(), true);
+  assert.equal(await manager.clearStoredSetupToken(), true);
+  assert.equal(cleanupAttempts, 2);
+});

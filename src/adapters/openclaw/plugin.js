@@ -70,6 +70,9 @@ export default definePluginEntry({
         if (setupToken && !auth.canSend()) {
           try { await auth.enroll(setupToken); }
           catch { ctx.logger.warn("Sidewisp enrollment failed; will retry on restart"); }
+        } else if (setupToken && auth.canSend()) {
+          try { await auth.clearStoredSetupToken(); }
+          catch { ctx.logger.warn("Sidewisp setup-token cleanup pending; will retry on restart"); }
         }
         spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
         if (preStartEvents.length > 0) {
