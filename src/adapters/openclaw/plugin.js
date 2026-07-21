@@ -7,6 +7,7 @@ import { createEnrollmentManager, createFileCredentialStore } from "../../auth/c
 import { createCollector } from "../../core/collector.js";
 import { normalizeRuntimeEvent } from "../../core/normalize.js";
 import { createAdapterRegistry } from "../../core/runtime-adapter.js";
+import { createSafeSupportBundle } from "../../core/support.js";
 import { openSpool } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
 import { createOpenClawAdapter } from "./index.js";
@@ -118,8 +119,17 @@ export default definePluginEntry({
         mode: "zero-llm",
         installation: auth.status(),
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
+        uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
         ...(await collector.status()),
       });
+    }, { scope: "operator.read" });
+
+    api.registerGatewayMethod("sidewisp.supportBundle", async ({ respond }) => {
+      const collectorStatus = await collector.status();
+      respond(true, createSafeSupportBundle({
+        pluginVersion: VERSION, runtimeVersion: api.runtime.version, endpoint: config.endpoint,
+        installation: auth.status(), spool: spool?.health(), uploader: uploader?.status(), collector: collectorStatus,
+      }));
     }, { scope: "operator.read" });
   },
 });

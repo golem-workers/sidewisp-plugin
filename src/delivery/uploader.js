@@ -14,16 +14,21 @@ export function createUploader({
 }) {
   if (!Number.isSafeInteger(maxBatch) || maxBatch < 1 || maxBatch > 1000) throw new TypeError("invalid maxBatch");
   let attempt = 0;
+  let lastResult = { status: "not-started", sent: 0, remaining: 0, at: null };
+  const finish = (result) => {
+    lastResult = { ...result, at: new Date(now()).toISOString() };
+    return result;
+  };
 
   async function sendOnce() {
     const credential = await credentialProvider.current();
-    if (!credential || credential.status !== "active") return { status: "disabled", sent: 0, remaining: spool.pending(1).length };
+    if (!credential || credential.status !== "active") return finish({ status: "disabled", sent: 0, remaining: spool.pending(1).length });
     const pending = spool.pending(maxBatch);
-    if (pending.length === 0) { attempt = 0; return { status: "idle", sent: 0, remaining: 0 }; }
+    if (pending.length === 0) { attempt = 0; return finish({ status: "idle", sent: 0, remaining: 0 }); }
     const body = JSON.stringify({ schema: "sidewisp.telemetry-batch.v1", events: pending.map(({ event }) => event) });
     if (Buffer.byteLength(body) > maxBodyBytes) {
       spool.deadLetter(pending[0].eventId, "batch-event-too-large");
-      return { status: "dead-lettered", sent: 0, remaining: spool.pending(1).length };
+      return finish({ status: "dead-lettered", sent: 0, remaining: spool.pending(1).length });
     }
     const timestamp = Math.floor(now() / 1000).toString();
     const requestNonce = nonce();
@@ -39,24 +44,25 @@ export function createUploader({
           "x-sidewisp-timestamp": timestamp, "x-sidewisp-nonce": requestNonce,
         },
       });
-    } catch { return { status: "retry", sent: 0, remaining: pending.length }; }
+    } catch { return finish({ status: "retry", sent: 0, remaining: pending.length }); }
     if (response.status === 401 || response.status === 403) {
       await credentialProvider.refresh?.();
-      return { status: "credential-rejected", sent: 0, remaining: pending.length };
+      return finish({ status: "credential-rejected", sent: 0, remaining: pending.length });
     }
-    if (response.status === 429 || response.status >= 500) return { status: "retry", sent: 0, remaining: pending.length };
-    if (!response.ok) return { status: "rejected", sent: 0, remaining: pending.length };
+    if (response.status === 429 || response.status >= 500) return finish({ status: "retry", sent: 0, remaining: pending.length });
+    if (!response.ok) return finish({ status: "rejected", sent: 0, remaining: pending.length });
     const result = await response.json();
     const sentIds = new Set(pending.map(({ eventId }) => eventId));
     const acknowledged = Array.isArray(result.acknowledgedEventIds)
       ? result.acknowledgedEventIds.filter((id) => sentIds.has(id)) : [];
     spool.acknowledge(acknowledged);
     attempt = 0;
-    return { status: "sent", sent: acknowledged.length, remaining: spool.pending(1).length };
+    return finish({ status: "sent", sent: acknowledged.length, remaining: spool.pending(1).length });
   }
 
   return Object.freeze({
     sendOnce,
+    status: () => ({ ...lastResult }),
     async drain({ maxAttempts = 10 } = {}) {
       for (let count = 0; count < maxAttempts; count += 1) {
         const result = await sendOnce();
@@ -67,7 +73,7 @@ export function createUploader({
           await sleep(Math.round(delay));
         }
       }
-      return { status: "backpressure", sent: 0, remaining: spool.pending(1).length };
+      return finish({ status: "backpressure", sent: 0, remaining: spool.pending(1).length });
     },
   });
 }
