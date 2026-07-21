@@ -10,6 +10,18 @@ The OpenClaw adapter runs as a native background service. It does not add an age
 
 The repository contains the installable plugin shell and runtime status contract. Telemetry collection, durable spooling, signed ingestion, and deterministic incident rules are being implemented for the first production release.
 
+## Package architecture
+
+```text
+src/core                 shared adapter registry and collector lifecycle
+src/adapters/openclaw    native OpenClaw package entrypoint
+src/adapters/hermes      Hermes integration behind the same contract
+src/contracts            runtime-neutral telemetry contracts (next stage)
+src/delivery             shared durable delivery (next stage)
+```
+
+Runtime selection is explicit. Every adapter declares all capabilities as supported, degraded, or unsupported; adding a runtime does not change backend ingestion or duplicate delivery code.
+
 ## Install from GitHub
 
 ```bash

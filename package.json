@@ -7,6 +7,7 @@
   "files": [
     "index.js",
     "config.js",
+    "src",
     "openclaw.plugin.json",
     "README.md",
     "ROADMAP.md",
@@ -14,7 +15,7 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check index.js && node --test",
+    "check": "node --check index.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --test",
     "pack:check": "npm pack --dry-run"
   },
   "peerDependencies": {
