@@ -3,6 +3,8 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+const SPOOL_SCHEMA_VERSION = 1;
+
 export class SpoolError extends Error {
   constructor(code, message = code) { super(message); this.name = "SpoolError"; this.code = code; }
 }
@@ -10,11 +12,18 @@ export class SpoolError extends Error {
 function initialize(file) {
   const db = new DatabaseSync(file);
   db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;
+    CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, payload TEXT NOT NULL, source TEXT NOT NULL, cursor TEXT NOT NULL, created_at INTEGER NOT NULL, acked_at INTEGER);
     CREATE INDEX IF NOT EXISTS events_pending ON events(acked_at, created_at);
     CREATE TABLE IF NOT EXISTS cursors (source TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS dead_letters (event_id TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at INTEGER NOT NULL);
   `);
+  const storedVersion = db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get()?.value;
+  if (storedVersion === undefined) db.prepare("INSERT INTO metadata(key,value) VALUES('schema_version',?)").run(String(SPOOL_SCHEMA_VERSION));
+  else if (!Number.isSafeInteger(Number(storedVersion)) || Number(storedVersion) > SPOOL_SCHEMA_VERSION) {
+    db.close();
+    throw new SpoolError("unsupported-schema", `spool schema ${storedVersion} is newer than ${SPOOL_SCHEMA_VERSION}`);
+  }
   const integrity = db.prepare("PRAGMA integrity_check").get();
   if (integrity.integrity_check !== "ok") { db.close(); throw new SpoolError("corrupt", "spool integrity check failed"); }
   return db;
@@ -34,6 +43,11 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
   let recoveredFromCorruption = false;
   try { db = initialize(file); }
   catch (error) {
+    if (error instanceof SpoolError && error.code === "unsupported-schema") {
+      await lock.close();
+      await fsp.rm(lockFile, { force: true });
+      throw error;
+    }
     const corruptFile = `${file}.corrupt-${now()}`;
     try { await fsp.rename(file, corruptFile); recoveredFromCorruption = true; db = initialize(file); }
     catch { await lock.close(); await fsp.rm(lockFile, { force: true }); throw error; }

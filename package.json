@@ -15,6 +15,7 @@
     "README.md",
     "ROADMAP.md",
     "COMPATIBILITY.md",
+    "RELEASE_TEMPLATE.md",
     "LICENSE"
   ],
   "scripts": {
