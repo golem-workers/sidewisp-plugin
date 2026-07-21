@@ -1,8 +1,10 @@
-# Sidewisp OpenClaw Plugin
+# Sidewisp Plugin
 
-Public, zero-LLM telemetry collector for observing OpenClaw agents with Sidewisp.
+Public, universal, zero-LLM telemetry collector for observing AI agent runtimes with Sidewisp.
 
-The plugin is an OpenClaw background service. It does not add an agent tool, does not call a model, and never sends commands to the observed agent.
+This is one plugin repository with runtime-specific adapters. The first adapters target OpenClaw and Hermes; future runtimes are added here behind the same telemetry, identity, spool, and remediation contracts.
+
+The OpenClaw adapter runs as a native background service. It does not add an agent tool, does not call a model, and never sends commands to the observed agent.
 
 ## Current status
 
@@ -11,7 +13,7 @@ The repository contains the installable plugin shell and runtime status contract
 ## Install from GitHub
 
 ```bash
-openclaw plugins install git:github.com/golem-workers/sidewisp-openclaw-plugin@main --force
+openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@main --force
 openclaw plugins inspect sidewisp --runtime --json
 ```
 

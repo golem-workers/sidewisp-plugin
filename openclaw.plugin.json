@@ -1,7 +1,7 @@
 {
   "id": "sidewisp",
   "name": "Sidewisp",
-  "description": "Deterministic, zero-LLM health and failure telemetry for OpenClaw agents",
+  "description": "Deterministic, zero-LLM health and failure telemetry for agent runtimes",
   "activation": {
     "onStartup": true
   },
