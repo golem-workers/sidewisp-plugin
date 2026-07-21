@@ -5,11 +5,13 @@ import { mutateConfigFile } from "openclaw/plugin-sdk/config-mutation";
 import { readSetupToken, resolveConfig } from "../../../config.js";
 import { createEnrollmentManager, createFileCredentialStore } from "../../auth/credentials.js";
 import { createCollector } from "../../core/collector.js";
+import { normalizeRuntimeEvent } from "../../core/normalize.js";
 import { createAdapterRegistry } from "../../core/runtime-adapter.js";
 import { openSpool } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
 import { createOpenClawAdapter } from "./index.js";
 import { registerOpenClawHooks } from "./hooks.js";
+import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 
 const VERSION = "0.1.0";
 
@@ -44,20 +46,19 @@ export default definePluginEntry({
       }
       spool.enqueueSourceBatch("openclaw-hooks", String(event.sequence), [event]);
     };
+    const makeEnvelope = (input, sourceKind = "hook", fallback = "") => {
+      const now = new Date().toISOString();
+      sequence += 1;
+      return {
+        eventId: stableOpenClawEventId(input, fallback || `${sequence}|${crypto.randomUUID()}`),
+        installationId: auth.status().installationId ?? "sw_ins_unconfigured",
+        sequence, occurredAt: now, observedAt: now,
+        runtime: { version: api.runtime.version }, source: { kind: sourceKind, adapterVersion: VERSION },
+      };
+    };
     registerOpenClawHooks(api, {
       emit: persistEvent,
-      envelopeFactory: (_input, _event, ctx) => {
-        const now = new Date().toISOString();
-        sequence += 1;
-        return {
-          eventId: `sw_evt_${crypto.randomUUID().replaceAll("-", "")}`,
-          installationId: auth.status().installationId ?? "sw_ins_unconfigured",
-          sequence, occurredAt: now, observedAt: now,
-          runtime: { version: api.version ?? "unknown" },
-          source: { kind: "hook", adapterVersion: VERSION },
-          correlation: { sessionId: ctx?.sessionId, turnId: ctx?.runId }, details: {},
-        };
-      },
+      envelopeFactory: (_input, _event, ctx) => ({ ...makeEnvelope(_input), correlation: { sessionId: ctx?.sessionId, turnId: ctx?.runId }, details: {} }),
       onDiagnostic: () => {},
     });
 
@@ -73,6 +74,16 @@ export default definePluginEntry({
         spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
         if (preStartEvents.length > 0) {
           spool.enqueueSourceBatch("openclaw-hooks", String(preStartEvents.at(-1).sequence), preStartEvents.splice(0));
+        }
+        const discovery = await discoverOpenClawSources(stateDir, api.runtime.version);
+        for (const source of discovery.sources) {
+          const stored = spool.cursor(source.file);
+          let cursor = null;
+          try { cursor = stored ? JSON.parse(stored) : null; } catch { cursor = null; }
+          const recovered = await recoverJsonl(source.file, cursor);
+          const events = recovered.facts.map((fact, index) => normalizeRuntimeEvent("openclaw", fact, makeEnvelope(fact, "log", `${source.ino}|${recovered.cursor.offset}|${index}`)).event).filter(Boolean);
+          if (events.length > 0) spool.enqueueSourceBatch(source.file, JSON.stringify(recovered.cursor), events);
+          else spool.advanceCursor(source.file, JSON.stringify(recovered.cursor));
         }
         uploader = createUploader({
           spool, endpoint: config.endpoint,

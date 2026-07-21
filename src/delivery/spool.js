@@ -65,6 +65,9 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
       } catch (error) { db.exec("ROLLBACK"); throw error; }
     },
     cursor(source) { return db.prepare("SELECT value FROM cursors WHERE source=?").get(source)?.value ?? null; },
+    advanceCursor(source, cursor) {
+      db.prepare("INSERT INTO cursors(source,value,updated_at) VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").run(source, cursor, now());
+    },
     pending(limit = 100) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new TypeError("invalid limit");
       return db.prepare("SELECT event_id,payload FROM events WHERE acked_at IS NULL ORDER BY created_at,event_id LIMIT ?").all(limit)
