@@ -1,0 +1,5 @@
+[
+  {"kind":"turn_start","correlation":{"sessionId":"session_fixture","turnId":"turn_fixture"}},
+  {"kind":"tool_end","outcome":"failure","correlation":{"sessionId":"session_fixture","turnId":"turn_fixture","toolCallId":"tool_fixture"},"durationMs":42},
+  {"kind":"delivery_end","outcome":"success","correlation":{"sessionId":"session_fixture","messageId":"message_fixture"},"durationMs":7}
+]
