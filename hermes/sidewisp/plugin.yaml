@@ -1,0 +1,5 @@
+name: Sidewisp
+key: sidewisp
+version: 0.1.0
+description: Deterministic zero-LLM runtime observability bridge
+entrypoint: sidewisp

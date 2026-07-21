@@ -8,6 +8,7 @@
     "index.js",
     "config.js",
     "src",
+    "hermes",
     "openclaw.plugin.json",
     "README.md",
     "ROADMAP.md",

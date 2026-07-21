@@ -5,9 +5,9 @@ export function createHermesAdapter({ hooks, state, version = "unknown", probes 
   let unsubscribe = null;
   let running = false;
   const capabilities = declareCapabilities([
-    "lifecycle-hooks", "turn-hooks", "tool-hooks", "message-hooks", "provider-hooks",
+    "lifecycle-hooks", "turn-hooks", "tool-hooks", "provider-hooks",
     "log-recovery", "state-recovery", "process-health",
-  ]);
+  ], { "message-hooks": "delivery-hook-unavailable" });
   const identity = { id: "hermes", version: "0.1.0", runtimeKind: "hermes", runtimeVersion: version };
   const health = createHealthReporter({ identity, capabilities, probes });
   return defineRuntimeAdapter({
