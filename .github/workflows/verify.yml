@@ -32,7 +32,8 @@ jobs:
       - name: Verify immutable version tag
         run: |
           test "${GITHUB_REF_NAME}" = "v$(node -p "require('./package.json').version")"
-          test "$(git tag --points-at HEAD --format='%(objecttype)' "${GITHUB_REF_NAME}")" = tag
+          test "$(git cat-file -t "${GITHUB_REF_NAME}")" = tag
+          test "$(git rev-parse "${GITHUB_REF_NAME}^{}")" = "${GITHUB_SHA}"
       - name: Build release tarball
         run: mkdir -p dist && npm pack --pack-destination dist
       - name: Record digest
