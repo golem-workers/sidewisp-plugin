@@ -31,9 +31,10 @@ jobs:
           node-version: 22.22.3
       - name: Verify immutable version tag
         run: |
-          test "${GITHUB_REF_NAME}" = "v$(node -p "require('./package.json').version")"
-          test "$(git cat-file -t "${GITHUB_REF_NAME}")" = tag
-          test "$(git rev-parse "${GITHUB_REF_NAME}^{commit}")" = "$(git rev-parse HEAD)"
+          package_version=$(node -p "require('./package.json').version")
+          test "${GITHUB_REF_NAME}" = "v${package_version}"
+          git show-ref --verify --quiet "refs/tags/${GITHUB_REF_NAME}"
+          test "$(git rev-list -n 1 "${GITHUB_REF_NAME}")" = "$(git rev-parse HEAD)"
       - name: Build release tarball
         run: mkdir -p dist && npm pack --pack-destination dist
       - name: Record digest
