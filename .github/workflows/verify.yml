@@ -38,7 +38,7 @@ jobs:
       - name: Build release tarball
         run: mkdir -p dist && npm pack --pack-destination dist
       - name: Record digest
-        run: sha256sum dist/*.tgz > dist/SHA256SUMS
+        run: cd dist && sha256sum *.tgz > SHA256SUMS
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/*.tgz
