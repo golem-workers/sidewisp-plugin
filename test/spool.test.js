@@ -42,6 +42,29 @@ test("single writer lock and disk quota fail visibly", async (t) => {
   await spool.close();
 });
 
+test("restart reclaims a dead PID writer lock without deleting a live lock", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sidewisp-spool-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "spool.sqlite");
+  const lockFile = `${file}.lock`;
+  await fs.writeFile(lockFile, `${JSON.stringify({ pid: 2_147_483_647, token: "dead", createdAtMs: 1 })}\n`, { mode: 0o600 });
+  const spool = await openSpool({ file });
+  await assert.rejects(openSpool({ file }), (error) => error instanceof SpoolError && error.code === "locked");
+  await spool.close();
+  await assert.rejects(fs.stat(lockFile), (error) => error.code === "ENOENT");
+});
+
+test("restart reclaims an old legacy empty writer lock", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sidewisp-spool-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "spool.sqlite");
+  const lockFile = `${file}.lock`;
+  await fs.writeFile(lockFile, "", { mode: 0o600 });
+  await fs.utimes(lockFile, new Date(0), new Date(0));
+  const spool = await openSpool({ file });
+  await spool.close();
+});
+
 test("corrupt database is quarantined and recovered", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "sidewisp-spool-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

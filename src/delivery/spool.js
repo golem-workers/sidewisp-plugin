@@ -2,11 +2,58 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import crypto from "node:crypto";
 
 const SPOOL_SCHEMA_VERSION = 1;
 
 export class SpoolError extends Error {
   constructor(code, message = code) { super(message); this.name = "SpoolError"; this.code = code; }
+}
+
+async function acquireWriterLock(lockFile, { now = Date.now, legacyStaleMs = 5_000 } = {}) {
+  const owner = { pid: process.pid, token: crypto.randomUUID(), createdAtMs: now() };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await fsp.open(lockFile, "wx", 0o600);
+      await handle.writeFile(`${JSON.stringify(owner)}\n`);
+      await handle.sync();
+      return { handle, owner };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      let stat;
+      let current;
+      try {
+        stat = await fsp.stat(lockFile);
+        current = JSON.parse(await fsp.readFile(lockFile, "utf8"));
+      } catch {
+        current = null;
+      }
+      let stale = false;
+      if (Number.isSafeInteger(current?.pid) && current.pid > 0) {
+        try { process.kill(current.pid, 0); }
+        catch (probeError) { stale = probeError.code === "ESRCH"; }
+      } else if (stat && now() - stat.mtimeMs >= legacyStaleMs) {
+        stale = true;
+      }
+      if (!stale || !stat) throw new SpoolError("locked", "spool already has a writer");
+      const latest = await fsp.stat(lockFile).catch(() => null);
+      if (!latest || latest.dev !== stat.dev || latest.ino !== stat.ino) throw new SpoolError("locked", "spool already has a writer");
+      await fsp.unlink(lockFile).catch((unlinkError) => {
+        if (unlinkError.code !== "ENOENT") throw unlinkError;
+      });
+    }
+  }
+  throw new SpoolError("locked", "spool already has a writer");
+}
+
+async function releaseWriterLock(lockFile, lock) {
+  await lock.handle.close();
+  try {
+    const current = JSON.parse(await fsp.readFile(lockFile, "utf8"));
+    if (current?.token === lock.owner.token) await fsp.unlink(lockFile);
+  } catch (error) {
+    if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+  }
 }
 
 function initialize(file) {
@@ -35,22 +82,19 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
   await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await fsp.chmod(path.dirname(file), 0o700);
   const lockFile = `${file}.lock`;
-  let lock;
-  try { lock = await fsp.open(lockFile, "wx", 0o600); }
-  catch (error) { if (error.code === "EEXIST") throw new SpoolError("locked", "spool already has a writer"); throw error; }
+  const lock = await acquireWriterLock(lockFile, { now });
 
   let db;
   let recoveredFromCorruption = false;
   try { db = initialize(file); }
   catch (error) {
     if (error instanceof SpoolError && error.code === "unsupported-schema") {
-      await lock.close();
-      await fsp.rm(lockFile, { force: true });
+      await releaseWriterLock(lockFile, lock);
       throw error;
     }
     const corruptFile = `${file}.corrupt-${now()}`;
     try { await fsp.rename(file, corruptFile); recoveredFromCorruption = true; db = initialize(file); }
-    catch { await lock.close(); await fsp.rm(lockFile, { force: true }); throw error; }
+    catch { await releaseWriterLock(lockFile, lock); throw error; }
   }
   await fsp.chmod(file, 0o600);
 
@@ -99,6 +143,6 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
     },
     prune() { return db.prepare("DELETE FROM events WHERE acked_at IS NOT NULL AND acked_at < ?").run(now() - retentionMs).changes; },
     health() { return { status: diskUsage() >= maxBytes ? "unhealthy" : diskUsage() >= maxBytes * 0.8 ? "degraded" : "healthy", bytes: diskUsage(), maxBytes, recoveredFromCorruption }; },
-    async close() { db.close(); await lock.close(); await fsp.rm(lockFile, { force: true }); },
+    async close() { db.close(); await releaseWriterLock(lockFile, lock); },
   });
 }

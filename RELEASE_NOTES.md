@@ -1,6 +1,6 @@
-# Sidewisp Plugin v0.1.0
+# Sidewisp Plugin v0.1.1
 
-First production-candidate release of the universal, zero-LLM Sidewisp runtime adapter.
+Production-candidate release of the universal, zero-LLM Sidewisp runtime adapter. This release safely reclaims a stale spool writer lock after a runtime crash or forced gateway restart while retaining strict single-writer protection.
 
 ## Contracts and compatibility
 
@@ -14,7 +14,7 @@ First production-candidate release of the universal, zero-LLM Sidewisp runtime a
 Install the immutable release tag:
 
 ```bash
-openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@v0.1.0 --force
+openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@v0.1.1 --force
 ```
 
 Before changing versions, back up the plugin state directory. Roll back by installing the previously pinned release without deleting that directory. The release verification job performs a clean isolated install and confirms that the plugin exposes no tools or model providers.
