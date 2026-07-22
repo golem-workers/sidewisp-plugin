@@ -7,7 +7,7 @@
 | Hermes Agent | Native hook API represented by `hermes/sidewisp/plugin.yaml` | Unknown state schemas are read-only and reported as degraded; no heuristic content scan is attempted. |
 | Sidewisp telemetry | `sidewisp.telemetry.v1` | Unknown contracts are retained locally and are not uploaded. |
 
-Production installations must pin a signed release tag, never `main`. Every release runs `scripts/verify-release.sh`, which tests the package, builds the exact tarball, installs it into an isolated OpenClaw state directory, and confirms that it loads only a background service and safe operator methods.
+Production installations must pin an immutable annotated release tag, never `main`. Every release runs `scripts/verify-release.sh`, which tests the package, builds the exact tarball, installs it into an isolated OpenClaw state directory, and confirms that it loads only a background service and safe operator methods. GitHub Actions signs provenance for the exact archive using OIDC/Sigstore and publishes its SHA-256 alongside the release; verify it with `gh attestation verify` before installation.
 
 ## Upgrade and rollback
 

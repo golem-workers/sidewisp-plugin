@@ -19,7 +19,7 @@ jobs:
     needs: package
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
       attestations: write
     steps:
@@ -29,8 +29,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.22.3
-      - name: Verify signed version tag
-        run: git verify-tag "${GITHUB_REF_NAME}"
+      - name: Verify immutable version tag
+        run: |
+          test "${GITHUB_REF_NAME}" = "v$(node -p "require('./package.json').version")"
+          test "$(git tag --points-at HEAD --format='%(objecttype)' "${GITHUB_REF_NAME}")" = tag
       - name: Build release tarball
         run: mkdir -p dist && npm pack --pack-destination dist
       - name: Record digest
@@ -38,7 +40,11 @@ jobs:
       - uses: actions/attest-build-provenance@v2
         with:
           subject-path: dist/*.tgz
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sidewisp-plugin-${{ github.ref_name }}
-          path: dist/
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.tgz dist/SHA256SUMS \
+            --verify-tag \
+            --title "Sidewisp Plugin ${GITHUB_REF_NAME}" \
+            --notes-file RELEASE_NOTES.md
