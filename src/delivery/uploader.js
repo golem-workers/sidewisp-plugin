@@ -81,8 +81,10 @@ export function createUploader({
     sendOnce,
     status: () => ({ ...lastResult }),
     async drain({ maxAttempts = 10 } = {}) {
+      let finalResult;
       for (let count = 0; count < maxAttempts; count += 1) {
         const result = await sendOnce();
+        finalResult = result;
         if (["idle", "disabled", "credential-rejected", "rejected"].includes(result.status)) return result;
         if (result.status === "retry") {
           const delay = result.retryAfterMs ?? Math.min(maxBackoffMs, 1000 * 2 ** attempt) * (0.5 + random() * 0.5);
@@ -90,7 +92,8 @@ export function createUploader({
           await sleep(Math.round(delay));
         }
       }
-      return finish({ status: "backpressure", sent: 0, remaining: spool.pending(1).length });
+      return finish({ status: "backpressure", sent: 0, remaining: spool.pending(1).length,
+        ...(finalResult?.transportCode ? { transportCode: finalResult.transportCode } : {}) });
     },
   });
 }
