@@ -1,6 +1,6 @@
-# Sidewisp Plugin v0.1.3
+# Sidewisp Plugin v0.1.4
 
-Production-candidate release of the universal, zero-LLM Sidewisp runtime adapter. This release emits an immediate and periodic metadata-only health heartbeat, attributes startup events after enrollment, and safely reclaims a stale spool writer lock after a runtime crash or forced gateway restart while retaining strict single-writer protection.
+Production-candidate release of the universal, zero-LLM Sidewisp runtime adapter. This release emits an immediate and periodic metadata-only health heartbeat, attributes startup events after enrollment, safely reclaims stale spool locks, and exposes a bounded non-sensitive transport error code for operator diagnostics.
 
 ## Contracts and compatibility
 
@@ -14,7 +14,7 @@ Production-candidate release of the universal, zero-LLM Sidewisp runtime adapter
 Install the immutable release tag:
 
 ```bash
-openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@v0.1.3 --force
+openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@v0.1.4 --force
 ```
 
 Before changing versions, back up the plugin state directory. Roll back by installing the previously pinned release without deleting that directory. The release verification job performs a clean isolated install and confirms that the plugin exposes no tools or model providers.

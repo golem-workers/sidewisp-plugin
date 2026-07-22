@@ -20,6 +20,10 @@ export function createUploader({
     lastResult = { ...result, at: new Date(now()).toISOString() };
     return result;
   };
+  const transportCode = (error) => {
+    const value = error?.cause?.code ?? error?.code ?? error?.name;
+    return typeof value === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(value) ? value : "transport-error";
+  };
 
   async function sendOnce() {
     const credential = await credentialProvider.current();
@@ -48,7 +52,7 @@ export function createUploader({
           "x-sidewisp-timestamp": timestamp, "x-sidewisp-nonce": requestNonce,
         },
       });
-    } catch { return finish({ status: "retry", sent: 0, remaining: pending.length }); }
+    } catch (error) { return finish({ status: "retry", sent: 0, remaining: pending.length, transportCode: transportCode(error) }); }
     if (response.status === 401 || response.status === 403) {
       await credentialProvider.refresh?.();
       return finish({ status: "credential-rejected", sent: 0, remaining: pending.length });
