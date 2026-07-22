@@ -48,7 +48,7 @@ try {
       eventId: `sw_evt_${digest}`, installationId: credential.installationId, sequence,
       occurredAt: observedAt, observedAt,
       runtime: { kind: "hermes", version: "upstream-canary" },
-      source: { kind: sourceKind, adapterVersion: "0.1.7" },
+      source: { kind: sourceKind, adapterVersion: "0.1.8" },
       correlation: fact.correlation || {}, details: {},
     });
     if (normalized.event) events.push(normalized.event);
