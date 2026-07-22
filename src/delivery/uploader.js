@@ -45,7 +45,7 @@ export function createUploader({
       response = await fetchImpl(new URL("/v1/telemetry/batches", endpoint), {
         method: "POST", signal: AbortSignal.timeout(timeoutMs), body,
         headers: {
-          "content-type": "application/json", "content-length": String(body.length),
+          "content-type": "application/json",
           ...(compressed ? { "content-encoding": "gzip" } : {}),
           authorization: `Sidewisp ${credential.installationId}:${signature}`,
           "x-sidewisp-algorithm": "hmac-sha256-v1",
