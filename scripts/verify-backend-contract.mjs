@@ -36,5 +36,12 @@ try {
   const result = await uploader.drain(); if (result.status !== "idle" || pending.length !== 0) throw new Error(`delivery failed: ${JSON.stringify(result)}`);
   const listed = await (await fetch(`${endpoint}/v1/incidents`)).json();
   if (listed.items[0]?.ruleId !== "tool-failure") throw new Error("incident was not created");
-  process.stdout.write(JSON.stringify({ ok: true, installationId: created.installationId, incidentRule: listed.items[0].ruleId }) + "\n");
+  const previousSecret = manager.credential().secret;
+  const rotation = await (await fetch(`${endpoint}/v1/installations/${created.installationId}/rotate`, { method: "POST" })).json();
+  if (rotation.installationSecret || !rotation.setupToken) throw new Error("unsafe rotation response");
+  await manager.enroll(rotation.setupToken);
+  if (manager.credential().secret === previousSecret) throw new Error("plugin did not apply rotated credential");
+  const detail = await (await fetch(`${endpoint}/v1/installations/${created.installationId}`)).json();
+  if (detail.credentialTransition?.status !== "applied") throw new Error("rotation was not acknowledged");
+  process.stdout.write(JSON.stringify({ ok: true, installationId: created.installationId, incidentRule: listed.items[0].ruleId, rotation: "applied" }) + "\n");
 } finally { await app.close(); db.close(); await rm(root, { recursive: true, force: true }); }
