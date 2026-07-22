@@ -6,6 +6,7 @@ import { readSetupToken, resolveConfig } from "../../../config.js";
 import { createEnrollmentManager, createFileCredentialStore } from "../../auth/credentials.js";
 import { createCollector } from "../../core/collector.js";
 import { normalizeRuntimeEvent } from "../../core/normalize.js";
+import { sanitizeTelemetryEvent } from "../../core/sanitize.js";
 import { createAdapterRegistry } from "../../core/runtime-adapter.js";
 import { createSafeSupportBundle } from "../../core/support.js";
 import { openSpool } from "../../delivery/spool.js";
@@ -14,7 +15,7 @@ import { createOpenClawAdapter } from "./index.js";
 import { registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 
-const VERSION = "0.1.1";
+const VERSION = "0.1.2";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -32,13 +33,29 @@ export default definePluginEntry({
         if (entry?.config && typeof entry.config === "object") delete entry.config.setupToken;
       } }),
     });
-    const registry = createAdapterRegistry([createOpenClawAdapter({ logger: api.logger })]);
+    let spool = null;
+    const healthy = async () => ({ status: "healthy" });
+    const registry = createAdapterRegistry([createOpenClawAdapter({
+      logger: api.logger,
+      version: api.runtime.version,
+      probes: {
+        process: healthy,
+        gateway: healthy,
+        config: async () => auth.canSend() ? { status: "healthy" } : { status: "degraded", reason: "awaiting-setup" },
+        collector: async () => spool ? { status: "healthy" } : { status: "degraded", reason: "starting" },
+        queue: healthy,
+        spool: async () => {
+          const status = spool?.health().status;
+          return status === "healthy" ? { status } : { status: status === "unhealthy" ? "unhealthy" : "degraded", reason: status ?? "starting" };
+        },
+      },
+    })]);
     const adapter = registry.select("openclaw");
     const collector = createCollector({ adapter });
     let sequence = 0;
-    let spool = null;
     let uploader = null;
     let uploadTimer = null;
+    let healthTimer = null;
     const preStartEvents = [];
     const persistEvent = async (event) => {
       if (!spool) {
@@ -56,6 +73,17 @@ export default definePluginEntry({
         sequence, occurredAt: now, observedAt: now,
         runtime: { version: api.runtime.version }, source: { kind: sourceKind, adapterVersion: VERSION },
       };
+    };
+    const emitHeartbeat = async () => {
+      if (!spool || !auth.canSend()) return;
+      const snapshot = await adapter.healthSnapshot();
+      await persistEvent(sanitizeTelemetryEvent({
+        ...makeEnvelope({}, "health", `health|${Date.now()}|${crypto.randomUUID()}`),
+        type: "health.snapshot",
+        outcome: snapshot.overall === "healthy" ? "success" : "degraded",
+        correlation: {},
+        details: { status: snapshot.overall },
+      }));
     };
     registerOpenClawHooks(api, {
       emit: persistEvent,
@@ -77,7 +105,9 @@ export default definePluginEntry({
         }
         spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
         if (preStartEvents.length > 0) {
-          spool.enqueueSourceBatch("openclaw-hooks", String(preStartEvents.at(-1).sequence), preStartEvents.splice(0));
+          const installationId = auth.status().installationId;
+          const ready = preStartEvents.splice(0).map((event) => installationId ? { ...event, installationId } : event);
+          spool.enqueueSourceBatch("openclaw-hooks", String(ready.at(-1).sequence), ready);
         }
         const discovery = await discoverOpenClawSources(stateDir, api.runtime.version);
         for (const source of discovery.sources) {
@@ -96,9 +126,14 @@ export default definePluginEntry({
         uploadTimer = setInterval(() => { void uploader.drain({ maxAttempts: 1 }); }, 5_000);
         uploadTimer.unref?.();
         await collector.start();
-        ctx.logger.info(`Sidewisp collector ${VERSION} started (${config.configured ? "configured" : "awaiting setup"})`);
+        await emitHeartbeat();
+        healthTimer = setInterval(() => { void emitHeartbeat(); }, 30_000);
+        healthTimer.unref?.();
+        ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
       },
       async stop() {
+        if (healthTimer) clearInterval(healthTimer);
+        healthTimer = null;
         if (uploadTimer) clearInterval(uploadTimer);
         uploadTimer = null;
         if (uploader) await uploader.drain({ maxAttempts: 1 });
