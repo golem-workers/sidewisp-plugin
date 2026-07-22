@@ -45,6 +45,9 @@ test("enforces field bounds and safe scalar encoding", () => {
   const nested = event();
   nested.details.count = { value: 1 };
   assert.throws(() => sanitizeTelemetryEvent(nested), /invalid-count/);
+  const missingRuntimeKind = event();
+  delete missingRuntimeKind.runtime.kind;
+  assert.throws(() => sanitizeTelemetryEvent(missingRuntimeKind), /invalid-runtime-kind/);
 });
 
 test("fails closed with a content-free local diagnostic", () => {

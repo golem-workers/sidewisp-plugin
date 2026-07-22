@@ -15,7 +15,7 @@ import { createOpenClawAdapter } from "./index.js";
 import { registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 
-const VERSION = "0.1.2";
+const VERSION = "0.1.3";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -77,8 +77,10 @@ export default definePluginEntry({
     const emitHeartbeat = async () => {
       if (!spool || !auth.canSend()) return;
       const snapshot = await adapter.healthSnapshot();
+      const envelope = makeEnvelope({}, "health", `health|${Date.now()}|${crypto.randomUUID()}`);
       await persistEvent(sanitizeTelemetryEvent({
-        ...makeEnvelope({}, "health", `health|${Date.now()}|${crypto.randomUUID()}`),
+        ...envelope,
+        runtime: { ...envelope.runtime, kind: "openclaw" },
         type: "health.snapshot",
         outcome: snapshot.overall === "healthy" ? "success" : "degraded",
         correlation: {},
