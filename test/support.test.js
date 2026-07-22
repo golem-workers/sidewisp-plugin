@@ -27,10 +27,10 @@ test("safe support bundle is stable offline and contains metadata only", () => {
 test("support bundle excludes secret corpus, identities, and raw payloads", () => {
   const bundle = createSafeSupportBundle({
     pluginVersion: "0.1.0", runtimeVersion: "2026.7.1", endpoint: "https://user:pass@sidewisp.test/path?token=secret",
-    installation: { state: "active", installationId: "sw_ins_secret", secret: "sw_sec_secret" },
+    installation: { state: "active", installationId: "sw_ins_secret", secret: "sw_secret_secret" },
     spool: { status: "healthy", events: [{ prompt: "private prompt" }] }, uploader: {}, collector: {},
     diagnostic: { code: "safe-code", reason: "safe-reason", payload: "Bearer abc123" },
   });
   const encoded = JSON.stringify(bundle);
-  for (const forbidden of ["user", "pass", "token", "sw_ins_secret", "sw_sec_secret", "private prompt", "Bearer abc123", "events"]) assert.equal(encoded.includes(forbidden), false);
+  for (const forbidden of ["user", "pass", "token", "sw_ins_secret", "sw_secret_secret", "private prompt", "Bearer abc123", "events"]) assert.equal(encoded.includes(forbidden), false);
 });

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 const INSTALLATION_ID = /^sw_ins_[A-Za-z0-9_-]{8,128}$/;
-const SECRET = /^sw_sec_[A-Za-z0-9_-]{24,256}$/;
+const SECRET = /^sw_secret_[A-Za-z0-9_-]{24,256}$/;
 
 function validateCredential(value) {
   if (!value || typeof value !== "object" || !INSTALLATION_ID.test(value.installationId) || !SECRET.test(value.secret)) {
@@ -64,12 +64,12 @@ export function createEnrollmentManager({ endpoint, store, fetchImpl = globalThi
       if (typeof setupToken !== "string" || !setupToken.startsWith("sw_setup_")) throw new TypeError("invalid setup token");
       state = "enrolling";
       try {
-        const response = await fetchImpl(new URL("/v1/installations/register", endpoint), {
+        const response = await fetchImpl(new URL("/v1/installations/exchange", endpoint), {
           method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ setupToken }),
         });
         if (!response.ok) throw new Error(`enrollment failed (${response.status})`);
         const body = await response.json();
-        await persist(validateCredential({ ...body, status: "active" }));
+        await persist(validateCredential({ installationId: body.installationId, secret: body.installationSecret, status: "active" }));
         try { await clearSetupToken(); }
         catch { return { installationId: credential.installationId, status: state, setupTokenCleanupPending: true }; }
         return { installationId: credential.installationId, status: state };

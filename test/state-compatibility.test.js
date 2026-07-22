@@ -8,7 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createFileCredentialStore } from "../src/auth/credentials.js";
 import { openSpool } from "../src/delivery/spool.js";
 
-const credential = { installationId: "sw_ins_fixture001", secret: `sw_sec_${"r".repeat(32)}`, status: "active" };
+const credential = { installationId: "sw_ins_fixture001", secret: `sw_secret_${"r".repeat(32)}`, status: "active" };
 const event = { eventId: "sw_evt_pending_rollback", type: "turn.failed" };
 
 test("upgrade and rollback preserve credentials, cursor, and pending events", async (t) => {
