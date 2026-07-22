@@ -54,4 +54,7 @@ assert.ok(evidence.recovered.facts.some(({ kind }) => kind === "session_crashed"
 assert.ok(evidence.recovered.facts.some(({ kind }) => kind === "runtime_crashed"));
 const serialized = JSON.stringify(evidence);
 for (const forbidden of ["forbidden", "prompt", "secret", "args", "result"]) assert.equal(serialized.includes(forbidden), false);
+if (process.env.SIDEWISP_HERMES_EVIDENCE_FILE) {
+  fs.writeFileSync(process.env.SIDEWISP_HERMES_EVIDENCE_FILE, `${JSON.stringify(evidence)}\n`, { mode: 0o600, flag: "wx" });
+}
 console.log(JSON.stringify({ runtime: "hermes", upstream, hooks: evidence.hooks.length, emittedFacts: evidence.facts.length, recoveredFacts: evidence.recovered.facts.length, inferenceCalls: 0, temporaryResourcesCleaned: true }));

@@ -1,6 +1,6 @@
-# Sidewisp Plugin v0.1.6
+# Sidewisp Plugin v0.1.7
 
-Production-candidate release of the universal, zero-LLM Sidewisp runtime adapter. This release emits metadata-only health heartbeats, attributes startup events after enrollment, safely reclaims stale spool locks, and lets the managed Fetch transport set `Content-Length` for signed gzip bodies to remain compatible with OpenClaw's Undici policy.
+Production-candidate release of the universal, zero-LLM Sidewisp runtime adapter. This release includes the reproducible live Hermes hook/recovery canary, metadata-only health heartbeats, safe spool recovery, and OpenClaw managed-transport compatibility.
 
 ## Contracts and compatibility
 
@@ -14,7 +14,7 @@ Production-candidate release of the universal, zero-LLM Sidewisp runtime adapter
 Install the immutable release tag:
 
 ```bash
-openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@v0.1.6 --force
+openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@v0.1.7 --force
 ```
 
 Before changing versions, back up the plugin state directory. Roll back by installing the previously pinned release without deleting that directory. The release verification job performs a clean isolated install and confirms that the plugin exposes no tools or model providers.

@@ -15,7 +15,7 @@ import { createOpenClawAdapter } from "./index.js";
 import { registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 
-const VERSION = "0.1.6";
+const VERSION = "0.1.7";
 
 export default definePluginEntry({
   id: "sidewisp",

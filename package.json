@@ -1,6 +1,6 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Universal zero-LLM telemetry plugin for monitoring AI agent runtimes with Sidewisp",
   "license": "MIT",
   "type": "module",
@@ -11,6 +11,8 @@
     "hermes/sidewisp/__init__.py",
     "hermes/sidewisp/recovery.py",
     "hermes/sidewisp/plugin.yaml",
+    "scripts/verify-hermes-upstream.mjs",
+    "scripts/verify-hermes-live.mjs",
     "openclaw.plugin.json",
     "README.md",
     "ROADMAP.md",
@@ -24,6 +26,7 @@
     "pack:check": "npm pack --dry-run",
     "e2e:openclaw": "./scripts/verify-release.sh",
     "e2e:hermes": "node scripts/verify-hermes-upstream.mjs",
+    "e2e:hermes:live": "node scripts/verify-hermes-live.mjs",
     "e2e:backend": "node scripts/verify-backend-contract.mjs",
     "e2e:live": "node scripts/verify-live-backend.mjs",
     "canary:check": "node scripts/evaluate-canary.mjs test/fixtures/canary-report.json"
