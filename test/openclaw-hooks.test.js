@@ -12,7 +12,7 @@ test("registers supported official hooks with bounded host timeouts and no tools
   const registered = new Map();
   const api = { on: (name, handler, options) => registered.set(name, { handler, options }) };
   const events = [];
-  registerOpenClawHooks(api, { emit: async (event) => events.push(event), envelopeFactory: envelope });
+  const telemetry = registerOpenClawHooks(api, { emit: async (event) => events.push(event), envelopeFactory: envelope });
   assert.deepEqual([...registered.keys()], Object.keys(OPENCLAW_HOOK_SOURCES));
   assert.ok([...registered.values()].every(({ options }) => options.timeoutMs === 25));
   assert.equal("registerHook" in api, false);
@@ -23,6 +23,8 @@ test("registers supported official hooks with bounded host timeouts and no tools
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(events.map(({ type }) => type), ["tool.started", "tool.failed"]);
   assert.equal(JSON.stringify(events).includes("private"), false);
+  assert.deepEqual(telemetry.status().observed, { before_tool_call: 1, after_tool_call: 1 });
+  assert.equal(telemetry.status().emitted, 2);
 });
 
 test("equivalent OpenClaw failure matches Hermes normalized failure", async () => {

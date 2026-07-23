@@ -16,7 +16,7 @@ import { registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.1.16";
+const VERSION = "0.1.17";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -89,7 +89,7 @@ export default definePluginEntry({
         details: { status: snapshot.overall },
       }));
     };
-    registerOpenClawHooks(api, {
+    const hookTelemetry = registerOpenClawHooks(api, {
       emit: persistEvent,
       envelopeFactory: (_input, _event, ctx) => ({ ...makeEnvelope(_input), correlation: { sessionId: ctx?.sessionId, turnId: ctx?.runId }, details: {} }),
       onDiagnostic: () => {},
@@ -161,6 +161,7 @@ export default definePluginEntry({
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
         update: updates.status(),
+        hooks: hookTelemetry.status(),
         ...(await collector.status()),
       });
     }, { scope: "operator.read" });
