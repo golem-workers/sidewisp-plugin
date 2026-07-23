@@ -16,7 +16,7 @@ import { registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.1.9";
+const VERSION = "0.1.10";
 
 export default definePluginEntry({
   id: "sidewisp",

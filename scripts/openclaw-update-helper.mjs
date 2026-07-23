@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from
 import path from "node:path";
 
 const directive = JSON.parse(process.argv[2] ?? "null");
-if (!directive?.stateFile || !directive?.targetVersion) process.exit(2);
+if (!directive?.stateFile || !directive?.targetVersion || !/^git:github\.com\/golem-workers\/sidewisp-plugin@v?\d+\.\d+\.\d+$/.test(directive.targetSpec)) process.exit(2);
 const stateFile = path.resolve(directive.stateFile);
 mkdirSync(path.dirname(stateFile), { recursive: true, mode: 0o700 });
 
@@ -28,7 +28,7 @@ try {
     backup = path.join(path.dirname(stateFile), `rollback-${Date.now()}`);
     cpSync(pluginPath, backup, { recursive: true, errorOnExist: true });
   }
-  run(["plugins", "update", "sidewisp"]);
+  run(["plugins", "install", directive.targetSpec, "--force"]);
   run(["plugins", "inspect", "sidewisp", "--runtime", "--json"]);
   writeState({ status: "restarting" });
   run(["gateway", "restart"]);
