@@ -14,8 +14,9 @@ import { createUploader } from "../../delivery/uploader.js";
 import { createOpenClawAdapter } from "./index.js";
 import { registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
+import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.1.8";
+const VERSION = "0.1.9";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -25,6 +26,7 @@ export default definePluginEntry({
     const config = resolveConfig(api.pluginConfig);
     const setupToken = readSetupToken(api.pluginConfig);
     const stateDir = api.runtime.state.resolveStateDir();
+    const updates = createUpdateScheduler({ stateDir, logger: api.logger, currentVersion: VERSION });
     const auth = createEnrollmentManager({
       endpoint: config.endpoint,
       store: createFileCredentialStore({ stateDir }),
@@ -124,6 +126,7 @@ export default definePluginEntry({
         uploader = createUploader({
           spool, endpoint: config.endpoint,
           credentialProvider: { current: async () => auth.credential() },
+          onUpdate: (directive) => updates.schedule(directive),
         });
         uploadTimer = setInterval(() => { void uploader.drain({ maxAttempts: 1 }); }, 5_000);
         uploadTimer.unref?.();
@@ -157,6 +160,7 @@ export default definePluginEntry({
         installation: auth.status(),
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
+        update: updates.status(),
         ...(await collector.status()),
       });
     }, { scope: "operator.read" });

@@ -9,6 +9,7 @@ export function signBatch({ secret, timestamp, nonce, body }) {
 
 export function createUploader({
   spool, credentialProvider, endpoint, fetchImpl = globalThis.fetch,
+  onUpdate = () => {},
   now = () => Date.now(), nonce = () => crypto.randomBytes(16).toString("base64url"),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), random = Math.random,
   maxBatch = 100, maxBodyBytes = 256 * 1024, timeoutMs = 10_000, maxBackoffMs = 60_000, compressThresholdBytes = 1024,
@@ -64,6 +65,9 @@ export function createUploader({
     }
     if (!response.ok) return finish({ status: "rejected", sent: 0, remaining: pending.length });
     const result = await response.json();
+    if (result?.update) {
+      try { onUpdate(result.update); } catch { /* update scheduling must never block telemetry */ }
+    }
     const sentIds = new Set(pending.map(({ eventId }) => eventId));
     const acknowledged = Array.isArray(result.acknowledgedEventIds)
       ? result.acknowledgedEventIds.filter((id) => sentIds.has(id)) : [];
