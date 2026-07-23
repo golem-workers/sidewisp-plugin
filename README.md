@@ -33,6 +33,18 @@ openclaw plugins inspect sidewisp --runtime --json
 
 For reproducible production installs, use a signed version tag instead of `main`.
 
+## One-command Hermes staging install
+
+From a verified checkout or release archive, run:
+
+```bash
+SIDEWISP_ENDPOINT=https://staging-api.sidewisp.com \
+HERMES_SOURCE_DIR="$HOME/hermes-agent" \
+./scripts/install-hermes.sh sw_setup_REPLACE_ME
+```
+
+The installer runs without administrator privileges, exchanges the setup token before creating the service, and never persists that token. It installs a systemd user service on Linux or a LaunchAgent on macOS. Remove the collector with `./scripts/uninstall-hermes.sh`; credentials and the spool are retained until the user explicitly deletes them.
+
 ## Configure
 
 ```bash
