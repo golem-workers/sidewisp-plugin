@@ -1,6 +1,6 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Universal zero-LLM telemetry plugin for monitoring AI agent runtimes with Sidewisp",
   "license": "MIT",
   "type": "module",

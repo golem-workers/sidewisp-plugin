@@ -4,7 +4,8 @@ import { createHealthReporter } from "../../core/health.js";
 export function createOpenClawAdapter({ logger, version = "unknown", probes = {} }) {
   let running = false;
   const capabilities = declareCapabilities([
-    "lifecycle-hooks", "log-recovery", "process-health",
+    "lifecycle-hooks", "turn-hooks", "tool-hooks", "message-hooks",
+    "log-recovery", "process-health",
   ]);
   const identity = { id: "openclaw", version: "0.1.0", runtimeKind: "openclaw", runtimeVersion: version };
   const health = createHealthReporter({ identity, capabilities, probes });

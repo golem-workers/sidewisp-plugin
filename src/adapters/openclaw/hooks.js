@@ -41,6 +41,9 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     gateway_start: observe(() => ({ kind: "gateway_up", correlation: {} })),
     gateway_stop: observe(() => ({ kind: "gateway_down", correlation: {} })),
   };
-  for (const [name, handler] of Object.entries(hooks)) api.registerHook(name, handler, { name: `sidewisp-${name}`, timeoutMs: 25 });
+  if (typeof api.on !== "function") {
+    throw new TypeError("OpenClaw typed hook API (api.on) is required");
+  }
+  for (const [name, handler] of Object.entries(hooks)) api.on(name, handler, { timeoutMs: 25 });
   return Object.freeze({ hookNames: Object.keys(hooks), pending: () => pending });
 }

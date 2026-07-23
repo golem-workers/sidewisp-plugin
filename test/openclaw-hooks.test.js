@@ -10,12 +10,12 @@ const envelope = () => ({
 
 test("registers supported official hooks with bounded host timeouts and no tools/models", async () => {
   const registered = new Map();
-  const api = { registerHook: (name, handler, options) => registered.set(name, { handler, options }) };
+  const api = { on: (name, handler, options) => registered.set(name, { handler, options }) };
   const events = [];
   registerOpenClawHooks(api, { emit: async (event) => events.push(event), envelopeFactory: envelope });
   assert.deepEqual([...registered.keys()], Object.keys(OPENCLAW_HOOK_SOURCES));
   assert.ok([...registered.values()].every(({ options }) => options.timeoutMs === 25));
-  assert.ok([...registered.entries()].every(([name, { options }]) => options.name === `sidewisp-${name}`));
+  assert.equal("registerHook" in api, false);
   assert.equal("registerTool" in api, false);
   assert.equal("registerProvider" in api, false);
   registered.get("before_tool_call").handler({ toolName: "exec", params: { password: "private" }, toolCallId: "tool-1" }, { runId: "run-1", sessionId: "session-1" });
@@ -28,7 +28,7 @@ test("registers supported official hooks with bounded host timeouts and no tools
 test("equivalent OpenClaw failure matches Hermes normalized failure", async () => {
   const registered = new Map();
   const events = [];
-  registerOpenClawHooks({ registerHook: (name, handler) => registered.set(name, handler) }, { emit: async (event) => events.push(event), envelopeFactory: envelope });
+  registerOpenClawHooks({ on: (name, handler) => registered.set(name, handler) }, { emit: async (event) => events.push(event), envelopeFactory: envelope });
   registered.get("agent_end")({ success: false, error: "raw private", runId: "run-1" }, { sessionId: "s" });
   registered.get("message_sent")({ success: false, error: "raw private", messageId: "m" }, { sessionId: "s" });
   await new Promise((resolve) => setImmediate(resolve));
@@ -40,10 +40,17 @@ test("equivalent OpenClaw failure matches Hermes normalized failure", async () =
 test("hook and emitter exceptions never escape into OpenClaw", async () => {
   const registered = new Map();
   const diagnostics = [];
-  registerOpenClawHooks({ registerHook: (name, handler) => registered.set(name, handler) }, {
+  registerOpenClawHooks({ on: (name, handler) => registered.set(name, handler) }, {
     emit: async () => { throw new Error("sink down"); }, envelopeFactory: envelope, onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
   });
   assert.doesNotThrow(() => registered.get("gateway_start")({ port: 3000 }, {}));
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(diagnostics[0].localOnly, true);
+});
+
+test("rejects the legacy internal-hook API so lifecycle events cannot be silently dropped", () => {
+  assert.throws(
+    () => registerOpenClawHooks({ registerHook() {} }, { emit: async () => {}, envelopeFactory: envelope }),
+    /typed hook API/,
+  );
 });
