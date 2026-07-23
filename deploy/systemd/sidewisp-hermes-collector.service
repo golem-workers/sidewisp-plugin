@@ -14,7 +14,7 @@ Environment=SIDEWISP_STATE_DIR=/var/lib/sidewisp-hermes
 Environment=HERMES_SOURCE_DIR=/opt/hermes-agent
 Environment=SIDEWISP_HEARTBEAT_INTERVAL_MS=30000
 ExecStart=/usr/bin/node scripts/hermes-canary-daemon.mjs
-Restart=on-failure
+Restart=always
 RestartSec=3
 TimeoutStopSec=30
 UMask=0077
