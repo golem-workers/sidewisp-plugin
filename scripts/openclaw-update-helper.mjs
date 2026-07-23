@@ -15,6 +15,16 @@ const writeState = (state) => {
 };
 const run = (args) => execFileSync("openclaw", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const waitForGateway = async () => {
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    try {
+      const output = run(["gateway", "call", "sidewisp.status", "--params", "{}", "--json"]);
+      if (JSON.parse(output).version === directive.targetVersion) return;
+    } catch { /* gateway is still restarting */ }
+    await sleep(5_000);
+  }
+  throw new Error("target plugin version did not become healthy");
+};
 
 writeState({ status: "scheduled" });
 await sleep(directive.restartDelaySeconds * 1000);
@@ -32,6 +42,7 @@ try {
   run(["plugins", "inspect", "sidewisp", "--runtime", "--json"]);
   writeState({ status: "restarting" });
   run(["gateway", "restart"]);
+  await waitForGateway();
   writeState({ status: "completed" });
   if (backup) rmSync(backup, { recursive: true, force: true });
 } catch (error) {
