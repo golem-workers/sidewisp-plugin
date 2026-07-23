@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OPENCLAW_HOOK_SOURCES, registerOpenClawHooks } from "../src/adapters/openclaw/hooks.js";
+import { OPENCLAW_HOOK_SOURCES, openClawAgentEventInput, registerOpenClawHooks } from "../src/adapters/openclaw/hooks.js";
 
 const envelope = () => ({
   eventId: `sw_evt_${"x".repeat(20)}`, installationId: "sw_ins_fixture001", sequence: 1,
@@ -55,4 +55,16 @@ test("rejects the legacy internal-hook API so lifecycle events cannot be silentl
     () => registerOpenClawHooks({ registerHook() {} }, { emit: async () => {}, envelopeFactory: envelope }),
     /typed hook API/,
   );
+});
+
+test("maps sanitized host agent streams used by Codex and other harnesses", () => {
+  assert.deepEqual(
+    openClawAgentEventInput({ runId: "run-1", sessionId: "session-1", stream: "lifecycle", data: { phase: "start" } }),
+    { kind: "turn_start", correlation: { sessionId: "session-1", turnId: "run-1", toolCallId: undefined } },
+  );
+  assert.deepEqual(
+    openClawAgentEventInput({ runId: "run-1", stream: "tool", data: { phase: "result", toolCallId: "tool-1", status: "failed", isError: true } }),
+    { kind: "tool_end", outcome: "failure", durationMs: undefined, correlation: { sessionId: undefined, turnId: "run-1", toolCallId: "tool-1" } },
+  );
+  assert.equal(openClawAgentEventInput({ runId: "run-1", stream: "assistant", data: { text: "private" } }), null);
 });

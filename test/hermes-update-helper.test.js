@@ -44,15 +44,15 @@ printf '%s\\n' "$SIDEWISP_TEST_TARBALL_NAME"
 set -eu
 case "$*" in
   *restart*)
-    printf '{"status":"healthy","version":"0.1.17","heartbeatAt":"%s"}\\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$SIDEWISP_TEST_COLLECTOR_STATUS"
+    printf '{"status":"healthy","version":"0.1.18","heartbeatAt":"%s"}\\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$SIDEWISP_TEST_COLLECTOR_STATUS"
     ;;
 esac
 `, { mode: 0o700 });
 
     const directive = {
       schema: "sidewisp.plugin-update.v1",
-      targetVersion: "0.1.17",
-      targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.1.17",
+      targetVersion: "0.1.18",
+      targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.1.18",
       sha256,
       restartDelaySeconds: 30,
       stateFile,
@@ -76,7 +76,7 @@ esac
     assert.equal(result.status, 0, result.stderr);
     const updateState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.equal(updateState.status, "completed", JSON.stringify(updateState));
-    assert.equal(JSON.parse(fs.readFileSync(path.join(installRoot, "current", "package.json"), "utf8")).version, "0.1.17");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(installRoot, "current", "package.json"), "utf8")).version, "0.1.18");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

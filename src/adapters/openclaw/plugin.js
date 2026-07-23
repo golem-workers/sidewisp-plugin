@@ -12,11 +12,11 @@ import { createSafeSupportBundle } from "../../core/support.js";
 import { openSpool } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
 import { createOpenClawAdapter } from "./index.js";
-import { registerOpenClawHooks } from "./hooks.js";
+import { openClawAgentEventInput, registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.1.17";
+const VERSION = "0.1.18";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -94,6 +94,32 @@ export default definePluginEntry({
       envelopeFactory: (_input, _event, ctx) => ({ ...makeEnvelope(_input), correlation: { sessionId: ctx?.sessionId, turnId: ctx?.runId }, details: {} }),
       onDiagnostic: () => {},
     });
+    const agentEventTelemetry = { observed: 0, emitted: 0, ignored: 0, failed: 0, lastObservedAt: null };
+    api.agent.events.registerAgentEventSubscription({
+      id: "sidewisp-runtime-events",
+      description: "Content-free Sidewisp lifecycle and tool failure telemetry",
+      streams: ["lifecycle", "tool"],
+      async handle(event) {
+        agentEventTelemetry.observed += 1;
+        agentEventTelemetry.lastObservedAt = new Date().toISOString();
+        const input = openClawAgentEventInput(event);
+        if (!input) {
+          agentEventTelemetry.ignored += 1;
+          return;
+        }
+        try {
+          const result = normalizeRuntimeEvent("openclaw", input, makeEnvelope(input, "hook"));
+          if (!result.event) {
+            agentEventTelemetry.ignored += 1;
+            return;
+          }
+          await persistEvent(result.event);
+          agentEventTelemetry.emitted += 1;
+        } catch {
+          agentEventTelemetry.failed += 1;
+        }
+      },
+    });
 
     api.registerService({
       id: "sidewisp-collector",
@@ -162,6 +188,7 @@ export default definePluginEntry({
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
         update: updates.status(),
         hooks: hookTelemetry.status(),
+        agentEvents: { ...agentEventTelemetry },
         ...(await collector.status()),
       });
     }, { scope: "operator.read" });

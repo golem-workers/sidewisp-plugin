@@ -11,6 +11,40 @@ export const OPENCLAW_HOOK_SOURCES = Object.freeze({
   gateway_stop: "src/plugins/hook-types.ts:902",
 });
 
+export function openClawAgentEventInput(event = {}) {
+  const data = event.data && typeof event.data === "object" ? event.data : {};
+  const correlation = {
+    sessionId: event.sessionId,
+    turnId: event.runId,
+    toolCallId: data.toolCallId ?? data.itemId,
+  };
+  if (event.stream === "lifecycle") {
+    if (data.phase === "start") return { kind: "turn_start", correlation };
+    if (["end", "error"].includes(data.phase)) {
+      const timedOut = data.timedOut === true || data.outcome === "timeout";
+      return {
+        kind: "turn_end",
+        outcome: timedOut ? "timeout" : data.phase === "error" || data.success === false ? "failure" : "success",
+        durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
+        correlation,
+      };
+    }
+  }
+  if (event.stream === "tool") {
+    if (["start", "started"].includes(data.phase)) return { kind: "tool_start", correlation };
+    if (["result", "end", "completed"].includes(data.phase)) {
+      const failed = data.isError === true || ["failed", "error", "timeout", "killed"].includes(data.status);
+      return {
+        kind: "tool_end",
+        outcome: data.status === "timeout" ? "timeout" : failed ? "failure" : "success",
+        durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
+        correlation,
+      };
+    }
+  }
+  return null;
+}
+
 export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic = () => {}, maxPending = 1000 }) {
   let pending = 0;
   let emitted = 0;
