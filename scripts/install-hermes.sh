@@ -42,6 +42,8 @@ WorkingDirectory=$install_root/current
 Environment=NODE_ENV=production
 Environment=SIDEWISP_ENDPOINT=$endpoint
 Environment=SIDEWISP_STATE_DIR=$state_dir
+Environment=SIDEWISP_INSTALL_ROOT=$install_root
+Environment=SIDEWISP_SERVICE_MANAGER=systemd-user
 Environment=HERMES_SOURCE_DIR=$runtime_dir
 Environment=SIDEWISP_HEARTBEAT_INTERVAL_MS=30000
 ExecStart=$(command -v node) $install_root/current/scripts/hermes-canary-daemon.mjs
@@ -79,6 +81,7 @@ elif test "$(uname -s)" = "Darwin"; then
 <key>EnvironmentVariables</key><dict>
 <key>NODE_ENV</key><string>production</string><key>SIDEWISP_ENDPOINT</key><string>$endpoint</string>
 <key>SIDEWISP_STATE_DIR</key><string>$state_dir</string><key>HERMES_SOURCE_DIR</key><string>$runtime_dir</string>
+<key>SIDEWISP_INSTALL_ROOT</key><string>$install_root</string><key>SIDEWISP_SERVICE_MANAGER</key><string>launch-agent</string>
 <key>SIDEWISP_HEARTBEAT_INTERVAL_MS</key><string>30000</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>StandardOutPath</key><string>$state_dir/collector.log</string>

@@ -12,12 +12,17 @@ import { createEnrollmentManager, createFileCredentialStore } from "../src/auth/
 import { sanitizeTelemetryEvent } from "../src/core/sanitize.js";
 import { openSpool } from "../src/delivery/spool.js";
 import { createUploader } from "../src/delivery/uploader.js";
+import { createHermesUpdateScheduler } from "../src/update/hermes-scheduler.js";
 
 const endpoint = new URL(process.env.SIDEWISP_ENDPOINT || "https://api.sidewisp.com");
 const stateDir = path.resolve(process.env.SIDEWISP_STATE_DIR || "/var/lib/sidewisp-hermes-canary");
 const upstream = path.resolve(process.env.HERMES_SOURCE_DIR || "../repos/hermes-agent-upstream");
 const setupToken = process.env.SIDEWISP_SETUP_TOKEN || "";
 const intervalMs = Number(process.env.SIDEWISP_HEARTBEAT_INTERVAL_MS || 30_000);
+const installRoot = path.resolve(process.env.SIDEWISP_INSTALL_ROOT || path.dirname(path.resolve(".")));
+const packageJson = JSON.parse(await fsp.readFile(new URL("../package.json", import.meta.url), "utf8"));
+const collectorVersion = packageJson.version;
+const serviceManager = process.env.SIDEWISP_SERVICE_MANAGER || (process.platform === "darwin" ? "launch-agent" : "systemd-user");
 
 assert.equal(endpoint.protocol, "https:");
 assert.ok(Number.isSafeInteger(intervalMs) && intervalMs >= 10_000 && intervalMs <= 300_000);
@@ -58,7 +63,15 @@ const adapter = createHermesAdapter({
   },
 });
 const spool = await openSpool({ file: path.join(stateDir, "spool.sqlite") });
-const uploader = createUploader({ spool, endpoint, credentialProvider: { current: async () => credential } });
+const updates = createHermesUpdateScheduler({
+  stateDir, installRoot, currentVersion: collectorVersion, serviceManager,
+});
+const uploader = createUploader({
+  spool,
+  endpoint,
+  credentialProvider: { current: async () => credential },
+  onUpdate: (directive) => updates.schedule(directive),
+});
 let sequence = 0;
 let stopped = false;
 
@@ -74,7 +87,7 @@ async function heartbeat() {
     occurredAt: observedAt,
     observedAt,
     runtime: { kind: "hermes", version: process.env.HERMES_RUNTIME_VERSION || "upstream-canary", instanceId: os.hostname() },
-    source: { kind: "health", adapterVersion: "0.1.0" },
+    source: { kind: "health", adapterVersion: collectorVersion },
     type: "health.snapshot",
     outcome: snapshot.overall === "healthy" ? "success" : "degraded",
     correlation: {},
@@ -83,6 +96,14 @@ async function heartbeat() {
   spool.enqueueSourceBatch("hermes-health", String(sequence), [event]);
   const delivered = await uploader.drain({ maxAttempts: 3 });
   if (delivered.remaining !== 0) throw new Error("Hermes canary heartbeat delivery remains queued");
+  const statusDir = path.join(stateDir, "sidewisp");
+  await fsp.mkdir(statusDir, { recursive: true, mode: 0o700 });
+  const statusFile = path.join(statusDir, "collector-status.json");
+  const temp = `${statusFile}.${process.pid}.tmp`;
+  await fsp.writeFile(temp, `${JSON.stringify({
+    status: "healthy", version: collectorVersion, heartbeatAt: new Date().toISOString(),
+  })}\n`, { mode: 0o600 });
+  await fsp.rename(temp, statusFile);
 }
 
 async function shutdown() {

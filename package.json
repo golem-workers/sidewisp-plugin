@@ -1,6 +1,6 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Universal zero-LLM telemetry plugin for monitoring AI agent runtimes with Sidewisp",
   "license": "MIT",
   "type": "module",
@@ -17,6 +17,7 @@
     "scripts/install-hermes.sh",
     "scripts/uninstall-hermes.sh",
     "scripts/hermes-canary-daemon.mjs",
+    "scripts/hermes-update-helper.mjs",
     "scripts/openclaw-update-helper.mjs",
     "openclaw.plugin.json",
     "README.md",
@@ -27,7 +28,7 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check index.js && node --check src/auth/credentials.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --check src/core/health.js && node --check src/core/normalize.js && node --check src/core/sanitize.js && node --check src/core/support.js && node --check src/adapters/openclaw/recovery.js && node --check src/delivery/spool.js && node --check src/delivery/uploader.js && node --test",
+    "check": "node --check index.js && node --check src/auth/credentials.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --check src/core/health.js && node --check src/core/normalize.js && node --check src/core/sanitize.js && node --check src/core/support.js && node --check src/adapters/openclaw/recovery.js && node --check src/delivery/spool.js && node --check src/delivery/uploader.js && node --check src/update/directive.js && node --check src/update/hermes-scheduler.js && node --check scripts/hermes-update-helper.mjs && node --test",
     "pack:check": "npm pack --dry-run",
     "e2e:openclaw": "./scripts/verify-release.sh",
     "e2e:hermes": "node scripts/verify-hermes-upstream.mjs",

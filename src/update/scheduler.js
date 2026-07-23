@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { validUpdateDirective } from "./directive.js";
 
 const HELPER = fileURLToPath(new URL("../../scripts/openclaw-update-helper.mjs", import.meta.url));
 
@@ -9,7 +10,7 @@ export function createUpdateScheduler({ stateDir, logger, currentVersion }) {
   return Object.freeze({
     status: () => ({ currentVersion, scheduledVersion }),
     schedule(directive) {
-      if (!validDirective(directive) || directive.targetVersion === currentVersion || directive.targetVersion === scheduledVersion) return false;
+      if (!validUpdateDirective(directive) || directive.targetVersion === currentVersion || directive.targetVersion === scheduledVersion) return false;
       scheduledVersion = directive.targetVersion;
       const child = spawn(process.execPath, [HELPER, JSON.stringify({
         ...directive,
@@ -20,14 +21,4 @@ export function createUpdateScheduler({ stateDir, logger, currentVersion }) {
       return true;
     },
   });
-}
-
-function validDirective(value) {
-  return value?.schema === "sidewisp.plugin-update.v1"
-    && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value.targetVersion)
-    && typeof value.targetSpec === "string"
-    && /^git:github\.com\/golem-workers\/sidewisp-plugin@(?:v?\d+\.\d+\.\d+|main)$/.test(value.targetSpec)
-    && Number.isInteger(value.restartDelaySeconds)
-    && value.restartDelaySeconds >= 30
-    && value.restartDelaySeconds <= 3600;
 }
