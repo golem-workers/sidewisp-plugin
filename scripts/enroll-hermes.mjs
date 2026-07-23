@@ -10,14 +10,16 @@ const stateDir = path.resolve(process.env.SIDEWISP_STATE_DIR || path.join(proces
 const setupToken = process.env.SIDEWISP_SETUP_TOKEN || "";
 
 assert.equal(endpoint.protocol, "https:");
-assert.match(setupToken, /^sw_setup_[A-Za-z0-9_-]{32,}$/);
 await fsp.mkdir(stateDir, { recursive: true, mode: 0o700 });
 await fsp.chmod(stateDir, 0o700);
 
 const store = createFileCredentialStore({ stateDir });
 const auth = createEnrollmentManager({ endpoint, store });
 await auth.load();
-if (!auth.canSend()) await auth.enroll(setupToken);
+if (!auth.canSend()) {
+  assert.match(setupToken, /^sw_setup_[A-Za-z0-9_-]{32,}$/);
+  await auth.enroll(setupToken);
+}
 const status = auth.status();
 assert.equal(status.state, "active");
 process.stdout.write(`${JSON.stringify({ ok: true, installationId: status.installationId, endpoint: endpoint.origin })}\n`);

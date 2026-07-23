@@ -9,14 +9,17 @@ state_dir="${SIDEWISP_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sidewisp-
 runtime_dir="${HERMES_SOURCE_DIR:-$HOME/hermes-agent}"
 
 case "$endpoint" in https://*) ;; *) echo "SIDEWISP_ENDPOINT must use HTTPS" >&2; exit 2 ;; esac
-case "$setup_token" in sw_setup_????????????????????????????????*) ;; *) echo "A valid one-time Sidewisp setup token is required" >&2; exit 2 ;; esac
+credential_file="$state_dir/sidewisp/installation.json"
+if test ! -f "$credential_file"; then
+  case "$setup_token" in sw_setup_????????????????????????????????*) ;; *) echo "A valid one-time Sidewisp setup token is required for first install" >&2; exit 2 ;; esac
+fi
 command -v node >/dev/null || { echo "Node.js is required" >&2; exit 2; }
 test -d "$runtime_dir" || { echo "Hermes runtime not found at $runtime_dir" >&2; exit 2; }
 
 mkdir -p -m 700 "$install_root" "$state_dir"
 release_dir="$install_root/releases/$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir -p -m 700 "$release_dir"
-cp -R "$source_dir/index.js" "$source_dir/config.js" "$source_dir/package.json" "$source_dir/src" "$source_dir/scripts" "$release_dir/"
+cp -R "$source_dir/index.js" "$source_dir/config.js" "$source_dir/package.json" "$source_dir/src" "$source_dir/scripts" "$source_dir/hermes" "$release_dir/"
 chmod -R go-rwx "$release_dir" "$state_dir"
 ln -sfn "$release_dir" "$install_root/current"
 
