@@ -27,6 +27,7 @@
     "e2e:openclaw": "./scripts/verify-release.sh",
     "e2e:hermes": "node scripts/verify-hermes-upstream.mjs",
     "e2e:hermes:live": "node scripts/verify-hermes-live.mjs",
+    "canary:hermes": "node scripts/hermes-canary-daemon.mjs",
     "e2e:backend": "node scripts/verify-backend-contract.mjs",
     "e2e:live": "node scripts/verify-live-backend.mjs",
     "canary:check": "node scripts/evaluate-canary.mjs test/fixtures/canary-report.json"
