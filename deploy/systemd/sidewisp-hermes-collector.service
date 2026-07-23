@@ -1,0 +1,41 @@
+[Unit]
+Description=Sidewisp Hermes metadata-only health collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sidewisp-hermes
+Group=sidewisp-hermes
+WorkingDirectory=/opt/sidewisp-hermes/current
+Environment=NODE_ENV=production
+Environment=SIDEWISP_ENDPOINT=https://api.sidewisp.com
+Environment=SIDEWISP_STATE_DIR=/var/lib/sidewisp-hermes
+Environment=HERMES_SOURCE_DIR=/opt/hermes-agent
+Environment=SIDEWISP_HEARTBEAT_INTERVAL_MS=30000
+ExecStart=/usr/bin/node scripts/hermes-canary-daemon.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/sidewisp-hermes
+MemoryMax=128M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

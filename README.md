@@ -6,6 +6,8 @@ This is one plugin repository with runtime-specific adapters. The first adapters
 
 The OpenClaw adapter runs as a native background service. It does not add an agent tool, does not call a model, and never sends commands to the observed agent.
 
+Health collection is runtime-owned, not scheduled through an OpenClaw cron or an agent turn. A native runtime plugin or bounded sidecar emits metadata-only snapshots on its own timer, writes through the shared durable spool, and uploads signed batches. The Hermes production sidecar unit is provided in `deploy/systemd/sidewisp-hermes-collector.service`.
+
 ## Current status
 
 The first production implementation includes runtime adapters, telemetry sanitation, durable spooling, signed ingestion, recovery, diagnostics, packaging gates, real-runtime E2E verification, and deterministic canary gates. See [E2E_AND_CANARY.md](E2E_AND_CANARY.md) for reproducible release evidence.
