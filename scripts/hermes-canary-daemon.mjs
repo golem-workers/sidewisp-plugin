@@ -98,9 +98,7 @@ await heartbeat();
 const timer = setInterval(() => heartbeat().catch((error) => {
   process.stderr.write(`Hermes canary heartbeat failed: ${error.message}\n`);
 }), intervalMs);
-timer.unref();
 await new Promise((resolve) => {
   process.once("SIGTERM", resolve);
   process.once("SIGINT", resolve);
 });
-
