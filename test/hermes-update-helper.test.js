@@ -8,6 +8,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 test("Hermes helper atomically switches release and proves the new collector heartbeat", () => {
+  const targetVersion = JSON.parse(fs.readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).version;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sidewisp-hermes-helper-"));
   try {
     const installRoot = path.join(root, "install");
@@ -44,15 +45,15 @@ printf '%s\\n' "$SIDEWISP_TEST_TARBALL_NAME"
 set -eu
 case "$*" in
   *restart*)
-    printf '{"status":"healthy","version":"0.1.18","heartbeatAt":"%s"}\\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$SIDEWISP_TEST_COLLECTOR_STATUS"
+    printf '{"status":"healthy","version":"${targetVersion}","heartbeatAt":"%s"}\\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" > "$SIDEWISP_TEST_COLLECTOR_STATUS"
     ;;
 esac
 `, { mode: 0o700 });
 
     const directive = {
       schema: "sidewisp.plugin-update.v1",
-      targetVersion: "0.1.18",
-      targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.1.18",
+      targetVersion,
+      targetSpec: `git:github.com/golem-workers/sidewisp-plugin@v${targetVersion}`,
       sha256,
       restartDelaySeconds: 30,
       stateFile,
@@ -76,7 +77,7 @@ esac
     assert.equal(result.status, 0, result.stderr);
     const updateState = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     assert.equal(updateState.status, "completed", JSON.stringify(updateState));
-    assert.equal(JSON.parse(fs.readFileSync(path.join(installRoot, "current", "package.json"), "utf8")).version, "0.1.18");
+    assert.equal(JSON.parse(fs.readFileSync(path.join(installRoot, "current", "package.json"), "utf8")).version, targetVersion);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
