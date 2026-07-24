@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createClaudeCodeAdapter } from "../src/adapters/claude-code/index.js";
+import { createCodexAdapter } from "../src/adapters/codex/index.js";
 import { createHermesAdapter } from "../src/adapters/hermes/index.js";
 import { createOpenClawAdapter } from "../src/adapters/openclaw/index.js";
 import { createCollector } from "../src/core/collector.js";
@@ -21,17 +23,23 @@ function fixtureAdapter() {
   });
 }
 
-test("registry selects OpenClaw, Hermes, and a fixture adapter explicitly", () => {
+test("registry selects every shipped runtime and a fixture adapter explicitly", () => {
   const registry = createAdapterRegistry([
-    createOpenClawAdapter({}), createHermesAdapter(), fixtureAdapter(),
+    createOpenClawAdapter({}), createHermesAdapter(), createCodexAdapter(),
+    createClaudeCodeAdapter(), fixtureAdapter(),
   ]);
-  assert.deepEqual(registry.list().map(({ runtimeKind }) => runtimeKind), ["openclaw", "hermes", "fixture"]);
+  assert.deepEqual(registry.list().map(({ runtimeKind }) => runtimeKind), [
+    "openclaw", "hermes", "codex", "claude-code", "fixture",
+  ]);
   assert.equal(registry.select("fixture").id, "fixture");
   assert.throws(() => registry.select("unknown"), /unsupported runtime/);
 });
 
 test("all adapters expose the complete capability declaration", () => {
-  for (const adapter of [createOpenClawAdapter({}), createHermesAdapter(), fixtureAdapter()]) {
+  for (const adapter of [
+    createOpenClawAdapter({}), createHermesAdapter(), createCodexAdapter(),
+    createClaudeCodeAdapter(), fixtureAdapter(),
+  ]) {
     assert.equal(Object.keys(adapter.capabilities).length, 8);
     assert.ok(Object.values(adapter.capabilities).every(({ status }) => status));
   }

@@ -8,10 +8,12 @@ const envelope = {
   runtime: { version: "1.0.0" }, source: { kind: "hook", adapterVersion: "0.1.0" },
 };
 
-test("mapping tables are explicitly versioned and cover both runtimes", () => {
+test("mapping tables are explicitly versioned and cover every shipped runtime", () => {
   assert.equal(RUNTIME_MAPPING_VERSION, "sidewisp.runtime-map.v1");
   assert.ok(Object.keys(RUNTIME_MAPPINGS.openclaw).length >= 10);
   assert.ok(Object.keys(RUNTIME_MAPPINGS.hermes).length >= 10);
+  assert.ok(Object.keys(RUNTIME_MAPPINGS.codex).length >= 8);
+  assert.ok(Object.keys(RUNTIME_MAPPINGS["claude-code"]).length >= 8);
 });
 
 test("OpenClaw and Hermes normalize overlapping facts identically", () => {

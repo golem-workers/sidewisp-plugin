@@ -27,6 +27,13 @@ Default mode runs in the current user's startup context without elevation. An al
 
 When a runtime provides a reliable native background-plugin lifecycle, prefer it over a separate OS service. OpenClaw uses this mode. Hermes uses the per-user sidecar until an equivalent stable native lifecycle is available.
 
+Codex and Claude Code use documented per-user command hooks. Installation
+modifies only `~/.codex/hooks.json` or `~/.claude/settings.json`, preserves
+existing handlers, and creates a one-time backup of an existing file. Each hook
+stages one metadata-only event and starts a short-lived delivery worker. No
+always-on service, administrator privilege, transcript access, or project-file
+permission is required.
+
 ## Enrollment
 
 The short-lived setup token is exchanged once. It is never written to the persistent service definition. The resulting installation credential is scoped to telemetry ingestion, stored owner-only, and can be revoked from Sidewisp.
