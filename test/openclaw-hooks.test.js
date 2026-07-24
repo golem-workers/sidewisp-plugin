@@ -19,9 +19,12 @@ test("registers supported official hooks with bounded host timeouts and no tools
   assert.equal("registerTool" in api, false);
   assert.equal("registerProvider" in api, false);
   registered.get("before_tool_call").handler({ toolName: "exec", params: { password: "private" }, toolCallId: "tool-1" }, { runId: "run-1", sessionId: "session-1" });
-  registered.get("after_tool_call").handler({ toolName: "exec", result: "private", error: "private failure", durationMs: 12, toolCallId: "tool-1" }, { runId: "run-1", sessionId: "session-1" });
+  registered.get("after_tool_call").handler({ toolName: "exec", result: "private", error: "private failure", isError: true, exitCode: 13, durationMs: 12, toolCallId: "tool-1" }, { runId: "run-1", sessionId: "session-1" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(events.map(({ type }) => type), ["tool.started", "tool.failed"]);
+  assert.deepEqual(events[1].details, {
+    code: "NONZERO_EXIT", operation: "exec", exitCode: 13, durationMs: 12, recoverable: true,
+  });
   assert.equal(JSON.stringify(events).includes("private"), false);
   assert.deepEqual(telemetry.status().observed, { before_tool_call: 1, after_tool_call: 1 });
   assert.equal(telemetry.status().emitted, 2);
@@ -63,8 +66,23 @@ test("maps sanitized host agent streams used by Codex and other harnesses", () =
     { kind: "turn_start", correlation: { sessionId: "session-1", turnId: "run-1", toolCallId: undefined } },
   );
   assert.deepEqual(
-    openClawAgentEventInput({ runId: "run-1", stream: "tool", data: { phase: "result", toolCallId: "tool-1", status: "failed", isError: true } }),
-    { kind: "tool_end", outcome: "failure", durationMs: undefined, correlation: { sessionId: undefined, turnId: "run-1", toolCallId: "tool-1" } },
+    openClawAgentEventInput({ runId: "run-1", stream: "tool", data: { phase: "result", name: "exec", toolCallId: "tool-1", status: "failed", isError: true, result: { exitCode: 13, text: "private" } } }),
+    {
+      kind: "tool_end", outcome: "failure", durationMs: undefined, operation: "exec", status: "failed",
+      exitCode: 13, code: "NONZERO_EXIT", recoverable: true,
+      correlation: { sessionId: undefined, turnId: "run-1", toolCallId: "tool-1" },
+    },
   );
   assert.equal(openClawAgentEventInput({ runId: "run-1", stream: "assistant", data: { text: "private" } }), null);
+});
+
+test("classifies structured failures without copying private error content", () => {
+  const mapped = openClawAgentEventInput({
+    runId: "run-1", stream: "tool",
+    data: { phase: "result", name: "web_fetch", isError: true, statusCode: 429, toolErrorSummary: "Bearer private", args: { token: "private" } },
+  });
+  assert.equal(mapped.operation, "web_fetch");
+  assert.equal(mapped.code, "RATE_LIMITED");
+  assert.equal(mapped.recoverable, true);
+  assert.equal(JSON.stringify(mapped).includes("private"), false);
 });

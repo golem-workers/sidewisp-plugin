@@ -11,6 +11,46 @@ export const OPENCLAW_HOOK_SOURCES = Object.freeze({
   gateway_stop: "src/plugins/hook-types.ts:902",
 });
 
+const FAILURE_CODES = new Set([
+  "AUTH_FAILED", "KILLED", "NONZERO_EXIT", "NOT_FOUND", "PERMISSION_DENIED",
+  "RATE_LIMITED", "TIMEOUT", "UNKNOWN", "VALIDATION_FAILED",
+]);
+
+function safeInteger(...values) {
+  return values.find((value) => Number.isSafeInteger(value));
+}
+
+function safeOperation(...values) {
+  return values.find((value) => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$/.test(value));
+}
+
+function classifyFailure(data, exitCode) {
+  const status = typeof data.status === "string" ? data.status.toLowerCase() : "";
+  const httpStatus = safeInteger(data.httpStatus, data.statusCode, data.result?.httpStatus, data.result?.statusCode);
+  const explicit = typeof data.code === "string" ? data.code.toUpperCase().replaceAll("-", "_") : "";
+  if (FAILURE_CODES.has(explicit)) return explicit;
+  if ([401, 403].includes(httpStatus)) return "AUTH_FAILED";
+  if (httpStatus === 429) return "RATE_LIMITED";
+  if (status === "timeout" || data.timedOut === true) return "TIMEOUT";
+  if (["killed", "aborted", "cancelled"].includes(status)) return "KILLED";
+  if (["validation_failed", "invalid", "rejected"].includes(status)) return "VALIDATION_FAILED";
+  if (["not_found", "missing"].includes(status)) return "NOT_FOUND";
+  if (["permission_denied", "forbidden"].includes(status)) return "PERMISSION_DENIED";
+  if (Number.isSafeInteger(exitCode) && exitCode !== 0) return "NONZERO_EXIT";
+  return "UNKNOWN";
+}
+
+function toolDetails(data, failed) {
+  const exitCode = safeInteger(data.exitCode, data.result?.exitCode);
+  return {
+    operation: safeOperation(data.name, data.toolName, data.result?.name, data.result?.toolName),
+    status: safeOperation(data.status, data.result?.status),
+    exitCode,
+    code: failed ? classifyFailure(data, exitCode) : undefined,
+    recoverable: failed ? !["AUTH_FAILED", "PERMISSION_DENIED"].includes(classifyFailure(data, exitCode)) : undefined,
+  };
+}
+
 export function openClawAgentEventInput(event = {}) {
   const data = event.data && typeof event.data === "object" ? event.data : {};
   const correlation = {
@@ -31,13 +71,18 @@ export function openClawAgentEventInput(event = {}) {
     }
   }
   if (event.stream === "tool") {
-    if (["start", "started"].includes(data.phase)) return { kind: "tool_start", correlation };
+    if (["start", "started"].includes(data.phase)) {
+      return { kind: "tool_start", operation: safeOperation(data.name, data.toolName), correlation };
+    }
     if (["result", "end", "completed"].includes(data.phase)) {
-      const failed = data.isError === true || ["failed", "error", "timeout", "killed"].includes(data.status);
+      const exitCode = safeInteger(data.exitCode, data.result?.exitCode);
+      const failed = data.isError === true || ["failed", "error", "timeout", "killed"].includes(data.status) ||
+        (Number.isSafeInteger(exitCode) && exitCode !== 0);
       return {
         kind: "tool_end",
         outcome: data.status === "timeout" ? "timeout" : failed ? "failure" : "success",
         durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
+        ...toolDetails(data, failed),
         correlation,
       };
     }
@@ -80,8 +125,16 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
   const hooks = {
     before_agent_run: observe("before_agent_run", (event, ctx) => ({ kind: "turn_start", correlation: correlation(event, ctx) })),
     agent_end: observe("agent_end", (event, ctx) => ({ kind: "turn_end", outcome: event.success ? "success" : "failure", durationMs: event.durationMs, correlation: correlation(event, ctx) })),
-    before_tool_call: observe("before_tool_call", (event, ctx) => ({ kind: "tool_start", correlation: correlation(event, ctx) })),
-    after_tool_call: observe("after_tool_call", (event, ctx) => ({ kind: "tool_end", outcome: event.error ? "failure" : "success", durationMs: event.durationMs, correlation: correlation(event, ctx) })),
+    before_tool_call: observe("before_tool_call", (event, ctx) => ({
+      kind: "tool_start", operation: safeOperation(event.toolName, event.name), correlation: correlation(event, ctx),
+    })),
+    after_tool_call: observe("after_tool_call", (event, ctx) => {
+      const failed = event.isError === true || Boolean(event.error);
+      return {
+        kind: "tool_end", outcome: failed ? "failure" : "success", durationMs: event.durationMs,
+        ...toolDetails(event, failed), correlation: correlation(event, ctx),
+      };
+    }),
     message_received: observe("message_received", (event, ctx) => ({ kind: "message_received", correlation: correlation(event, ctx) })),
     message_sent: observe("message_sent", (event, ctx) => ({ kind: "delivery_end", outcome: event.success ? "success" : "failure", correlation: correlation(event, ctx) })),
     gateway_start: observe("gateway_start", () => ({ kind: "gateway_up", correlation: {} })),

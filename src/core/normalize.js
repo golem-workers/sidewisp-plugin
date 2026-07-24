@@ -62,7 +62,17 @@ export function normalizeRuntimeEvent(runtimeKind, input, envelope) {
       source: { ...envelope.source, adapterVersion: envelope.source.adapterVersion },
       type, outcome,
       correlation: input.correlation ?? {},
-      details: { ...factDetails, code: input.code, durationMs: input.durationMs },
+      details: {
+        ...factDetails,
+        code: input.code,
+        component: input.component,
+        operation: input.operation,
+        status: input.status,
+        exitCode: input.exitCode,
+        durationMs: input.durationMs,
+        recoverable: input.recoverable,
+        expected: input.expected ?? factDetails.expected,
+      },
     });
     return { event, diagnostic: null };
   } catch {
