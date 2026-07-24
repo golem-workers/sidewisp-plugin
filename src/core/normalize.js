@@ -15,10 +15,23 @@ export const RUNTIME_MAPPINGS = Object.freeze({
     message_received: "message-received", message_delivery_end: "delivery-end", llm_provider_error: "provider-error",
     configuration_error: "config-invalid", task_queue_stalled: "queue-stuck", context_limit_reached: "context-exhausted",
   }),
+  codex: Object.freeze({
+    runtime_start: "runtime-start", runtime_stop: "runtime-stop",
+    turn_start: "turn-start", turn_end: "turn-end",
+    tool_start: "tool-start", tool_end: "tool-end",
+    provider_error: "provider-error", context_exhausted: "context-exhausted",
+  }),
+  "claude-code": Object.freeze({
+    runtime_start: "runtime-start", runtime_stop: "runtime-stop",
+    turn_start: "turn-start", turn_end: "turn-end",
+    tool_start: "tool-start", tool_end: "tool-end",
+    provider_error: "provider-error", context_exhausted: "context-exhausted",
+  }),
 });
 
 const FIXED = Object.freeze({
-  "runtime-start": ["runtime.started", "success"], "runtime-crash": ["runtime.crashed", "failure"],
+  "runtime-start": ["runtime.started", "success"], "runtime-stop": ["runtime.stopped", "success"],
+  "runtime-crash": ["runtime.crashed", "failure"],
   "gateway-up": ["gateway.connected", "success"], "gateway-down": ["gateway.disconnected", "failure"],
   "config-invalid": ["config.invalid", "failure"], "queue-stuck": ["queue.stuck", "failure"],
   "context-exhausted": ["context.exhausted", "failure"],

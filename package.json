@@ -1,9 +1,19 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.1.20",
+  "version": "0.2.0",
   "description": "Universal zero-LLM telemetry plugin for monitoring AI agent runtimes with Sidewisp",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
+  "keywords": [
+    "sidewisp",
+    "openclaw",
+    "hermes-agent",
+    "codex",
+    "claude-code",
+    "agent-monitoring",
+    "telemetry",
+    "plugin"
+  ],
   "files": [
     "index.js",
     "config.js",
@@ -18,21 +28,40 @@
     "scripts/uninstall-hermes.sh",
     "scripts/hermes-canary-daemon.mjs",
     "scripts/hermes-update-helper.mjs",
+    "scripts/configure-command-runtime.mjs",
+    "scripts/enroll-command-runtime.mjs",
+    "scripts/install-command-runtime.sh",
+    "scripts/install-codex.sh",
+    "scripts/install-claude-code.sh",
+    "scripts/runtime-hook.mjs",
+    "scripts/runtime-hook-drain.mjs",
+    "scripts/uninstall-command-runtime.sh",
+    "scripts/uninstall-codex.sh",
+    "scripts/uninstall-claude-code.sh",
     "scripts/openclaw-update-helper.mjs",
     "openclaw.plugin.json",
     "README.md",
+    "docs",
     "ROADMAP.md",
     "COMPATIBILITY.md",
+    "E2E_AND_CANARY.md",
+    "INSTALLATION_PERMISSIONS.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "LICENSING.md",
     "RELEASE_TEMPLATE.md",
+    "RELEASE_NOTES.md",
     "LICENSE"
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check index.js && node --check src/auth/credentials.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --check src/core/health.js && node --check src/core/normalize.js && node --check src/core/sanitize.js && node --check src/core/support.js && node --check src/adapters/openclaw/recovery.js && node --check src/delivery/spool.js && node --check src/delivery/uploader.js && node --check src/update/directive.js && node --check src/update/hermes-scheduler.js && node --check scripts/hermes-update-helper.mjs && node --test",
+    "check": "node --check index.js && node --check src/auth/credentials.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --check src/core/health.js && node --check src/core/normalize.js && node --check src/core/sanitize.js && node --check src/core/support.js && node --check src/adapters/openclaw/recovery.js && node --check src/adapters/codex/hooks.js && node --check src/adapters/claude-code/hooks.js && node --check src/adapters/command-hook/bridge.js && node --check src/adapters/command-hook/install.js && node --check src/delivery/spool.js && node --check src/delivery/uploader.js && node --check src/update/directive.js && node --check src/update/hermes-scheduler.js && node --check scripts/hermes-update-helper.mjs && node --check scripts/runtime-hook.mjs && node --check scripts/runtime-hook-drain.mjs && node --test",
     "pack:check": "npm pack --dry-run",
     "e2e:openclaw": "./scripts/verify-release.sh",
     "e2e:hermes": "node scripts/verify-hermes-upstream.mjs",
     "e2e:hermes:live": "node scripts/verify-hermes-live.mjs",
+    "e2e:codex": "node --test test/codex-adapter.test.js test/runtime-hook-install.test.js test/runtime-hook-script.test.js",
+    "e2e:claude-code": "node --test test/claude-code-adapter.test.js test/runtime-hook-install.test.js test/runtime-hook-script.test.js",
     "canary:hermes": "node scripts/hermes-canary-daemon.mjs",
     "e2e:backend": "node scripts/verify-backend-contract.mjs",
     "e2e:live": "node scripts/verify-live-backend.mjs",
@@ -53,6 +82,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/golem-workers/sidewisp-plugin.git"
+  },
+  "homepage": "https://sidewisp.com",
+  "bugs": {
+    "url": "https://github.com/golem-workers/sidewisp-plugin/issues"
   },
   "engines": {
     "node": ">=22.22.3"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-endpoint="${SIDEWISP_ENDPOINT:-https://staging-api.sidewisp.com}"
+endpoint="${SIDEWISP_ENDPOINT:-https://api.sidewisp.com}"
 setup_token="${SIDEWISP_SETUP_TOKEN:-${1:-}}"
 source_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 install_root="${SIDEWISP_INSTALL_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/sidewisp-hermes}"

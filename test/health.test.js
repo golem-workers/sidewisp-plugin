@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createClaudeCodeAdapter } from "../src/adapters/claude-code/index.js";
+import { createCodexAdapter } from "../src/adapters/codex/index.js";
 import { createHermesAdapter } from "../src/adapters/hermes/index.js";
 import { createOpenClawAdapter } from "../src/adapters/openclaw/index.js";
 import { HEALTH_CHECKS, runBoundedProbe } from "../src/core/health.js";
@@ -10,10 +12,12 @@ const healthyProbes = () => Object.fromEntries(HEALTH_CHECKS.map((name) => [name
   return { status: "healthy" };
 }]));
 
-test("OpenClaw and Hermes produce the same health snapshot shape", async () => {
+test("all runtime adapters produce the same health snapshot shape", async () => {
   const snapshots = await Promise.all([
     createOpenClawAdapter({ version: "2026.7.1", probes: healthyProbes() }).healthSnapshot(),
     createHermesAdapter({ version: "0.9.0", probes: healthyProbes() }).healthSnapshot(),
+    createCodexAdapter({ version: "0.145.0", probes: healthyProbes() }).healthSnapshot(),
+    createClaudeCodeAdapter({ version: "2.1.218", probes: healthyProbes() }).healthSnapshot(),
   ]);
   for (const snapshot of snapshots) {
     assert.equal(snapshot.schema, "sidewisp.health.v1");
