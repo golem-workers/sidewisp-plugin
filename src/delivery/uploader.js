@@ -90,6 +90,9 @@ export function createUploader({
         const result = await sendOnce();
         finalResult = result;
         if (["idle", "disabled", "credential-rejected", "rejected"].includes(result.status)) return result;
+        if (result.status === "sent" && result.remaining === 0) {
+          return finish({ status: "idle", sent: result.sent, remaining: 0 });
+        }
         if (result.status === "retry") {
           const delay = result.retryAfterMs ?? Math.min(maxBackoffMs, 1000 * 2 ** attempt) * (0.5 + random() * 0.5);
           attempt = Math.min(attempt + 1, 20);

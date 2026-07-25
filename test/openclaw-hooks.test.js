@@ -40,6 +40,40 @@ test("equivalent OpenClaw failure matches Hermes normalized failure", async () =
   assert.deepEqual(events.map(({ type, outcome }) => ({ type, outcome })), [
     { type: "turn.failed", outcome: "failure" }, { type: "message.failed", outcome: "failure" },
   ]);
+  assert.equal(events[0].details.code, "UNKNOWN");
+  assert.equal(events[0].details.recoverable, true);
+});
+
+test("correlates tool names when completion omits operation and marks signal exits as expected cancellation", async () => {
+  const registered = new Map();
+  const events = [];
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    { emit: async (event) => events.push(event), envelopeFactory: envelope },
+  );
+  registered.get("before_tool_call")(
+    { toolName: "sessions_history", toolCallId: "call-correlated" },
+    { runId: "run-1", sessionId: "session-1" },
+  );
+  registered.get("after_tool_call")(
+    { toolCallId: "call-correlated", isError: true, statusCode: 429 },
+    { runId: "run-1", sessionId: "session-1" },
+  );
+  registered.get("after_tool_call")(
+    { toolName: "exec", toolCallId: "call-cancelled", isError: true, exitCode: 130 },
+    { runId: "run-1", sessionId: "session-1" },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(events[1].type, "tool.failed");
+  assert.deepEqual(events[1].details, {
+    code: "RATE_LIMITED",
+    operation: "sessions_history",
+    httpStatus: 429,
+    recoverable: true,
+  });
+  assert.equal(events[2].type, "tool.cancelled");
+  assert.equal(events[2].details.expected, true);
+  assert.equal(events[2].details.operation, "exec");
 });
 
 test("hook and emitter exceptions never escape into OpenClaw", async () => {
@@ -84,5 +118,6 @@ test("classifies structured failures without copying private error content", () 
   assert.equal(mapped.operation, "web_fetch");
   assert.equal(mapped.code, "RATE_LIMITED");
   assert.equal(mapped.recoverable, true);
+  assert.equal(mapped.httpStatus, 429);
   assert.equal(JSON.stringify(mapped).includes("private"), false);
 });
