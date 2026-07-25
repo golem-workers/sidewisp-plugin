@@ -82,6 +82,7 @@ export function normalizeRuntimeEvent(runtimeKind, input, envelope) {
         operation: input.operation,
         status: input.status,
         exitCode: input.exitCode,
+        httpStatus: input.httpStatus,
         durationMs: input.durationMs,
         recoverable: input.recoverable,
         expected: input.expected ?? factDetails.expected,

@@ -47,6 +47,27 @@ test("backend outage retries with bounded backoff then drains in order", async (
   assert.equal(spool.pending(1).length, 0);
 });
 
+test("a final successful attempt with an empty queue never reports backpressure", async () => {
+  const spool = memorySpool([{ eventId: "only-event" }]);
+  const uploader = createUploader({
+    spool,
+    endpoint: "https://sidewisp.test",
+    credentialProvider: { current: async () => credential },
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ acknowledgedEventIds: ["only-event"] }),
+    }),
+  });
+  assert.deepEqual(await uploader.drain({ maxAttempts: 1 }), {
+    status: "idle",
+    sent: 1,
+    remaining: 0,
+  });
+  assert.equal(uploader.status().status, "idle");
+  assert.equal(uploader.status().remaining, 0);
+});
+
 test("oversized event is dead-lettered without unbounded request memory", async () => {
   const spool = memorySpool([{ eventId: "large", value: "x".repeat(2000) }]);
   let fetched = false;

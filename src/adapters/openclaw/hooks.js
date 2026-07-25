@@ -40,12 +40,22 @@ function classifyFailure(data, exitCode) {
   return "UNKNOWN";
 }
 
-function toolDetails(data, failed) {
+function cancellation(data, exitCode) {
+  const status = typeof data.status === "string" ? data.status.toLowerCase() : "";
+  return data.cancelled === true
+    || data.canceled === true
+    || ["killed", "aborted", "cancelled", "canceled"].includes(status)
+    || [130, 143].includes(exitCode);
+}
+
+function toolDetails(data, failed, fallbackOperation) {
   const exitCode = safeInteger(data.exitCode, data.result?.exitCode);
+  const httpStatus = safeInteger(data.httpStatus, data.statusCode, data.result?.httpStatus, data.result?.statusCode);
   return {
-    operation: safeOperation(data.name, data.toolName, data.result?.name, data.result?.toolName),
+    operation: safeOperation(data.name, data.toolName, data.result?.name, data.result?.toolName, fallbackOperation) ?? "unknown",
     status: safeOperation(data.status, data.result?.status),
     exitCode,
+    ...(Number.isSafeInteger(httpStatus) ? { httpStatus } : {}),
     code: failed ? classifyFailure(data, exitCode) : undefined,
     recoverable: failed ? !["AUTH_FAILED", "PERMISSION_DENIED"].includes(classifyFailure(data, exitCode)) : undefined,
   };
@@ -78,11 +88,12 @@ export function openClawAgentEventInput(event = {}) {
       const exitCode = safeInteger(data.exitCode, data.result?.exitCode);
       const failed = data.isError === true || ["failed", "error", "timeout", "killed"].includes(data.status) ||
         (Number.isSafeInteger(exitCode) && exitCode !== 0);
+      const cancelled = cancellation(data, exitCode);
       return {
         kind: "tool_end",
-        outcome: data.status === "timeout" ? "timeout" : failed ? "failure" : "success",
+        outcome: cancelled ? "cancelled" : data.status === "timeout" ? "timeout" : failed ? "failure" : "success",
         durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
-        ...toolDetails(data, failed),
+        ...toolDetails(data, failed && !cancelled),
         correlation,
       };
     }
@@ -96,6 +107,7 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
   let lastObservedAt = null;
   const observed = {};
   const diagnostics = {};
+  const operationByCallId = new Map();
   const diagnose = (diagnostic) => {
     diagnostics[diagnostic.code] = (diagnostics[diagnostic.code] ?? 0) + 1;
     onDiagnostic(diagnostic);
@@ -122,17 +134,41 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     sessionId: ctx.sessionId ?? event.sessionId, turnId: ctx.runId ?? event.runId,
     toolCallId: ctx.toolCallId ?? event.toolCallId, messageId: ctx.messageId ?? event.messageId,
   });
+  const callId = (event, ctx) => ctx.toolCallId ?? event.toolCallId ?? event.itemId;
   const hooks = {
     before_agent_run: observe("before_agent_run", (event, ctx) => ({ kind: "turn_start", correlation: correlation(event, ctx) })),
-    agent_end: observe("agent_end", (event, ctx) => ({ kind: "turn_end", outcome: event.success ? "success" : "failure", durationMs: event.durationMs, correlation: correlation(event, ctx) })),
-    before_tool_call: observe("before_tool_call", (event, ctx) => ({
-      kind: "tool_start", operation: safeOperation(event.toolName, event.name), correlation: correlation(event, ctx),
-    })),
-    after_tool_call: observe("after_tool_call", (event, ctx) => {
-      const failed = event.isError === true || Boolean(event.error);
+    agent_end: observe("agent_end", (event, ctx) => {
+      const exitCode = safeInteger(event.exitCode);
+      const cancelled = cancellation(event, exitCode);
+      const failed = event.success !== true && !cancelled;
       return {
-        kind: "tool_end", outcome: failed ? "failure" : "success", durationMs: event.durationMs,
-        ...toolDetails(event, failed), correlation: correlation(event, ctx),
+        kind: "turn_end",
+        outcome: cancelled ? "cancelled" : failed ? "failure" : "success",
+        durationMs: event.durationMs,
+        exitCode,
+        httpStatus: safeInteger(event.httpStatus, event.statusCode),
+        code: failed ? classifyFailure(event, exitCode) : undefined,
+        recoverable: failed ? !["AUTH_FAILED", "PERMISSION_DENIED"].includes(classifyFailure(event, exitCode)) : undefined,
+        correlation: correlation(event, ctx),
+      };
+    }),
+    before_tool_call: observe("before_tool_call", (event, ctx) => {
+      const operation = safeOperation(event.toolName, event.name) ?? "unknown";
+      const id = callId(event, ctx);
+      if (id && operationByCallId.size < maxPending) operationByCallId.set(id, operation);
+      return { kind: "tool_start", operation, correlation: correlation(event, ctx) };
+    }),
+    after_tool_call: observe("after_tool_call", (event, ctx) => {
+      const id = callId(event, ctx);
+      const fallbackOperation = id ? operationByCallId.get(id) : undefined;
+      if (id) operationByCallId.delete(id);
+      const exitCode = safeInteger(event.exitCode, event.result?.exitCode);
+      const cancelled = cancellation(event, exitCode);
+      const failed = !cancelled && (event.isError === true || Boolean(event.error)
+        || (Number.isSafeInteger(exitCode) && exitCode !== 0));
+      return {
+        kind: "tool_end", outcome: cancelled ? "cancelled" : failed ? "failure" : "success", durationMs: event.durationMs,
+        ...toolDetails(event, failed, fallbackOperation), correlation: correlation(event, ctx),
       };
     }),
     message_received: observe("message_received", (event, ctx) => ({ kind: "message_received", correlation: correlation(event, ctx) })),
