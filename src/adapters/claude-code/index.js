@@ -1,5 +1,6 @@
 import { ADAPTER_CONTRACT, declareCapabilities, defineRuntimeAdapter } from "../../core/runtime-adapter.js";
 import { createHealthReporter } from "../../core/health.js";
+import { unsupportedDiagnostics } from "../../core/diagnostics.js";
 
 export function createClaudeCodeAdapter({ hooks, version = "unknown", probes = {} } = {}) {
   let unsubscribe = null;
@@ -30,5 +31,12 @@ export function createClaudeCodeAdapter({ hooks, version = "unknown", probes = {
     },
     async recover(cursor) { return cursor; },
     async healthSnapshot() { return health.snapshot(); },
+    async collectDiagnostics({ installationId = "sw_ins_unconfigured", now = () => Date.now() } = {}) {
+      return unsupportedDiagnostics({
+        installationId, runtimeKind: "claude-code", runtimeVersion: version,
+        adapterName: "sidewisp.claude-code", adapterVersion: "0.2.0",
+        observedAt: new Date(now()).toISOString(),
+      });
+    },
   });
 }

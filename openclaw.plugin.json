@@ -20,6 +20,20 @@
       "enabled": {
         "type": "boolean",
         "default": true
+      },
+      "diagnosticsIntervalMs": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 86400000,
+        "default": 900000,
+        "description": "Runtime diagnostic collection cadence in milliseconds"
+      },
+      "diagnosticsMaxRefreshMs": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 86400000,
+        "default": 3600000,
+        "description": "Maximum interval before an unchanged snapshot is refreshed"
       }
     }
   },

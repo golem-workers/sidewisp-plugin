@@ -34,6 +34,25 @@ test("restart safely replays incomplete delivery and acknowledgements are idempo
   await reopened.close();
 });
 
+test("runtime diagnostics coalesce latest-only and survive restart", async (t) => {
+  const { file, spool } = await fixture(t);
+  const first = { installationId: "sw_ins_test123456", snapshotId: "sw_diag_first" };
+  const latest = { installationId: first.installationId, snapshotId: "sw_diag_latest" };
+  spool.coalesceRuntimeDiagnostic(first);
+  spool.coalesceRuntimeDiagnostic(latest);
+  assert.deepEqual(spool.pendingRuntimeDiagnostic(first.installationId), {
+    snapshotId: latest.snapshotId,
+    snapshot: latest,
+  });
+  await spool.close();
+  const reopened = await openSpool({ file });
+  assert.equal(reopened.pendingRuntimeDiagnostic(first.installationId).snapshotId, latest.snapshotId);
+  assert.equal(reopened.acknowledgeRuntimeDiagnostic(first.installationId, "sw_diag_first"), false);
+  assert.equal(reopened.acknowledgeRuntimeDiagnostic(first.installationId, latest.snapshotId), true);
+  assert.equal(reopened.pendingRuntimeDiagnostic(first.installationId), null);
+  await reopened.close();
+});
+
 test("single writer lock and disk quota fail visibly", async (t) => {
   const { file, spool } = await fixture(t, { maxBytes: 4096 });
   await assert.rejects(openSpool({ file, maxBytes: 4096 }), (error) => error instanceof SpoolError && error.code === "locked");
