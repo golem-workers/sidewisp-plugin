@@ -20,6 +20,7 @@ function fixtureAdapter() {
     async stop() { running = false; },
     async recover(cursor) { return cursor; },
     async healthSnapshot() { return { status: running ? "healthy" : "stopped" }; },
+    async collectDiagnostics() { return { collection: { outcome: "unsupported" } }; },
   });
 }
 
@@ -40,7 +41,7 @@ test("all adapters expose the complete capability declaration", () => {
     createOpenClawAdapter({}), createHermesAdapter(), createCodexAdapter(),
     createClaudeCodeAdapter(), fixtureAdapter(),
   ]) {
-    assert.equal(Object.keys(adapter.capabilities).length, 8);
+    assert.equal(Object.keys(adapter.capabilities).length, 9);
     assert.ok(Object.values(adapter.capabilities).every(({ status }) => status));
   }
 });

@@ -11,6 +11,7 @@ import { createAdapterRegistry } from "../../core/runtime-adapter.js";
 import { createSafeSupportBundle } from "../../core/support.js";
 import { openSpool } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
+import { createRuntimeDiagnosticsDelivery } from "../../delivery/runtime-diagnostics.js";
 import { createOpenClawAdapter } from "./index.js";
 import { openClawAgentEventInput, registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
@@ -56,6 +57,7 @@ export default definePluginEntry({
     const collector = createCollector({ adapter });
     let sequence = 0;
     let uploader = null;
+    let runtimeDiagnostics = null;
     let uploadTimer = null;
     let healthTimer = null;
     const preStartEvents = [];
@@ -154,6 +156,13 @@ export default definePluginEntry({
           credentialProvider: { current: async () => auth.credential() },
           onUpdate: (directive) => updates.schedule(directive),
         });
+        runtimeDiagnostics = createRuntimeDiagnosticsDelivery({
+          adapter, spool, endpoint: config.endpoint,
+          credentialProvider: { current: async () => auth.credential() },
+          intervalMs: config.diagnosticsIntervalMs,
+          maxRefreshMs: config.diagnosticsMaxRefreshMs,
+        });
+        runtimeDiagnostics.start();
         uploadTimer = setInterval(() => { void uploader.drain({ maxAttempts: 1 }); }, 5_000);
         uploadTimer.unref?.();
         await collector.start();
@@ -169,6 +178,8 @@ export default definePluginEntry({
         uploadTimer = null;
         if (uploader) await uploader.drain({ maxAttempts: 1 });
         uploader = null;
+        if (runtimeDiagnostics) await runtimeDiagnostics.stop();
+        runtimeDiagnostics = null;
         if (spool) await spool.close();
         spool = null;
         await collector.stop();
@@ -186,6 +197,7 @@ export default definePluginEntry({
         installation: auth.status(),
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
+        runtimeDiagnostics: runtimeDiagnostics?.status() ?? { status: "not-started", at: null },
         update: updates.status(),
         hooks: hookTelemetry.status(),
         agentEvents: { ...agentEventTelemetry },
@@ -198,6 +210,7 @@ export default definePluginEntry({
       respond(true, createSafeSupportBundle({
         pluginVersion: VERSION, runtimeVersion: api.runtime.version, endpoint: config.endpoint,
         installation: auth.status(), spool: spool?.health(), uploader: uploader?.status(), collector: collectorStatus,
+        diagnostic: runtimeDiagnostics?.status(),
       }));
     }, { scope: "operator.read" });
   },

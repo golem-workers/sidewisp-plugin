@@ -9,6 +9,7 @@ export const CAPABILITIES = Object.freeze([
   "log-recovery",
   "state-recovery",
   "process-health",
+  "diagnostics-probe",
 ]);
 
 const CAPABILITY_STATES = new Set(["supported", "degraded", "unsupported"]);
@@ -35,7 +36,7 @@ export function defineRuntimeAdapter(adapter) {
       throw new TypeError(`degraded capability ${name} requires a stable reason`);
     }
   }
-  for (const method of ["start", "stop", "healthSnapshot", "recover"]) {
+  for (const method of ["start", "stop", "healthSnapshot", "recover", "collectDiagnostics"]) {
     if (typeof adapter[method] !== "function") throw new TypeError(`adapter.${method} must be a function`);
   }
   return Object.freeze(adapter);

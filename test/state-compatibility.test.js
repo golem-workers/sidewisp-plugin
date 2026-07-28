@@ -19,12 +19,20 @@ test("upgrade and rollback preserve credentials, cursor, and pending events", as
   const file = path.join(root, "sidewisp", "spool.sqlite");
   let spool = await openSpool({ file });
   spool.enqueueSourceBatch("fixture", "cursor-v1", [event]);
+  spool.coalesceRuntimeDiagnostic({
+    installationId: credential.installationId,
+    snapshotId: "sw_diag_pending_rollback",
+  });
   await spool.close();
 
   spool = await openSpool({ file });
   assert.deepEqual(await credentialStore.read(), credential);
   assert.equal(spool.cursor("fixture"), "cursor-v1");
   assert.deepEqual(spool.pending(), [{ eventId: event.eventId, event }]);
+  assert.equal(
+    spool.pendingRuntimeDiagnostic(credential.installationId).snapshotId,
+    "sw_diag_pending_rollback",
+  );
   await spool.close();
 });
 

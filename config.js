@@ -7,6 +7,18 @@ export function resolveConfig(value) {
       typeof input.endpoint === "string" && input.endpoint.length > 0
         ? input.endpoint
         : "https://api.sidewisp.com",
+    diagnosticsIntervalMs:
+      Number.isSafeInteger(input.diagnosticsIntervalMs)
+      && input.diagnosticsIntervalMs >= 60_000
+      && input.diagnosticsIntervalMs <= 86_400_000
+        ? input.diagnosticsIntervalMs
+        : 15 * 60_000,
+    diagnosticsMaxRefreshMs:
+      Number.isSafeInteger(input.diagnosticsMaxRefreshMs)
+      && input.diagnosticsMaxRefreshMs >= 60_000
+      && input.diagnosticsMaxRefreshMs <= 86_400_000
+        ? input.diagnosticsMaxRefreshMs
+        : 60 * 60_000,
   };
 }
 

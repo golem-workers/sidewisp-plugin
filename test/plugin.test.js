@@ -18,6 +18,8 @@ test("configuration never exposes the setup token", () => {
     enabled: true,
     configured: true,
     endpoint: "https://example.test",
+    diagnosticsIntervalMs: 900000,
+    diagnosticsMaxRefreshMs: 3600000,
   });
   assert.equal(JSON.stringify(config).includes("sw_setup_secret"), false);
   assert.equal(readSetupToken({ setupToken: "sw_setup_secret" }), "sw_setup_secret");
@@ -28,5 +30,7 @@ test("defaults to zero-configuration pending setup", () => {
     enabled: true,
     configured: false,
     endpoint: "https://api.sidewisp.com",
+    diagnosticsIntervalMs: 900000,
+    diagnosticsMaxRefreshMs: 3600000,
   });
 });

@@ -4,6 +4,8 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import crypto from "node:crypto";
 
+// The additive diagnostics table is intentionally compatible with v1 readers:
+// older releases ignore it, which keeps rollback safe.
 const SPOOL_SCHEMA_VERSION = 1;
 
 export class SpoolError extends Error {
@@ -64,6 +66,12 @@ function initialize(file) {
     CREATE INDEX IF NOT EXISTS events_pending ON events(acked_at, created_at);
     CREATE TABLE IF NOT EXISTS cursors (source TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS dead_letters (event_id TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS runtime_diagnostic_pending (
+      installation_id TEXT PRIMARY KEY,
+      snapshot_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
   const storedVersion = db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get()?.value;
   if (storedVersion === undefined) db.prepare("INSERT INTO metadata(key,value) VALUES('schema_version',?)").run(String(SPOOL_SCHEMA_VERSION));
@@ -140,6 +148,24 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
     deadLetter(eventId, reason) {
       db.prepare("INSERT OR REPLACE INTO dead_letters(event_id,reason,created_at) VALUES(?,?,?)").run(eventId, reason, now());
       db.prepare("DELETE FROM events WHERE event_id=?").run(eventId);
+    },
+    coalesceRuntimeDiagnostic(snapshot) {
+      const payload = JSON.stringify(snapshot);
+      assertQuota(Buffer.byteLength(payload));
+      db.prepare(`INSERT INTO runtime_diagnostic_pending(installation_id,snapshot_id,payload,created_at)
+        VALUES(?,?,?,?)
+        ON CONFLICT(installation_id) DO UPDATE SET
+          snapshot_id=excluded.snapshot_id,payload=excluded.payload,created_at=excluded.created_at`)
+        .run(snapshot.installationId, snapshot.snapshotId, payload, now());
+    },
+    pendingRuntimeDiagnostic(installationId) {
+      const row = db.prepare(`SELECT snapshot_id,payload FROM runtime_diagnostic_pending
+        WHERE installation_id=?`).get(installationId);
+      return row ? { snapshotId: row.snapshot_id, snapshot: JSON.parse(row.payload) } : null;
+    },
+    acknowledgeRuntimeDiagnostic(installationId, snapshotId) {
+      return db.prepare(`DELETE FROM runtime_diagnostic_pending
+        WHERE installation_id=? AND snapshot_id=?`).run(installationId, snapshotId).changes === 1;
     },
     prune() { return db.prepare("DELETE FROM events WHERE acked_at IS NOT NULL AND acked_at < ?").run(now() - retentionMs).changes; },
     health() { return { status: diskUsage() >= maxBytes ? "unhealthy" : diskUsage() >= maxBytes * 0.8 ? "degraded" : "healthy", bytes: diskUsage(), maxBytes, recoveredFromCorruption }; },
