@@ -15,14 +15,36 @@ const { createSidewispHttpServer } = await import(`${backend}/src/http/server.mj
 
 const root = await mkdtemp(join(tmpdir(), "sidewisp-plugin-backend-"));
 const db = new SidewispDatabase(); db.createTenant({ id: "tenant_contract" });
+db.createUser({
+  id: "plugin_contract_operator",
+  identitySubject: "contract|plugin_contract_operator",
+});
+db.setTenantMembership({
+  tenantId: "tenant_contract",
+  userId: "plugin_contract_operator",
+  role: "admin",
+});
 const installations = new InstallationService({ db, masterKey: randomBytes(32), ingestionUrl: "http://localhost/v1/telemetry/batches" });
 const incidents = new IncidentEngine({ db });
+const operator = {
+  tenantId: "tenant_contract",
+  userId: "plugin_contract_operator",
+  role: "admin",
+  authType: "internal_admin",
+  authenticatedAtMs: Date.now(),
+};
 const app = createSidewispHttpServer({ db, installations, monitoring: new MonitoringApi({ db, installations }), incidentEngine: incidents,
   authenticateIngest: ({ headers, body }) => verifySignedRequest({ db, installationService: installations, headers, body }),
-  authorizeUser: async () => ({ tenantId: "tenant_contract", role: "admin" }) });
+  authorizeUser: async () => operator });
 try {
   const address = await app.listen({ host: "127.0.0.1", port: 0 }); const endpoint = `http://127.0.0.1:${address.port}`;
-  const created = await (await fetch(`${endpoint}/v1/installations`, { method: "POST", body: JSON.stringify({ runtime: "openclaw", displayName: "plugin-contract" }) })).json();
+  const createResponse = await fetch(`${endpoint}/v1/installations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ runtime: "openclaw", displayName: "plugin-contract" }),
+  });
+  if (createResponse.status !== 201) throw new Error(`installation creation failed (${createResponse.status})`);
+  const created = await createResponse.json();
   const manager = createEnrollmentManager({ endpoint, store: createFileCredentialStore({ stateDir: root }) }); await manager.enroll(created.setupToken);
   const event = { schema: "sidewisp.telemetry.v1", eventId: "sw_evt_plugincontract000001", installationId: created.installationId, sequence: 1,
     occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), runtime: { kind: "openclaw", version: "2026.7.1", instanceId: "contract" },
