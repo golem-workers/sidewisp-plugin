@@ -50,3 +50,28 @@ jobs:
             --verify-tag \
             --title "Sidewisp Plugin ${GITHUB_REF_NAME}" \
             --notes-file RELEASE_NOTES.md
+  promote-production:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: signed-release
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and promote verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIDEWISP_PRODUCTION_HOST: ${{ vars.SIDEWISP_PRODUCTION_HOST }}
+          SIDEWISP_PRODUCTION_USER: ${{ vars.SIDEWISP_PRODUCTION_USER }}
+          SIDEWISP_PRODUCTION_SSH_KEY: ${{ secrets.SIDEWISP_PRODUCTION_SSH_KEY }}
+          SIDEWISP_PRODUCTION_KNOWN_HOSTS: ${{ secrets.SIDEWISP_PRODUCTION_KNOWN_HOSTS }}
+        run: |
+          mkdir -p dist
+          gh release download "${GITHUB_REF_NAME}" \
+            --pattern "sidewisp-plugin-*.tgz" \
+            --pattern SHA256SUMS \
+            --dir dist
+          (cd dist && sha256sum --check SHA256SUMS)
+          version="${GITHUB_REF_NAME#v}"
+          sha=$(awk 'NF == 2 && $2 ~ /sidewisp-plugin-.*\\.tgz$/ { print $1 }' dist/SHA256SUMS)
+          test -n "$sha"
+          ./scripts/promote-production.sh "$version" "$sha"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+read -r action version sha extra <<<"${SSH_ORIGINAL_COMMAND:-}"
+if [[ "$action" != "promote" || -n "${extra:-}" ]]; then
+  echo "only 'promote <version> <sha256>' is permitted" >&2
+  exit 64
+fi
+
+exec /usr/local/sbin/sidewisp-promote-stable-plugin "$version" "$sha"
