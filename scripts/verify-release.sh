@@ -6,6 +6,10 @@ release_dir=$(mktemp -d)
 trap 'rm -rf "$release_dir"' EXIT
 
 cd "$repo_dir"
+bash -n \
+  deploy/promote-stable-plugin.sh \
+  deploy/promote-stable-plugin-ssh \
+  scripts/promote-production.sh
 npm run check
 archive=$(npm pack --pack-destination "$release_dir" --silent)
 OPENCLAW_STATE_DIR="$release_dir/state" openclaw plugins install "$release_dir/$archive" --force >/dev/null
