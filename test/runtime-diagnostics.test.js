@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createHermesAdapter } from "../src/adapters/hermes/index.js";
@@ -7,6 +9,16 @@ import { collectRuntimeDiagnostics } from "../src/core/diagnostics.js";
 
 const INSTALLATION_ID = "sw_ins_diagnostic1234";
 const NOW = Date.parse("2026-07-28T08:00:00.000Z");
+
+test("canonical OpenClaw fixture keeps the cross-repository fingerprint", async () => {
+  const bytes = await readFile(
+    new URL("./fixtures/runtime-diagnostics-v1/openclaw.json", import.meta.url),
+  );
+  assert.equal(
+    createHash("sha256").update(bytes).digest("hex"),
+    "d3ce1f3508e94787662e89973e9e591524160d29641af3b44f4a29b2874a980c",
+  );
+});
 
 test("OpenClaw diagnostic probe is bounded, deterministic and privacy closed", async () => {
   const adapter = createOpenClawAdapter({
