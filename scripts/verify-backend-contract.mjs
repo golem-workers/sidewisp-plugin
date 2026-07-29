@@ -8,6 +8,9 @@ import { createUploader } from "../src/delivery/uploader.js";
 const backend = resolve(process.env.SIDEWISP_BACKEND_DIR ?? "../sidewisp-backend");
 const { SidewispDatabase } = await import(`${backend}/src/storage/database.mjs`);
 const { InstallationService } = await import(`${backend}/src/auth/installations.mjs`);
+const { createInstallationMutationGrantAuthority } = await import(
+  `${backend}/src/auth/installation-mutation-grants.mjs`
+);
 const { MonitoringApi } = await import(`${backend}/src/api/monitoring.mjs`);
 const { IncidentEngine } = await import(`${backend}/src/incidents/engine.mjs`);
 const { verifySignedRequest } = await import(`${backend}/src/auth/requests.mjs`);
@@ -24,7 +27,13 @@ db.setTenantMembership({
   userId: "plugin_contract_operator",
   role: "admin",
 });
-const installations = new InstallationService({ db, masterKey: randomBytes(32), ingestionUrl: "http://localhost/v1/telemetry/batches" });
+const installationMutationGrants = createInstallationMutationGrantAuthority();
+const installations = new InstallationService({
+  db,
+  masterKey: randomBytes(32),
+  ingestionUrl: "http://localhost/v1/telemetry/batches",
+  mutationGrantVerifier: installationMutationGrants.verifier,
+});
 const incidents = new IncidentEngine({ db });
 const operator = {
   tenantId: "tenant_contract",
@@ -33,7 +42,15 @@ const operator = {
   authType: "internal_admin",
   authenticatedAtMs: Date.now(),
 };
-const app = createSidewispHttpServer({ db, installations, monitoring: new MonitoringApi({ db, installations }), incidentEngine: incidents,
+const app = createSidewispHttpServer({
+  db,
+  installations,
+  monitoring: new MonitoringApi({
+    db,
+    installations,
+    installationMutationGrantIssuer: installationMutationGrants.issuer,
+  }),
+  incidentEngine: incidents,
   authenticateIngest: ({ headers, body }) => verifySignedRequest({ db, installationService: installations, headers, body }),
   authorizeUser: async () => operator });
 try {
