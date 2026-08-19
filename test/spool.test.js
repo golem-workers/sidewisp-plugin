@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { openSpool, SpoolError } from "../src/delivery/spool.js";
 
 const event = (id) => ({ eventId: id, schema: "sidewisp.telemetry.v1", type: "tool.failed" });
@@ -93,4 +94,59 @@ test("corrupt database is quarantined and recovered", async (t) => {
   assert.equal(spool.recoveredFromCorruption, true);
   assert.ok((await fs.readdir(root)).includes("spool.sqlite.corrupt-123"));
   await spool.close();
+});
+
+test("startup migrates and physically compacts a legacy ACK-filled spool", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sidewisp-spool-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "spool.sqlite");
+  const legacy = new DatabaseSync(file);
+  legacy.exec(`
+    PRAGMA auto_vacuum=NONE;
+    CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO metadata(key,value) VALUES('schema_version','1');
+    CREATE TABLE events (event_id TEXT PRIMARY KEY, payload TEXT NOT NULL, source TEXT NOT NULL, cursor TEXT NOT NULL, created_at INTEGER NOT NULL, acked_at INTEGER);
+    CREATE TABLE cursors (source TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+    CREATE TABLE dead_letters (event_id TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at INTEGER NOT NULL);
+    BEGIN;
+  `);
+  const insert = legacy.prepare("INSERT INTO events VALUES(?,?,?,?,?,?)");
+  for (let index = 0; index < 2_000; index += 1) {
+    insert.run(`acked-${index}`, JSON.stringify({ eventId: `acked-${index}`, data: "x".repeat(512) }), "legacy", "1", 1, 2);
+  }
+  legacy.exec("COMMIT");
+  legacy.close();
+  const before = (await fs.stat(file)).size;
+
+  const spool = await openSpool({ file, now: () => 10 });
+  assert.deepEqual(spool.pending(), []);
+  await spool.close();
+
+  const after = (await fs.stat(file)).size;
+  const migrated = new DatabaseSync(file, { readOnly: true });
+  const autoVacuum = migrated.prepare("PRAGMA auto_vacuum").get().auto_vacuum;
+  const remaining = migrated.prepare("SELECT count(*) AS count FROM events").get().count;
+  migrated.close();
+  assert.equal(autoVacuum, 2);
+  assert.equal(remaining, 0);
+  assert.ok(after < before / 2, `expected physical compaction (${before} -> ${after})`);
+});
+
+test("long acknowledged flow stays below quota and leaves no ACK tombstones", async (t) => {
+  const maxBytes = 256 * 1024;
+  const { file, spool } = await fixture(t, { maxBytes });
+  for (let batch = 0; batch < 100; batch += 1) {
+    const events = Array.from({ length: 25 }, (_, index) => ({
+      ...event(`flow-${batch}-${index}`),
+      data: "x".repeat(512),
+    }));
+    spool.enqueueSourceBatch("long-flow", String(batch), events);
+    spool.acknowledge(events.map(({ eventId }) => eventId));
+    assert.equal(spool.pending(1).length, 0);
+    assert.ok(spool.health().bytes < maxBytes);
+  }
+  await spool.close();
+  const db = new DatabaseSync(file, { readOnly: true });
+  assert.equal(db.prepare("SELECT count(*) AS count FROM events").get().count, 0);
+  db.close();
 });
