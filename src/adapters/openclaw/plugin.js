@@ -9,7 +9,7 @@ import { normalizeRuntimeEvent } from "../../core/normalize.js";
 import { sanitizeTelemetryEvent } from "../../core/sanitize.js";
 import { createAdapterRegistry } from "../../core/runtime-adapter.js";
 import { createSafeSupportBundle } from "../../core/support.js";
-import { openSpool } from "../../delivery/spool.js";
+import { openSpool, SpoolError } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
 import { createRuntimeDiagnosticsDelivery } from "../../delivery/runtime-diagnostics.js";
 import { createOpenClawAdapter } from "./index.js";
@@ -17,7 +17,7 @@ import { openClawAgentEventInput, registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.16";
+const VERSION = "0.2.17";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -45,7 +45,9 @@ export default definePluginEntry({
         process: healthy,
         gateway: healthy,
         config: async () => auth.canSend() ? { status: "healthy" } : { status: "degraded", reason: "awaiting-setup" },
-        collector: async () => spool ? { status: "healthy" } : { status: "degraded", reason: "starting" },
+        collector: async () => spool
+          ? { status: "healthy" }
+          : { status: "degraded", reason: spoolFailure?.code ?? "starting" },
         queue: healthy,
         spool: async () => {
           const status = spool?.health().status;
@@ -60,13 +62,35 @@ export default definePluginEntry({
     let runtimeDiagnostics = null;
     let uploadTimer = null;
     let healthTimer = null;
+    let spoolFailure = null;
+    let spoolFailureCount = 0;
     const preStartEvents = [];
+    const recordSpoolFailure = (error) => {
+      spoolFailureCount += 1;
+      spoolFailure = { code: error.code, at: new Date().toISOString() };
+      if (spoolFailureCount === 1 || (spoolFailureCount & (spoolFailureCount - 1)) === 0) {
+        api.logger.warn(`Sidewisp spool failure isolated from gateway (${error.code}; count=${spoolFailureCount})`);
+      }
+    };
+    const runDetached = (label, operation) => {
+      void Promise.resolve().then(operation).catch((error) => {
+        if (error instanceof SpoolError) recordSpoolFailure(error);
+        else api.logger.warn(`Sidewisp ${label} failed; gateway continues`);
+      });
+    };
     const persistEvent = async (event) => {
       if (!spool) {
         if (preStartEvents.length < 1000) preStartEvents.push(event);
-        return;
+        return false;
       }
-      spool.enqueueSourceBatch("openclaw-hooks", String(event.sequence), [event]);
+      try {
+        spool.enqueueSourceBatch("openclaw-hooks", String(event.sequence), [event]);
+        return true;
+      } catch (error) {
+        if (!(error instanceof SpoolError)) throw error;
+        recordSpoolFailure(error);
+        return false;
+      }
     };
     const makeEnvelope = (input, sourceKind = "hook", fallback = "") => {
       const now = new Date().toISOString();
@@ -127,58 +151,85 @@ export default definePluginEntry({
       id: "sidewisp-collector",
       async start(ctx) {
         if (!config.enabled) return;
-        await auth.load();
-        if (setupToken && !auth.canSend()) {
-          try { await auth.enroll(setupToken); }
-          catch { ctx.logger.warn("Sidewisp enrollment failed; will retry on restart"); }
-        } else if (setupToken && auth.canSend()) {
-          try { await auth.clearStoredSetupToken(); }
-          catch { ctx.logger.warn("Sidewisp setup-token cleanup pending; will retry on restart"); }
+        try {
+          await auth.load();
+          if (setupToken && !auth.canSend()) {
+            try { await auth.enroll(setupToken); }
+            catch { ctx.logger.warn("Sidewisp enrollment failed; will retry on restart"); }
+          } else if (setupToken && auth.canSend()) {
+            try { await auth.clearStoredSetupToken(); }
+            catch { ctx.logger.warn("Sidewisp setup-token cleanup pending; will retry on restart"); }
+          }
+          spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
+          if (preStartEvents.length > 0) {
+            const installationId = auth.status().installationId;
+            const ready = preStartEvents.splice(0).map((event) => installationId ? { ...event, installationId } : event);
+            spool.enqueueSourceBatch("openclaw-hooks", String(ready.at(-1).sequence), ready);
+          }
+          const discovery = await discoverOpenClawSources(stateDir, api.runtime.version);
+          for (const source of discovery.sources) {
+            const stored = spool.cursor(source.file);
+            let cursor = null;
+            try { cursor = stored ? JSON.parse(stored) : null; } catch { cursor = null; }
+            const recovered = await recoverJsonl(source.file, cursor);
+            const events = recovered.facts.map((fact, index) => normalizeRuntimeEvent("openclaw", fact, makeEnvelope(fact, "log", `${source.ino}|${recovered.cursor.offset}|${index}`)).event).filter(Boolean);
+            if (events.length > 0) spool.enqueueSourceBatch(source.file, JSON.stringify(recovered.cursor), events);
+            else spool.advanceCursor(source.file, JSON.stringify(recovered.cursor));
+          }
+          uploader = createUploader({
+            spool, endpoint: config.endpoint,
+            credentialProvider: { current: async () => auth.credential() },
+            onUpdate: (directive) => updates.schedule(directive),
+          });
+          runtimeDiagnostics = createRuntimeDiagnosticsDelivery({
+            adapter, spool, endpoint: config.endpoint,
+            credentialProvider: { current: async () => auth.credential() },
+            intervalMs: config.diagnosticsIntervalMs,
+            maxRefreshMs: config.diagnosticsMaxRefreshMs,
+          });
+          runtimeDiagnostics.start();
+          uploadTimer = setInterval(() => runDetached("upload", () => uploader.drain({ maxAttempts: 1 })), 5_000);
+          uploadTimer.unref?.();
+          await collector.start();
+          await emitHeartbeat();
+          healthTimer = setInterval(() => runDetached("heartbeat", emitHeartbeat), 30_000);
+          healthTimer.unref?.();
+          ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
+        } catch (error) {
+          if (!(error instanceof SpoolError)) throw error;
+          recordSpoolFailure(error);
+          if (healthTimer) clearInterval(healthTimer);
+          healthTimer = null;
+          if (uploadTimer) clearInterval(uploadTimer);
+          uploadTimer = null;
+          if (runtimeDiagnostics) await runtimeDiagnostics.stop().catch(() => {});
+          runtimeDiagnostics = null;
+          if (spool) await spool.close().catch(() => {});
+          spool = null;
+          uploader = null;
+          ctx.logger.error(`Sidewisp collector disabled after spool failure (${error.code}); gateway continues`);
         }
-        spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
-        if (preStartEvents.length > 0) {
-          const installationId = auth.status().installationId;
-          const ready = preStartEvents.splice(0).map((event) => installationId ? { ...event, installationId } : event);
-          spool.enqueueSourceBatch("openclaw-hooks", String(ready.at(-1).sequence), ready);
-        }
-        const discovery = await discoverOpenClawSources(stateDir, api.runtime.version);
-        for (const source of discovery.sources) {
-          const stored = spool.cursor(source.file);
-          let cursor = null;
-          try { cursor = stored ? JSON.parse(stored) : null; } catch { cursor = null; }
-          const recovered = await recoverJsonl(source.file, cursor);
-          const events = recovered.facts.map((fact, index) => normalizeRuntimeEvent("openclaw", fact, makeEnvelope(fact, "log", `${source.ino}|${recovered.cursor.offset}|${index}`)).event).filter(Boolean);
-          if (events.length > 0) spool.enqueueSourceBatch(source.file, JSON.stringify(recovered.cursor), events);
-          else spool.advanceCursor(source.file, JSON.stringify(recovered.cursor));
-        }
-        uploader = createUploader({
-          spool, endpoint: config.endpoint,
-          credentialProvider: { current: async () => auth.credential() },
-          onUpdate: (directive) => updates.schedule(directive),
-        });
-        runtimeDiagnostics = createRuntimeDiagnosticsDelivery({
-          adapter, spool, endpoint: config.endpoint,
-          credentialProvider: { current: async () => auth.credential() },
-          intervalMs: config.diagnosticsIntervalMs,
-          maxRefreshMs: config.diagnosticsMaxRefreshMs,
-        });
-        runtimeDiagnostics.start();
-        uploadTimer = setInterval(() => { void uploader.drain({ maxAttempts: 1 }); }, 5_000);
-        uploadTimer.unref?.();
-        await collector.start();
-        await emitHeartbeat();
-        healthTimer = setInterval(() => { void emitHeartbeat(); }, 30_000);
-        healthTimer.unref?.();
-        ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
       },
       async stop() {
         if (healthTimer) clearInterval(healthTimer);
         healthTimer = null;
         if (uploadTimer) clearInterval(uploadTimer);
         uploadTimer = null;
-        if (uploader) await uploader.drain({ maxAttempts: 1 });
+        if (uploader) {
+          try { await uploader.drain({ maxAttempts: 1 }); }
+          catch (error) {
+            if (error instanceof SpoolError) recordSpoolFailure(error);
+            else api.logger.warn("Sidewisp final upload failed during shutdown");
+          }
+        }
         uploader = null;
-        if (runtimeDiagnostics) await runtimeDiagnostics.stop();
+        if (runtimeDiagnostics) {
+          try { await runtimeDiagnostics.stop(); }
+          catch (error) {
+            if (error instanceof SpoolError) recordSpoolFailure(error);
+            else api.logger.warn("Sidewisp diagnostics stop failed during shutdown");
+          }
+        }
         runtimeDiagnostics = null;
         if (spool) await spool.close();
         spool = null;
@@ -201,6 +252,7 @@ export default definePluginEntry({
         update: updates.status(),
         hooks: hookTelemetry.status(),
         agentEvents: { ...agentEventTelemetry },
+        failures: { spool: spoolFailure, spoolCount: spoolFailureCount },
         ...(await collector.status()),
       });
     }, { scope: "operator.read" });

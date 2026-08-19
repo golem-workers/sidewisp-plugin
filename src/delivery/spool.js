@@ -84,9 +84,10 @@ function initialize(file) {
   return db;
 }
 
-export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs = 7 * 86400_000, now = Date.now }) {
+export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs = 0, now = Date.now }) {
   if (!path.isAbsolute(file)) throw new TypeError("spool file must be absolute");
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 4096) throw new TypeError("maxBytes is invalid");
+  if (!Number.isSafeInteger(retentionMs) || retentionMs < 0) throw new TypeError("retentionMs is invalid");
   await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   await fsp.chmod(path.dirname(file), 0o700);
   const lockFile = `${file}.lock`;
@@ -111,7 +112,37 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
       try { return total + fs.statSync(current).size; } catch { return total; }
     }, 0);
   }
+  const pragmaNumber = (name) => Number(Object.values(db.prepare(`PRAGMA ${name}`).get())[0]);
+  const deleteAcknowledged = () => db.prepare(
+    "DELETE FROM events WHERE acked_at IS NOT NULL AND acked_at <= ?",
+  ).run(now() - retentionMs).changes;
+  const checkpoint = () => db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+  const compact = () => {
+    checkpoint();
+    db.exec("PRAGMA incremental_vacuum");
+    checkpoint();
+  };
+  const configureCompaction = () => {
+    if (pragmaNumber("auto_vacuum") === 2) return false;
+    checkpoint();
+    db.exec("PRAGMA auto_vacuum=INCREMENTAL; VACUUM");
+    checkpoint();
+    return true;
+  };
+  try {
+    const startupPruned = deleteAcknowledged();
+    const compactionConfigured = configureCompaction();
+    if (startupPruned > 0 && !compactionConfigured) compact();
+  } catch (error) {
+    db.close();
+    await releaseWriterLock(lockFile, lock);
+    throw error;
+  }
+
   function assertQuota(extra = 0) {
+    if (diskUsage() + extra <= maxBytes) return;
+    const pruned = deleteAcknowledged();
+    if (pruned > 0 || pragmaNumber("freelist_count") > 0) compact();
     if (diskUsage() + extra > maxBytes) throw new SpoolError("quota-exceeded", "spool disk quota exceeded");
   }
 
@@ -141,9 +172,17 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
     },
     acknowledge(eventIds) {
       const update = db.prepare("UPDATE events SET acked_at=? WHERE event_id=? AND acked_at IS NULL");
+      let acknowledged = 0;
+      let pruned = 0;
       db.exec("BEGIN IMMEDIATE");
-      try { for (const id of eventIds) update.run(now(), id); db.exec("COMMIT"); }
+      try {
+        for (const id of eventIds) acknowledged += update.run(now(), id).changes;
+        pruned = deleteAcknowledged();
+        db.exec("COMMIT");
+      }
       catch (error) { db.exec("ROLLBACK"); throw error; }
+      if (pruned > 0) compact();
+      return acknowledged;
     },
     deadLetter(eventId, reason) {
       db.prepare("INSERT OR REPLACE INTO dead_letters(event_id,reason,created_at) VALUES(?,?,?)").run(eventId, reason, now());
@@ -167,7 +206,11 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
       return db.prepare(`DELETE FROM runtime_diagnostic_pending
         WHERE installation_id=? AND snapshot_id=?`).run(installationId, snapshotId).changes === 1;
     },
-    prune() { return db.prepare("DELETE FROM events WHERE acked_at IS NOT NULL AND acked_at < ?").run(now() - retentionMs).changes; },
+    prune() {
+      const pruned = deleteAcknowledged();
+      if (pruned > 0 || pragmaNumber("freelist_count") > 0) compact();
+      return pruned;
+    },
     health() { return { status: diskUsage() >= maxBytes ? "unhealthy" : diskUsage() >= maxBytes * 0.8 ? "degraded" : "healthy", bytes: diskUsage(), maxBytes, recoveredFromCorruption }; },
     async close() { db.close(); await releaseWriterLock(lockFile, lock); },
   });
