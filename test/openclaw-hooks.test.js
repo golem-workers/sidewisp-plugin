@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { OPENCLAW_HOOK_SOURCES, openClawAgentEventInput, registerOpenClawHooks } from "../src/adapters/openclaw/hooks.js";
 
 const envelope = () => ({
@@ -108,6 +109,43 @@ test("maps sanitized host agent streams used by Codex and other harnesses", () =
     },
   );
   assert.equal(openClawAgentEventInput({ runId: "run-1", stream: "assistant", data: { text: "private" } }), null);
+});
+
+test("official agent event API covers cancellation and user approval without content", () => {
+  const cancelled = openClawAgentEventInput({
+    runId: "run-cancelled",
+    sessionId: "session-1",
+    stream: "lifecycle",
+    data: { phase: "end", aborted: true, stopReason: "cancelled", error: "private" },
+  });
+  assert.equal(cancelled.kind, "turn_end");
+  assert.equal(cancelled.outcome, "cancelled");
+
+  const waiting = openClawAgentEventInput({
+    runId: "run-waiting",
+    stream: "approval",
+    data: { phase: "requested", status: "pending", kind: "exec", command: "private" },
+  });
+  const resumed = openClawAgentEventInput({
+    runId: "run-waiting",
+    stream: "approval",
+    data: { phase: "resolved", status: "approved", message: "private" },
+  });
+  assert.deepEqual(waiting, {
+    kind: "tool_start",
+    operation: "user_approval",
+    correlation: { sessionId: undefined, turnId: "run-waiting", toolCallId: undefined },
+  });
+  assert.equal(resumed.kind, "tool_end");
+  assert.equal(resumed.outcome, "success");
+  assert.equal(JSON.stringify([cancelled, waiting, resumed]).includes("private"), false);
+});
+
+test("plugin subscribes through the official host-owned agent event API", () => {
+  const source = readFileSync(new URL("../src/adapters/openclaw/plugin.js", import.meta.url), "utf8");
+  assert.match(source, /api\.agent\.events\.registerAgentEventSubscription/);
+  assert.match(source, /streams:\s*\["lifecycle", "tool", "approval"\]/);
+  assert.doesNotMatch(source, /onAgentEvent\s*\(/);
 });
 
 test("classifies structured failures without copying private error content", () => {

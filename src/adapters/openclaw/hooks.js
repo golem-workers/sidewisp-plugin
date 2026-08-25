@@ -72,10 +72,29 @@ export function openClawAgentEventInput(event = {}) {
     if (data.phase === "start") return { kind: "turn_start", correlation };
     if (["end", "error"].includes(data.phase)) {
       const timedOut = data.timedOut === true || data.outcome === "timeout";
+      const cancelled = data.aborted === true
+        || ["cancelled", "canceled", "aborted", "killed"].includes(
+          typeof data.stopReason === "string" ? data.stopReason.toLowerCase() : "",
+        );
       return {
         kind: "turn_end",
-        outcome: timedOut ? "timeout" : data.phase === "error" || data.success === false ? "failure" : "success",
+        outcome: cancelled ? "cancelled" : timedOut ? "timeout" : data.phase === "error" || data.success === false ? "failure" : "success",
         durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
+        correlation,
+      };
+    }
+  }
+  if (event.stream === "approval") {
+    if (data.phase === "requested" && data.status === "pending") {
+      return { kind: "tool_start", operation: "user_approval", correlation };
+    }
+    if (data.phase === "resolved") {
+      return {
+        kind: "tool_end",
+        operation: "user_approval",
+        outcome: ["denied", "failed", "unavailable"].includes(data.status)
+          ? "cancelled"
+          : "success",
         correlation,
       };
     }

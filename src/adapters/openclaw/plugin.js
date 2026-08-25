@@ -17,7 +17,7 @@ import { openClawAgentEventInput, registerOpenClawHooks } from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.17";
+const VERSION = "0.2.18";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -124,7 +124,7 @@ export default definePluginEntry({
     api.agent.events.registerAgentEventSubscription({
       id: "sidewisp-runtime-events",
       description: "Content-free Sidewisp lifecycle and tool failure telemetry",
-      streams: ["lifecycle", "tool"],
+      streams: ["lifecycle", "tool", "approval"],
       async handle(event) {
         agentEventTelemetry.observed += 1;
         agentEventTelemetry.lastObservedAt = new Date().toISOString();
