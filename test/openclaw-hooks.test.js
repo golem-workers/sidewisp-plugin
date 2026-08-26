@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { OPENCLAW_HOOK_SOURCES, openClawAgentEventInput, registerOpenClawHooks } from "../src/adapters/openclaw/hooks.js";
+import { stableOpenClawEventId } from "../src/adapters/openclaw/recovery.js";
 
 const envelope = () => ({
   eventId: `sw_evt_${"x".repeat(20)}`, installationId: "sw_ins_fixture001", sequence: 1,
@@ -139,6 +140,44 @@ test("official agent event API covers cancellation and user approval without con
   assert.equal(resumed.kind, "tool_end");
   assert.equal(resumed.outcome, "success");
   assert.equal(JSON.stringify([cancelled, waiting, resumed]).includes("private"), false);
+});
+
+test("official approval identity distinguishes approvals and deduplicates repeats", () => {
+  const first = openClawAgentEventInput({
+    runId: "run-waiting",
+    stream: "approval",
+    data: {
+      phase: "requested",
+      status: "pending",
+      approvalId: "approval-one",
+      prompt: "private one",
+    },
+  });
+  const second = openClawAgentEventInput({
+    runId: "run-waiting",
+    stream: "approval",
+    data: {
+      phase: "requested",
+      status: "pending",
+      approvalSlug: "approval-two",
+      prompt: "private two",
+    },
+  });
+  const repeated = openClawAgentEventInput({
+    runId: "run-waiting",
+    stream: "approval",
+    data: {
+      phase: "requested",
+      status: "pending",
+      approvalId: "approval-one",
+      prompt: "different private content",
+    },
+  });
+  assert.equal(first.correlation.toolCallId, "approval-one");
+  assert.equal(second.correlation.toolCallId, "approval-two");
+  assert.notEqual(stableOpenClawEventId(first), stableOpenClawEventId(second));
+  assert.equal(stableOpenClawEventId(first), stableOpenClawEventId(repeated));
+  assert.equal(JSON.stringify([first, second, repeated]).includes("private"), false);
 });
 
 test("plugin subscribes through the official host-owned agent event API", () => {

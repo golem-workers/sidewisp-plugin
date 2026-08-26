@@ -66,7 +66,10 @@ export function openClawAgentEventInput(event = {}) {
   const correlation = {
     sessionId: event.sessionId,
     turnId: event.runId,
-    toolCallId: data.toolCallId ?? data.itemId,
+    toolCallId: data.toolCallId
+      ?? data.itemId
+      ?? data.approvalId
+      ?? data.approvalSlug,
   };
   if (event.stream === "lifecycle") {
     if (data.phase === "start") return { kind: "turn_start", correlation };
