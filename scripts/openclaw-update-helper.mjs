@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { isNewerVersion, validUpdateDirective } from "../src/update/directive.js";
 
 const directive = JSON.parse(process.argv[2] ?? "null");
-if (!directive?.stateFile || !directive?.targetVersion || !/^git:github\.com\/golem-workers\/sidewisp-plugin@v?\d+\.\d+\.\d+$/.test(directive.targetSpec)) process.exit(2);
+if (!directive?.stateFile || !validUpdateDirective(directive)) process.exit(2);
 const stateFile = path.resolve(directive.stateFile);
 mkdirSync(path.dirname(stateFile), { recursive: true, mode: 0o700 });
 
@@ -15,6 +16,17 @@ const writeState = (state) => {
 };
 const run = (args) => execFileSync("openclaw", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000 });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const inspectInstalled = () => {
+  const inspected = JSON.parse(run(["plugins", "inspect", "sidewisp", "--runtime", "--json"]));
+  const pluginPath = inspected.path ?? inspected.plugin?.path ?? inspected.runtime?.path;
+  if (typeof pluginPath !== "string" || !existsSync(pluginPath)) throw new Error("installed plugin path unavailable");
+  const pluginRoot = [pluginPath, path.dirname(pluginPath)]
+    .find((candidate) => existsSync(path.join(candidate, "package.json")));
+  if (!pluginRoot) throw new Error("installed plugin package unavailable");
+  const version = JSON.parse(readFileSync(path.join(pluginRoot, "package.json"), "utf8")).version;
+  if (typeof version !== "string") throw new Error("installed plugin version unavailable");
+  return { pluginRoot, version };
+};
 const waitForGateway = async () => {
   for (let attempt = 0; attempt < 24; attempt += 1) {
     try {
@@ -32,14 +44,16 @@ await sleep(directive.restartDelaySeconds * 1000);
 let backup = null;
 try {
   writeState({ status: "updating" });
-  const inspected = JSON.parse(run(["plugins", "inspect", "sidewisp", "--runtime", "--json"]));
-  const pluginPath = inspected.path ?? inspected.plugin?.path ?? inspected.runtime?.path;
-  if (typeof pluginPath === "string" && existsSync(pluginPath)) {
-    backup = path.join(path.dirname(stateFile), `rollback-${Date.now()}`);
-    cpSync(pluginPath, backup, { recursive: true, errorOnExist: true });
+  const installed = inspectInstalled();
+  if (!isNewerVersion(directive.targetVersion, installed.version)) {
+    writeState({ status: "skipped", reasonCode: "TARGET_NOT_NEWER" });
+    process.exit(0);
   }
+  backup = path.join(path.dirname(stateFile), `rollback-${Date.now()}`);
+  cpSync(installed.pluginRoot, backup, { recursive: true, errorOnExist: true });
   run(["plugins", "install", directive.targetSpec, "--force"]);
-  run(["plugins", "inspect", "sidewisp", "--runtime", "--json"]);
+  const updated = inspectInstalled();
+  if (updated.version !== directive.targetVersion) throw new Error("installed plugin version mismatch");
   writeState({ status: "restarting" });
   run(["gateway", "restart"]);
   await waitForGateway();
@@ -49,12 +63,9 @@ try {
   writeState({ status: "rolling_back", errorCode: "UPDATE_OR_RESTART_FAILED" });
   try {
     if (backup) {
-      const inspected = JSON.parse(run(["plugins", "inspect", "sidewisp", "--runtime", "--json"]));
-      const pluginPath = inspected.path ?? inspected.plugin?.path ?? inspected.runtime?.path;
-      if (typeof pluginPath === "string") {
-        rmSync(pluginPath, { recursive: true, force: true });
-        cpSync(backup, pluginPath, { recursive: true });
-      }
+      const installed = inspectInstalled();
+      rmSync(installed.pluginRoot, { recursive: true, force: true });
+      cpSync(backup, installed.pluginRoot, { recursive: true });
     }
     run(["gateway", "restart"]);
     writeState({ status: "rolled_back", errorCode: "UPDATE_OR_RESTART_FAILED" });
