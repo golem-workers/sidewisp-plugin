@@ -13,7 +13,11 @@ import { openSpool, SpoolError } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
 import { createRuntimeDiagnosticsDelivery } from "../../delivery/runtime-diagnostics.js";
 import { createOpenClawAdapter } from "./index.js";
-import { openClawAgentEventInput, registerOpenClawHooks } from "./hooks.js";
+import {
+  createOpenClawUserTaskLifecycle,
+  openClawAgentEventInput,
+  registerOpenClawHooks,
+} from "./hooks.js";
 import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
@@ -65,6 +69,21 @@ export default definePluginEntry({
     let spoolFailure = null;
     let spoolFailureCount = 0;
     const preStartEvents = [];
+    const agentEventTelemetry = { observed: 0, emitted: 0, ignored: 0, failed: 0, lastObservedAt: null };
+    let persistDeferredEvent = async () => false;
+    const userTaskLifecycle = createOpenClawUserTaskLifecycle({
+      async onDeferred(event) {
+        try {
+          if (await persistDeferredEvent(event)) agentEventTelemetry.emitted += 1;
+          else agentEventTelemetry.failed += 1;
+        } catch {
+          agentEventTelemetry.failed += 1;
+        }
+      },
+      onSuppressed() {
+        agentEventTelemetry.ignored += 1;
+      },
+    });
     const recordSpoolFailure = (error) => {
       spoolFailureCount += 1;
       spoolFailure = { code: error.code, at: new Date().toISOString() };
@@ -78,13 +97,14 @@ export default definePluginEntry({
         else api.logger.warn(`Sidewisp ${label} failed; gateway continues`);
       });
     };
-    const persistEvent = async (event) => {
+    const enqueueAcceptedEvent = async (acceptedEvent) => {
       if (!spool) {
-        if (preStartEvents.length < 1000) preStartEvents.push(event);
-        return false;
+        if (preStartEvents.length >= 1000) return false;
+        preStartEvents.push(acceptedEvent);
+        return true;
       }
       try {
-        spool.enqueueSourceBatch("openclaw-hooks", String(event.sequence), [event]);
+        spool.enqueueSourceBatch("openclaw-hooks", String(acceptedEvent.sequence), [acceptedEvent]);
         return true;
       } catch (error) {
         if (!(error instanceof SpoolError)) throw error;
@@ -92,6 +112,16 @@ export default definePluginEntry({
         return false;
       }
     };
+    persistDeferredEvent = enqueueAcceptedEvent;
+    const persistEventDetailed = async (event) => {
+      const result = userTaskLifecycle.processDetailed(event);
+      if (result.disposition !== "accepted") return result;
+      return Object.freeze({
+        disposition: await enqueueAcceptedEvent(result.event) ? "emitted" : "failed",
+        event: result.event,
+      });
+    };
+    const persistEvent = async (event) => (await persistEventDetailed(event)).disposition === "emitted";
     const makeEnvelope = (input, sourceKind = "hook", fallback = "") => {
       const now = new Date().toISOString();
       sequence += 1;
@@ -120,7 +150,6 @@ export default definePluginEntry({
       envelopeFactory: (_input, _event, ctx) => ({ ...makeEnvelope(_input), correlation: { sessionId: ctx?.sessionId, turnId: ctx?.runId }, details: {} }),
       onDiagnostic: () => {},
     });
-    const agentEventTelemetry = { observed: 0, emitted: 0, ignored: 0, failed: 0, lastObservedAt: null };
     api.agent.events.registerAgentEventSubscription({
       id: "sidewisp-runtime-events",
       description: "Content-free Sidewisp lifecycle and tool failure telemetry",
@@ -139,8 +168,10 @@ export default definePluginEntry({
             agentEventTelemetry.ignored += 1;
             return;
           }
-          await persistEvent(result.event);
-          agentEventTelemetry.emitted += 1;
+          const persisted = await persistEventDetailed(result.event);
+          if (persisted.disposition === "emitted") agentEventTelemetry.emitted += 1;
+          else if (persisted.disposition === "failed") agentEventTelemetry.failed += 1;
+          else if (persisted.disposition === "coalesced") agentEventTelemetry.ignored += 1;
         } catch {
           agentEventTelemetry.failed += 1;
         }
@@ -215,6 +246,7 @@ export default definePluginEntry({
         healthTimer = null;
         if (uploadTimer) clearInterval(uploadTimer);
         uploadTimer = null;
+        await userTaskLifecycle.flushPending();
         if (uploader) {
           try { await uploader.drain({ maxAttempts: 1 }); }
           catch (error) {
@@ -252,6 +284,7 @@ export default definePluginEntry({
         update: updates.status(),
         hooks: hookTelemetry.status(),
         agentEvents: { ...agentEventTelemetry },
+        userTasks: userTaskLifecycle.status(),
         failures: { spool: spoolFailure, spoolCount: spoolFailureCount },
         ...(await collector.status()),
       });

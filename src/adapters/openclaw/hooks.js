@@ -1,10 +1,6 @@
 import { localDiagnostic, normalizeRuntimeEvent } from "../../core/normalize.js";
 
 export const OPENCLAW_HOOK_SOURCES = Object.freeze({
-  before_agent_run: "src/plugins/hook-types.ts:1120",
-  agent_end: "src/plugins/hook-types.ts:389",
-  before_tool_call: "src/plugins/hook-types.ts:650",
-  after_tool_call: "src/plugins/hook-types.ts:682",
   message_received: "src/plugins/hook-message.types.ts:70",
   message_sent: "src/plugins/hook-message.types.ts:111",
   gateway_start: "src/plugins/hook-types.ts:898",
@@ -15,6 +11,175 @@ const FAILURE_CODES = new Set([
   "AUTH_FAILED", "KILLED", "NONZERO_EXIT", "NOT_FOUND", "PERMISSION_DENIED",
   "RATE_LIMITED", "TIMEOUT", "UNKNOWN", "VALIDATION_FAILED",
 ]);
+
+const TURN_TERMINALS = new Set([
+  "turn.completed", "turn.failed", "turn.timeout", "turn.cancelled",
+]);
+
+export function createOpenClawUserTaskLifecycle({
+  cancel = clearTimeout,
+  now = Date.now,
+  onDeferred = () => {},
+  onSuppressed = () => {},
+  schedule = setTimeout,
+  terminalGraceMs = 5_000,
+  maxRuns = 1000,
+  ttlMs = 60 * 60_000,
+} = {}) {
+  const runs = new Map();
+  const tasksBySession = new Map();
+  const taskQueue = (sessionId) => tasksBySession.get(sessionId) ?? [];
+  const dequeue = (key, state) => {
+    const remaining = taskQueue(state.sessionId).filter((candidate) => candidate !== key);
+    if (remaining.length > 0) tasksBySession.set(state.sessionId, remaining);
+    else tasksBySession.delete(state.sessionId);
+  };
+  const clearPending = (state, { suppressed = false } = {}) => {
+    const event = state.pendingEvent;
+    if (state.pendingTimer) cancel(state.pendingTimer);
+    state.pendingEvent = null;
+    state.pendingTimer = null;
+    if (suppressed && event) onSuppressed(event);
+  };
+  const remove = (key) => {
+    const state = runs.get(key);
+    if (state?.sessionId) {
+      clearPending(state, { suppressed: true });
+      dequeue(key, state);
+    }
+    runs.delete(key);
+  };
+  const prune = (nowMs) => {
+    for (const [key, state] of runs) {
+      if (nowMs - state.updatedAt >= ttlMs) remove(key);
+    }
+  };
+  const track = (key, state) => {
+    while (runs.size >= maxRuns) remove(runs.keys().next().value);
+    runs.set(key, state);
+  };
+  const taskKey = (sessionId, messageId) => (
+    typeof sessionId === "string" && sessionId
+    && typeof messageId === "string" && messageId
+      ? `message:${sessionId}:${messageId}`
+      : null
+  );
+  const runKey = (turnId) => typeof turnId === "string" && turnId ? `run:${turnId}` : null;
+  const closeTask = (key, state, event, nowMs) => {
+    clearPending(state, { suppressed: state.pendingEvent !== event });
+    state.terminal = true;
+    state.updatedAt = nowMs;
+    dequeue(key, state);
+    return event;
+  };
+  const releasePending = (key, state, nowMs) => {
+    const event = state.pendingEvent;
+    if (!event || state.terminal) return Promise.resolve();
+    const released = closeTask(key, state, event, nowMs);
+    return Promise.resolve(onDeferred(released));
+  };
+  const deferTerminal = (key, state, event, nowMs) => {
+    clearPending(state, { suppressed: true });
+    state.pendingEvent = event;
+    state.updatedAt = nowMs;
+    state.pendingTimer = schedule(() => {
+      if (runs.get(key) !== state || state.terminal || state.pendingEvent !== event) return;
+      void releasePending(key, state, now()).catch(() => {});
+    }, terminalGraceMs);
+    state.pendingTimer?.unref?.();
+  };
+  const accepted = (event) => Object.freeze({ disposition: "accepted", event });
+  const buffered = () => Object.freeze({ disposition: "buffered", event: null });
+  const coalesced = () => Object.freeze({ disposition: "coalesced", event: null });
+  const processDetailed = (event) => {
+    const nowMs = now();
+    prune(nowMs);
+    const correlation = event?.correlation ?? {};
+    const messageKey = taskKey(correlation.sessionId, correlation.messageId);
+    if (event?.type === "message.received") {
+      if (!messageKey || runs.has(messageKey)) return messageKey ? coalesced() : accepted(event);
+      track(messageKey, {
+        createdAt: nowMs,
+        messageId: correlation.messageId,
+        sessionId: correlation.sessionId,
+        started: false,
+        terminal: false,
+        updatedAt: nowMs,
+        pendingEvent: null,
+        pendingTimer: null,
+      });
+      tasksBySession.set(correlation.sessionId, [...taskQueue(correlation.sessionId), messageKey]);
+      return accepted(event);
+    }
+    const started = event?.type === "turn.started";
+    const terminal = TURN_TERMINALS.has(event?.type);
+    const queue = taskQueue(correlation.sessionId);
+    let activeKey = queue.find((key) => !runs.get(key)?.terminal) ?? null;
+    let active = activeKey ? runs.get(activeKey) : null;
+    if (!started && !terminal) {
+      if (active) active.updatedAt = nowMs;
+      return accepted(event);
+    }
+    if (started) {
+      if (active?.pendingEvent && queue.some((key) => key !== activeKey && !runs.get(key)?.terminal)) {
+        void releasePending(activeKey, active, nowMs).catch(() => {});
+        activeKey = taskQueue(correlation.sessionId).find((key) => !runs.get(key)?.terminal) ?? null;
+        active = activeKey ? runs.get(activeKey) : null;
+      }
+      if (active) {
+        active.updatedAt = nowMs;
+        if (active.pendingEvent) {
+          clearPending(active, { suppressed: true });
+          return coalesced();
+        }
+        if (active.started || active.terminal) return coalesced();
+        active.started = true;
+        return accepted(event);
+      }
+      const autonomousKey = runKey(correlation.turnId);
+      if (!autonomousKey) return accepted(event);
+      if (runs.has(autonomousKey)) return coalesced();
+      track(autonomousKey, { createdAt: nowMs, started: true, terminal: false, updatedAt: nowMs });
+      return accepted(event);
+    }
+    if (active) {
+      active.updatedAt = nowMs;
+      const deliveredResponse = Boolean(messageKey);
+      if (event.type === "turn.completed" && !deliveredResponse) return coalesced();
+      if (deliveredResponse && !active.started) return coalesced();
+      if (active.terminal) return coalesced();
+      if (!deliveredResponse) {
+        deferTerminal(activeKey, active, event, nowMs);
+        return buffered();
+      }
+      return accepted(closeTask(activeKey, active, event, nowMs));
+    }
+    if (messageKey) return coalesced();
+    const autonomousKey = runKey(correlation.turnId);
+    if (!autonomousKey) return accepted(event);
+    const autonomous = runs.get(autonomousKey);
+    if (autonomous?.terminal) return coalesced();
+    if (autonomous) {
+      autonomous.terminal = true;
+      autonomous.updatedAt = nowMs;
+    } else {
+      track(autonomousKey, { createdAt: nowMs, started: false, terminal: true, updatedAt: nowMs });
+    }
+    return accepted(event);
+  };
+  return Object.freeze({
+    process: (event) => processDetailed(event).event,
+    processDetailed,
+    async flushPending() {
+      const pending = [...runs].filter(([, state]) => state.pendingEvent && !state.terminal);
+      await Promise.all(pending.map(([key, state]) => releasePending(key, state, now())));
+    },
+    status: () => Object.freeze({
+      pendingTerminals: [...runs.values()].filter((state) => state.pendingEvent && !state.terminal).length,
+      trackedRuns: runs.size,
+    }),
+  });
+}
 
 function safeInteger(...values) {
   return values.find((value) => Number.isSafeInteger(value));
@@ -126,10 +291,10 @@ export function openClawAgentEventInput(event = {}) {
 export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic = () => {}, maxPending = 1000 }) {
   let pending = 0;
   let emitted = 0;
+  let ignored = 0;
   let lastObservedAt = null;
   const observed = {};
   const diagnostics = {};
-  const operationByCallId = new Map();
   const diagnose = (diagnostic) => {
     diagnostics[diagnostic.code] = (diagnostics[diagnostic.code] ?? 0) + 1;
     onDiagnostic(diagnostic);
@@ -145,8 +310,9 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       try {
         const result = normalizeRuntimeEvent("openclaw", input, envelopeFactory(input, event, ctx));
         if (result.event) {
-          await emit(result.event);
-          emitted += 1;
+          const accepted = await emit(result.event);
+          if (accepted === false) ignored += 1;
+          else emitted += 1;
         } else if (result.diagnostic) diagnose(result.diagnostic);
       } catch { diagnose(localDiagnostic("hook-emit-failed", "openclaw")); }
       finally { pending -= 1; }
@@ -156,45 +322,9 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     sessionId: ctx.sessionId ?? event.sessionId, turnId: ctx.runId ?? event.runId,
     toolCallId: ctx.toolCallId ?? event.toolCallId, messageId: ctx.messageId ?? event.messageId,
   });
-  const callId = (event, ctx) => ctx.toolCallId ?? event.toolCallId ?? event.itemId;
   const hooks = {
-    before_agent_run: observe("before_agent_run", (event, ctx) => ({ kind: "turn_start", correlation: correlation(event, ctx) })),
-    agent_end: observe("agent_end", (event, ctx) => {
-      const exitCode = safeInteger(event.exitCode);
-      const cancelled = cancellation(event, exitCode);
-      const failed = event.success !== true && !cancelled;
-      return {
-        kind: "turn_end",
-        outcome: cancelled ? "cancelled" : failed ? "failure" : "success",
-        durationMs: event.durationMs,
-        exitCode,
-        httpStatus: safeInteger(event.httpStatus, event.statusCode),
-        code: failed ? classifyFailure(event, exitCode) : undefined,
-        recoverable: failed ? !["AUTH_FAILED", "PERMISSION_DENIED"].includes(classifyFailure(event, exitCode)) : undefined,
-        correlation: correlation(event, ctx),
-      };
-    }),
-    before_tool_call: observe("before_tool_call", (event, ctx) => {
-      const operation = safeOperation(event.toolName, event.name) ?? "unknown";
-      const id = callId(event, ctx);
-      if (id && operationByCallId.size < maxPending) operationByCallId.set(id, operation);
-      return { kind: "tool_start", operation, correlation: correlation(event, ctx) };
-    }),
-    after_tool_call: observe("after_tool_call", (event, ctx) => {
-      const id = callId(event, ctx);
-      const fallbackOperation = id ? operationByCallId.get(id) : undefined;
-      if (id) operationByCallId.delete(id);
-      const exitCode = safeInteger(event.exitCode, event.result?.exitCode);
-      const cancelled = cancellation(event, exitCode);
-      const failed = !cancelled && (event.isError === true || Boolean(event.error)
-        || (Number.isSafeInteger(exitCode) && exitCode !== 0));
-      return {
-        kind: "tool_end", outcome: cancelled ? "cancelled" : failed ? "failure" : "success", durationMs: event.durationMs,
-        ...toolDetails(event, failed, fallbackOperation), correlation: correlation(event, ctx),
-      };
-    }),
     message_received: observe("message_received", (event, ctx) => ({ kind: "message_received", correlation: correlation(event, ctx) })),
-    message_sent: observe("message_sent", (event, ctx) => ({ kind: "delivery_end", outcome: event.success ? "success" : "failure", correlation: correlation(event, ctx) })),
+    message_sent: observe("message_sent", (event, ctx) => ({ kind: "turn_end", outcome: event.success === false ? "failure" : "success", correlation: correlation(event, ctx) })),
     gateway_start: observe("gateway_start", () => ({ kind: "gateway_up", correlation: {} })),
     gateway_stop: observe("gateway_stop", () => ({ kind: "gateway_down", correlation: {} })),
   };
@@ -205,6 +335,6 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
   return Object.freeze({
     hookNames: Object.keys(hooks),
     pending: () => pending,
-    status: () => ({ observed: { ...observed }, emitted, pending, diagnostics: { ...diagnostics }, lastObservedAt }),
+    status: () => ({ observed: { ...observed }, emitted, ignored, pending, diagnostics: { ...diagnostics }, lastObservedAt }),
   });
 }
