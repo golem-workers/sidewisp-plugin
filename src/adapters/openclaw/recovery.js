@@ -7,6 +7,16 @@ const EVENT_MAP = Object.freeze({
   agent_start: "turn_start", agent_end: "turn_end", tool_start: "tool_start", tool_end: "tool_end",
   message_received: "message_received", message_sent: "delivery_end", gateway_start: "gateway_up", gateway_stop: "gateway_down",
 });
+const HOOK_RECOVERY_KINDS = new Set([
+  "message_received",
+  "delivery_end",
+  "gateway_up",
+  "gateway_down",
+]);
+
+export function isOpenClawHookRecoveryFact(fact) {
+  return Boolean(fact && HOOK_RECOVERY_KINDS.has(fact.kind));
+}
 
 export function stableOpenClawEventId(fact, fallback = "") {
   const correlation = fact.correlation ?? {};

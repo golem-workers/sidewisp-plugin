@@ -27,27 +27,28 @@ test("registers supported official hooks with bounded host timeouts and no tools
   assert.equal("registerProvider" in api, false);
   registered.get("message_received").handler(
     { messageId: "message-1", text: "private inbound" },
-    { sessionId: "session-1" },
+    { sessionKey: "agent:main:telegram:group:one" },
   );
   registered.get("message_sent").handler(
     { messageId: "message-1", text: "private outbound", success: true },
-    { sessionId: "session-1" },
+    { sessionKey: "agent:main:telegram:group:one" },
   );
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(events.map(({ type }) => type), ["message.received", "turn.completed"]);
+  assert.deepEqual(events.map(({ type }) => type), ["message.received", "message.delivered"]);
+  assert.ok(events.every(({ correlation }) => correlation.sessionId === "agent:main:telegram:group:one"));
   assert.equal(JSON.stringify(events).includes("private"), false);
   assert.deepEqual(telemetry.status().observed, { message_received: 1, message_sent: 1 });
   assert.equal(telemetry.status().emitted, 2);
 });
 
-test("an unsuccessful outgoing message closes the task as a sanitized failure", async () => {
+test("an unsuccessful outgoing message reports delivery failure without changing work", async () => {
   const registered = new Map();
   const events = [];
   registerOpenClawHooks({ on: (name, handler) => registered.set(name, handler) }, { emit: async (event) => events.push(event), envelopeFactory: envelope });
   registered.get("message_sent")({ success: false, error: "raw private", messageId: "m" }, { sessionId: "s" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(events.map(({ type, outcome }) => ({ type, outcome })), [
-    { type: "turn.failed", outcome: "failure" },
+    { type: "message.failed", outcome: "failure" },
   ]);
   assert.equal(JSON.stringify(events).includes("private"), false);
 });
@@ -84,8 +85,8 @@ test("rejects the legacy internal-hook API so lifecycle events cannot be silentl
 
 test("maps sanitized host agent streams used by Codex and other harnesses", () => {
   assert.deepEqual(
-    openClawAgentEventInput({ runId: "run-1", sessionId: "session-1", stream: "lifecycle", data: { phase: "start" } }),
-    { kind: "turn_start", correlation: { sessionId: "session-1", turnId: "run-1", toolCallId: undefined } },
+    openClawAgentEventInput({ runId: "run-1", sessionKey: "agent:main:telegram:group:one", stream: "lifecycle", data: { phase: "start" } }),
+    { kind: "turn_start", correlation: { sessionId: "agent:main:telegram:group:one", turnId: "run-1", toolCallId: undefined } },
   );
   assert.deepEqual(
     openClawAgentEventInput({ runId: "run-1", stream: "tool", data: { phase: "result", name: "exec", toolCallId: "tool-1", status: "failed", isError: true, result: { exitCode: 13, text: "private" } } }),
@@ -166,181 +167,116 @@ test("official approval identity distinguishes approvals and deduplicates repeat
   assert.equal(JSON.stringify([first, second, repeated]).includes("private"), false);
 });
 
-test("coalesces internal runs into one lifecycle for one incoming message", () => {
+test("message and gateway hooks never invent work transitions", () => {
   const lifecycle = createOpenClawUserTaskLifecycle();
-  const event = (type, { sessionId = "session-one", messageId, turnId } = {}) => ({
-    type,
-    correlation: { sessionId, messageId, turnId },
-  });
-  assert.equal(lifecycle.process(event("message.received", { messageId: "message-one" })).type, "turn.started");
-  assert.equal(lifecycle.process(event("turn.started", { turnId: "internal-run-one" })), null);
-  assert.ok(lifecycle.process(event("tool.started", { turnId: "internal-run-one" })));
-  assert.ok(lifecycle.process(event("tool.completed", { turnId: "internal-run-one" })));
-  assert.equal(lifecycle.process(event("turn.completed", { turnId: "internal-run-one" })), null);
-  assert.equal(lifecycle.process(event("turn.started", { turnId: "internal-run-two" })), null);
-  assert.equal(lifecycle.process(event("turn.completed", { turnId: "internal-run-two" })), null);
-  assert.ok(lifecycle.process(event("turn.completed", { messageId: "outgoing-one" })));
-  assert.equal(lifecycle.process(event("turn.completed", { messageId: "outgoing-two" })), null);
+  const events = [
+    { type: "message.received", correlation: { sessionId: "telegram", messageId: "inbound" } },
+    { type: "message.delivered", correlation: { sessionId: "telegram", messageId: "outbound" } },
+    { type: "gateway.disconnected", correlation: {} },
+  ].map((event) => lifecycle.process(event)).filter(Boolean);
+  assert.equal(events.filter(({ type }) => type.startsWith("turn.")).length, 0);
+  assert.deepEqual(lifecycle.activeRunIds(), []);
 });
 
-test("correlates sessionless official lifecycle with one active user task", () => {
+test("official run id emits exactly one start and one immediate terminal", () => {
   const lifecycle = createOpenClawUserTaskLifecycle();
-  const emitted = [];
-  const accept = (event) => {
-    const accepted = lifecycle.process(event);
-    if (accepted?.type?.startsWith("turn.")) emitted.push(accepted.type);
-  };
-
-  accept({ type: "message.received", correlation: { sessionId: "telegram", messageId: "inbound" } });
-  accept({ type: "turn.started", correlation: { turnId: "official-run" } });
-  accept({ type: "turn.completed", correlation: { turnId: "official-run" } });
-  accept({ type: "turn.completed", correlation: { sessionId: "telegram", messageId: "outbound" } });
-
-  assert.deepEqual(emitted, ["turn.started", "turn.completed"]);
+  const event = (type, turnId = "run-one") => ({ type, correlation: { turnId } });
+  assert.equal(lifecycle.process({ type: "turn.started", correlation: { sessionId: "session-only" } }), null);
+  assert.equal(lifecycle.process(event("turn.started")).type, "turn.started");
+  assert.equal(lifecycle.process(event("turn.started")), null);
+  assert.equal(lifecycle.process(event("turn.completed")).type, "turn.completed");
+  assert.equal(lifecycle.process(event("turn.failed")), null);
+  assert.deepEqual(lifecycle.activeRunIds(), []);
 });
 
-test("preserves waiting, failures, autonomous runs, and concurrent sessions", () => {
-  const deferred = new Set();
-  const released = [];
-  const suppressed = [];
-  const lifecycle = createOpenClawUserTaskLifecycle({
-    cancel: (handle) => deferred.delete(handle),
-    onDeferred: (event) => released.push(event),
-    onSuppressed: (event) => suppressed.push(event),
-    schedule: (callback) => { deferred.add(callback); return callback; },
-  });
-  const flushDeferred = () => {
-    for (const callback of [...deferred]) {
-      deferred.delete(callback);
-      callback();
-    }
-  };
-  const event = (type, correlation) => ({ type, correlation });
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "waiting", messageId: "m-wait" })));
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "waiting", turnId: "r-wait" })), null);
-  assert.ok(lifecycle.process(event("tool.started", { sessionId: "waiting", turnId: "r-wait", toolCallId: "approval" })));
-  assert.ok(lifecycle.process(event("tool.completed", { sessionId: "waiting", turnId: "r-wait", toolCallId: "approval" })));
-  assert.equal(lifecycle.process(event("turn.failed", { sessionId: "waiting", turnId: "r-wait" })), null);
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "waiting", turnId: "r-retry" })), null);
-  assert.equal(lifecycle.process(event("turn.completed", { sessionId: "waiting", turnId: "r-retry" })), null);
-  assert.ok(lifecycle.process(event("turn.completed", { sessionId: "waiting", messageId: "out-wait" })));
-  assert.deepEqual(released, []);
-  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
-
-  for (const [sessionId, messageId, terminal] of [
-    ["timeout", "m-timeout", "turn.timeout"],
-    ["cancel", "m-cancel", "turn.cancelled"],
-  ]) {
-    assert.ok(lifecycle.process(event("message.received", { sessionId, messageId })));
-    assert.equal(lifecycle.process(event("turn.started", { sessionId, turnId: `run-${sessionId}` })), null);
-    assert.equal(lifecycle.process(event(terminal, { sessionId, turnId: `run-${sessionId}` })), null);
-    flushDeferred();
-    assert.equal(released.at(-1).type, terminal);
-  }
-
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "a", messageId: "m-a" })));
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "b", messageId: "m-b" })));
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "a", turnId: "run-a" })), null);
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "b", turnId: "run-b" })), null);
-  assert.ok(lifecycle.process(event("turn.completed", { sessionId: "b", messageId: "m-b" })));
-  assert.ok(lifecycle.process(event("turn.completed", { sessionId: "a", messageId: "m-a" })));
-
-  assert.ok(lifecycle.process(event("turn.started", { turnId: "autonomous" })));
-  assert.equal(lifecycle.process(event("turn.started", { turnId: "autonomous" })), null);
-  assert.ok(lifecycle.process(event("turn.completed", { turnId: "autonomous" })));
-  assert.equal(lifecycle.process(event("turn.failed", { turnId: "autonomous" })), null);
-
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "same", messageId: "same-message" })));
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "same", turnId: "user-run" })), null);
-  assert.ok(lifecycle.process(event("turn.completed", { sessionId: "same", messageId: "user-out" })));
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "same", turnId: "autonomous-same-session" })));
-  assert.ok(lifecycle.process(event("turn.completed", { sessionId: "same", turnId: "autonomous-same-session" })));
-});
-
-test("queues multiple incoming messages within one session without cross-linking tasks", () => {
+test("official terminal is accepted without message_sent or a prior start", () => {
   const lifecycle = createOpenClawUserTaskLifecycle();
-  const event = (type, correlation) => ({ type, correlation });
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "shared", messageId: "m-one" })));
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "shared", messageId: "m-two" })));
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-one" })), null);
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "internal-one" })), null);
-  assert.ok(lifecycle.process(event("turn.completed", { sessionId: "shared", messageId: "out-one" })));
-  assert.equal(lifecycle.process(event("turn.completed", { sessionId: "shared", messageId: "extra-out" })), null);
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-two" })));
-  assert.ok(lifecycle.process(event("turn.completed", { sessionId: "shared", messageId: "out-two" })));
-  assert.equal(lifecycle.process(event("turn.completed", { sessionId: "shared", messageId: "duplicate-out" })), null);
+  const terminal = { type: "turn.failed", correlation: { turnId: "run-ended" } };
+  assert.equal(lifecycle.process(terminal), terminal);
+  assert.equal(lifecycle.process(terminal), null);
 });
 
-test("does not mistake a queued message for a retry during terminal grace", async () => {
-  const deferred = new Set();
-  const released = [];
-  const lifecycle = createOpenClawUserTaskLifecycle({
-    cancel: (handle) => deferred.delete(handle),
-    onDeferred: async (event) => released.push(event),
-    schedule: (callback) => { deferred.add(callback); return callback; },
-  });
-  const event = (type, correlation) => ({ type, correlation });
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "shared", messageId: "m-one" })));
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-one" })), null);
-  assert.equal(lifecycle.process(event("turn.failed", { sessionId: "shared", turnId: "run-one" })), null);
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "shared", messageId: "m-two" })));
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-two" })));
-  await Promise.resolve();
-  assert.deepEqual(released.map(({ type }) => type), ["turn.failed"]);
-  assert.ok(lifecycle.process(event("turn.completed", { sessionId: "shared", messageId: "out-two" })));
+test("deduplicates lifecycle per run id while preserving parallel runs", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  const event = (type, turnId, sessionId) => ({ type, correlation: { turnId, sessionId } });
+  assert.ok(lifecycle.process(event("turn.started", "run-a", "session-a")));
+  assert.ok(lifecycle.process(event("turn.started", "run-b", "session-b")));
+  assert.equal(lifecycle.process(event("turn.started", "run-a", "different-session")), null);
+  assert.deepEqual(new Set(lifecycle.activeRunIds()), new Set(["run-a", "run-b"]));
+  assert.ok(lifecycle.process(event("turn.timeout", "run-b")));
+  assert.ok(lifecycle.process(event("turn.cancelled", "run-a")));
+  assert.equal(lifecycle.status().activeRuns, 0);
 });
 
-test("flushes deferred terminal events before shutdown", async () => {
-  const released = [];
-  const lifecycle = createOpenClawUserTaskLifecycle({
-    onDeferred: async (event) => released.push(event),
-    schedule: () => ({ unref() {} }),
-  });
-  const event = (type, correlation) => ({ type, correlation });
-  lifecycle.process(event("message.received", { sessionId: "shutdown", messageId: "message" }));
-  lifecycle.process(event("turn.started", { sessionId: "shutdown", turnId: "run" }));
-  lifecycle.process(event("turn.cancelled", { sessionId: "shutdown", turnId: "run" }));
-  assert.equal(lifecycle.status().pendingTerminals, 1);
-  await lifecycle.flushPending();
-  assert.deepEqual(released.map(({ type }) => type), ["turn.cancelled"]);
-  assert.equal(lifecycle.status().pendingTerminals, 0);
+test("graceful gateway stop closes every active run once", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  const start = (turnId) => ({ type: "turn.started", correlation: { turnId } });
+  lifecycle.process(start("run-a"));
+  lifecycle.process(start("run-b"));
+  const terminals = lifecycle.cancelActiveRuns((turnId) => ({
+    type: "turn.cancelled",
+    correlation: { turnId },
+  }));
+  assert.deepEqual(terminals.map(({ correlation }) => correlation.turnId), ["run-a", "run-b"]);
+  assert.equal(lifecycle.status().activeRuns, 0);
+  assert.deepEqual(lifecycle.cancelActiveRuns(() => assert.fail("already closed")), []);
 });
 
-test("bounds and expires run-only lifecycle state without reading content", () => {
+test("failed durable writes can roll lifecycle state back for an exact retry", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  const started = { type: "turn.started", correlation: { turnId: "run-retry" } };
+  const completed = { type: "turn.completed", correlation: { turnId: "run-retry" } };
+  assert.equal(lifecycle.process(started), started);
+  lifecycle.rollback(started);
+  assert.equal(lifecycle.process(started), started);
+  assert.equal(lifecycle.process(completed), completed);
+  lifecycle.rollback(completed);
+  assert.deepEqual(lifecycle.activeRunIds(), ["run-retry"]);
+  assert.equal(lifecycle.process(completed), completed);
+});
+
+test("persisted active run can recover after restart with a stable terminal id", () => {
+  const beforeRestart = createOpenClawUserTaskLifecycle();
+  beforeRestart.process({ type: "turn.started", correlation: { turnId: "run-orphan" } });
+  const stored = JSON.stringify(beforeRestart.activeRunIds());
+  const terminalInput = (turnId) => ({ kind: "turn_end", outcome: "cancelled", correlation: { turnId } });
+  const recovered = JSON.parse(stored).map((turnId) => ({
+    type: "turn.cancelled",
+    correlation: { turnId },
+    eventId: stableOpenClawEventId(terminalInput(turnId)),
+  }));
+  assert.equal(recovered[0].eventId, stableOpenClawEventId(terminalInput("run-orphan")));
+  const afterRestart = createOpenClawUserTaskLifecycle();
+  assert.equal(afterRestart.process(recovered[0]).type, "turn.cancelled");
+  assert.equal(afterRestart.process(recovered[0]), null);
+});
+
+test("bounds terminal dedupe state and never reads event content", () => {
   let nowMs = 1_000;
-  const lifecycle = createOpenClawUserTaskLifecycle({
-    now: () => nowMs,
-    maxRuns: 2,
-    ttlMs: 50,
-  });
+  const lifecycle = createOpenClawUserTaskLifecycle({ now: () => nowMs, maxRuns: 2, ttlMs: 50 });
   const event = (turnId) => ({
     type: "turn.started",
     correlation: { turnId },
     get details() { throw new Error("private content read"); },
   });
   assert.ok(lifecycle.process(event("run-one")));
+  assert.ok(lifecycle.process({ type: "turn.completed", correlation: { turnId: "run-one" } }));
   assert.ok(lifecycle.process(event("run-two")));
+  assert.ok(lifecycle.process({ type: "turn.completed", correlation: { turnId: "run-two" } }));
   assert.ok(lifecycle.process(event("run-three")));
-  assert.equal(lifecycle.status().trackedRuns, 2);
-  assert.ok(lifecycle.process(event("run-one")));
   assert.equal(lifecycle.status().trackedRuns, 2);
   nowMs += 51;
   assert.ok(lifecycle.process(event("run-one")));
-  assert.equal(lifecycle.status().trackedRuns, 1);
+  assert.equal(lifecycle.status().activeRuns, 2);
 });
 
-test("refreshes task TTL from bounded lifecycle activity", () => {
+test("does not silently expire an active run", () => {
   let nowMs = 1_000;
   const lifecycle = createOpenClawUserTaskLifecycle({ now: () => nowMs, ttlMs: 50 });
-  const event = (type, correlation) => ({ type, correlation });
-  assert.ok(lifecycle.process(event("message.received", { sessionId: "long", messageId: "message" })));
-  nowMs += 40;
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "long", turnId: "run" })), null);
-  nowMs += 40;
-  assert.ok(lifecycle.process(event("tool.started", { sessionId: "long", turnId: "run", toolCallId: "tool" })));
-  nowMs += 40;
-  assert.equal(lifecycle.process(event("turn.started", { sessionId: "long", turnId: "internal" })), null);
-  assert.equal(lifecycle.status().trackedRuns, 1);
+  assert.ok(lifecycle.process({ type: "turn.started", correlation: { turnId: "long" } }));
+  nowMs += 51;
+  assert.ok(lifecycle.process({ type: "tool.started", correlation: { turnId: "long", toolCallId: "tool" } }));
+  assert.deepEqual(lifecycle.activeRunIds(), ["long"]);
 });
 
 test("plugin subscribes through the official host-owned agent event API", () => {
@@ -349,9 +285,15 @@ test("plugin subscribes through the official host-owned agent event API", () => 
   assert.match(source, /streams:\s*\["lifecycle", "tool", "approval"\]/);
   assert.match(source, /userTaskLifecycle\.processDetailed\(event\)/);
   assert.match(source, /persisted\.disposition === "emitted"/);
-  assert.match(source, /userTaskLifecycle\.flushPending\(\)/);
+  assert.match(source, /HOOK_EVENT_SOURCE/);
+  assert.match(source, /const enqueueAcceptedEvents = \(acceptedEvents\) =>/);
+  assert.doesNotMatch(source, /await enqueueAcceptedEvent/);
+  assert.match(source, /hookCursor\(acceptedEvents\.at\(-1\)\.sequence, userTaskLifecycle\.activeRunIds\(\)\)/);
+  assert.match(source, /\.filter\(isOpenClawHookRecoveryFact\)/);
+  assert.match(source, /userTaskLifecycle\.rollback\(result\.event\)/);
+  assert.match(source, /userTaskLifecycle\.cancelActiveRuns\(cancelledRunEvent\)/);
   assert.match(source, /userTasks: userTaskLifecycle\.status\(\)/);
-  assert.match(source, /if \(await persistDeferredEvent\(event\)\) agentEventTelemetry\.emitted \+= 1/);
+  assert.doesNotMatch(source, /terminalGraceMs|persistDeferredEvent|flushPending/);
   assert.doesNotMatch(source, /onAgentEvent\s*\(/);
 });
 

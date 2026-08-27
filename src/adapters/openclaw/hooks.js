@@ -17,175 +17,77 @@ const TURN_TERMINALS = new Set([
 ]);
 
 export function createOpenClawUserTaskLifecycle({
-  cancel = clearTimeout,
   now = Date.now,
-  onDeferred = () => {},
-  onSuppressed = () => {},
-  schedule = setTimeout,
-  terminalGraceMs = 5_000,
   maxRuns = 1000,
   ttlMs = 60 * 60_000,
 } = {}) {
   const runs = new Map();
-  const tasksBySession = new Map();
-  const taskQueue = (sessionId) => tasksBySession.get(sessionId) ?? [];
-  const dequeue = (key, state) => {
-    const remaining = taskQueue(state.sessionId).filter((candidate) => candidate !== key);
-    if (remaining.length > 0) tasksBySession.set(state.sessionId, remaining);
-    else tasksBySession.delete(state.sessionId);
-  };
-  const clearPending = (state, { suppressed = false } = {}) => {
-    const event = state.pendingEvent;
-    if (state.pendingTimer) cancel(state.pendingTimer);
-    state.pendingEvent = null;
-    state.pendingTimer = null;
-    if (suppressed && event) onSuppressed(event);
-  };
-  const remove = (key) => {
-    const state = runs.get(key);
-    if (state?.sessionId) {
-      clearPending(state, { suppressed: true });
-      dequeue(key, state);
-    }
-    runs.delete(key);
-  };
   const prune = (nowMs) => {
     for (const [key, state] of runs) {
-      if (nowMs - state.updatedAt >= ttlMs) remove(key);
+      if (state.terminal && nowMs - state.updatedAt >= ttlMs) runs.delete(key);
     }
   };
   const track = (key, state) => {
-    while (runs.size >= maxRuns) remove(runs.keys().next().value);
+    while (runs.size >= maxRuns) {
+      const terminalKey = [...runs].find(([, candidate]) => candidate.terminal)?.[0];
+      if (!terminalKey) return false;
+      runs.delete(terminalKey);
+    }
     runs.set(key, state);
+    return true;
   };
-  const taskKey = (sessionId, messageId) => (
-    typeof sessionId === "string" && sessionId
-    && typeof messageId === "string" && messageId
-      ? `message:${sessionId}:${messageId}`
-      : null
-  );
   const runKey = (turnId) => typeof turnId === "string" && turnId ? `run:${turnId}` : null;
-  const closeTask = (key, state, event, nowMs) => {
-    clearPending(state, { suppressed: state.pendingEvent !== event });
-    state.terminal = true;
-    state.updatedAt = nowMs;
-    dequeue(key, state);
-    return event;
-  };
-  const releasePending = (key, state, nowMs) => {
-    const event = state.pendingEvent;
-    if (!event || state.terminal) return Promise.resolve();
-    const released = closeTask(key, state, event, nowMs);
-    return Promise.resolve(onDeferred(released));
-  };
-  const deferTerminal = (key, state, event, nowMs) => {
-    clearPending(state, { suppressed: true });
-    state.pendingEvent = event;
-    state.updatedAt = nowMs;
-    state.pendingTimer = schedule(() => {
-      if (runs.get(key) !== state || state.terminal || state.pendingEvent !== event) return;
-      void releasePending(key, state, now()).catch(() => {});
-    }, terminalGraceMs);
-    state.pendingTimer?.unref?.();
-  };
   const accepted = (event) => Object.freeze({ disposition: "accepted", event });
-  const buffered = () => Object.freeze({ disposition: "buffered", event: null });
   const coalesced = () => Object.freeze({ disposition: "coalesced", event: null });
   const processDetailed = (event) => {
     const nowMs = now();
     prune(nowMs);
     const correlation = event?.correlation ?? {};
-    const messageKey = taskKey(correlation.sessionId, correlation.messageId);
-    if (event?.type === "message.received") {
-      if (!messageKey || runs.has(messageKey)) return messageKey ? coalesced() : accepted(event);
-      const startsImmediately = !taskQueue(correlation.sessionId)
-        .some((key) => !runs.get(key)?.terminal);
-      track(messageKey, {
-        createdAt: nowMs,
-        messageId: correlation.messageId,
-        sessionId: correlation.sessionId,
-        started: startsImmediately,
-        terminal: false,
-        updatedAt: nowMs,
-        pendingEvent: null,
-        pendingTimer: null,
-      });
-      tasksBySession.set(correlation.sessionId, [...taskQueue(correlation.sessionId), messageKey]);
-      return accepted(startsImmediately ? { ...event, type: "turn.started" } : event);
-    }
     const started = event?.type === "turn.started";
     const terminal = TURN_TERMINALS.has(event?.type);
-    const queue = taskQueue(correlation.sessionId);
-    let activeKey = queue.find((key) => !runs.get(key)?.terminal) ?? null;
-    let active = activeKey ? runs.get(activeKey) : null;
-    if (!active && !correlation.sessionId && correlation.turnId) {
-      const userTasks = [...runs].filter(([key]) => key.startsWith("message:"));
-      const exact = userTasks.find(([, state]) => state.turnId === correlation.turnId);
-      const open = userTasks.filter(([, state]) => !state.terminal);
-      const matched = exact ?? (open.length === 1 ? open[0] : null);
-      if (matched) [activeKey, active] = matched;
-    }
-    if (!started && !terminal) {
-      if (active) active.updatedAt = nowMs;
-      return accepted(event);
-    }
+    if (!started && !terminal) return accepted(event);
+    const key = runKey(correlation.turnId);
+    if (!key) return coalesced();
+    const state = runs.get(key);
     if (started) {
-      if (active?.pendingEvent && queue.some((key) => key !== activeKey && !runs.get(key)?.terminal)) {
-        void releasePending(activeKey, active, nowMs).catch(() => {});
-        activeKey = taskQueue(correlation.sessionId).find((key) => !runs.get(key)?.terminal) ?? null;
-        active = activeKey ? runs.get(activeKey) : null;
-      }
-      if (active) {
-        active.updatedAt = nowMs;
-        active.turnId ??= correlation.turnId;
-        if (active.pendingEvent) {
-          clearPending(active, { suppressed: true });
-          return coalesced();
-        }
-        if (active.started || active.terminal) return coalesced();
-        active.started = true;
-        return accepted(event);
-      }
-      const autonomousKey = runKey(correlation.turnId);
-      if (!autonomousKey) return accepted(event);
-      if (runs.has(autonomousKey)) return coalesced();
-      track(autonomousKey, { createdAt: nowMs, started: true, terminal: false, updatedAt: nowMs });
+      if (state) return coalesced();
+      if (!track(key, { started: true, terminal: false, turnId: correlation.turnId, updatedAt: nowMs })) return coalesced();
       return accepted(event);
     }
-    if (active) {
-      active.updatedAt = nowMs;
-      const deliveredResponse = Boolean(messageKey);
-      if (event.type === "turn.completed" && !deliveredResponse) return coalesced();
-      if (deliveredResponse && !active.started) return coalesced();
-      if (active.terminal) return coalesced();
-      if (!deliveredResponse) {
-        deferTerminal(activeKey, active, event, nowMs);
-        return buffered();
-      }
-      return accepted(closeTask(activeKey, active, event, nowMs));
-    }
-    if (messageKey) return coalesced();
-    const autonomousKey = runKey(correlation.turnId);
-    if (!autonomousKey) return accepted(event);
-    const autonomous = runs.get(autonomousKey);
-    if (autonomous?.terminal) return coalesced();
-    if (autonomous) {
-      autonomous.terminal = true;
-      autonomous.updatedAt = nowMs;
-    } else {
-      track(autonomousKey, { createdAt: nowMs, started: false, terminal: true, updatedAt: nowMs });
-    }
+    if (state?.terminal) return coalesced();
+    if (state) Object.assign(state, { terminal: true, updatedAt: nowMs });
+    else track(key, { started: false, terminal: true, turnId: correlation.turnId, updatedAt: nowMs });
     return accepted(event);
   };
+  const activeRunIds = () => Object.freeze(
+    [...runs.values()].filter((state) => !state.terminal).map((state) => state.turnId),
+  );
   return Object.freeze({
     process: (event) => processDetailed(event).event,
     processDetailed,
-    async flushPending() {
-      const pending = [...runs].filter(([, state]) => state.pendingEvent && !state.terminal);
-      await Promise.all(pending.map(([key, state]) => releasePending(key, state, now())));
+    rollback(event) {
+      const key = runKey(event?.correlation?.turnId);
+      const state = key ? runs.get(key) : null;
+      if (!state) return;
+      if (event?.type === "turn.started" && !state.terminal) {
+        runs.delete(key);
+      } else if (TURN_TERMINALS.has(event?.type) && state.terminal) {
+        if (state.started) state.terminal = false;
+        else runs.delete(key);
+      }
+    },
+    activeRunIds,
+    cancelActiveRuns(makeTerminalEvent) {
+      const terminals = [];
+      for (const turnId of activeRunIds()) {
+        const result = processDetailed(makeTerminalEvent(turnId));
+        if (result.disposition === "accepted") terminals.push(result.event);
+      }
+      return Object.freeze(terminals);
     },
     status: () => Object.freeze({
-      pendingTerminals: [...runs.values()].filter((state) => state.pendingEvent && !state.terminal).length,
+      activeRuns: [...runs.values()].filter((state) => !state.terminal).length,
+      pendingTerminals: 0,
       trackedRuns: runs.size,
     }),
   });
@@ -239,7 +141,7 @@ function toolDetails(data, failed, fallbackOperation) {
 export function openClawAgentEventInput(event = {}) {
   const data = event.data && typeof event.data === "object" ? event.data : {};
   const correlation = {
-    sessionId: event.sessionId,
+    sessionId: event.sessionId ?? event.sessionKey,
     turnId: event.runId,
     toolCallId: data.toolCallId
       ?? data.itemId
@@ -329,12 +231,13 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     });
   };
   const correlation = (event, ctx) => ({
-    sessionId: ctx.sessionId ?? event.sessionId, turnId: ctx.runId ?? event.runId,
+    sessionId: ctx.sessionId ?? ctx.sessionKey ?? event.sessionId ?? event.sessionKey,
+    turnId: ctx.runId ?? event.runId,
     toolCallId: ctx.toolCallId ?? event.toolCallId, messageId: ctx.messageId ?? event.messageId,
   });
   const hooks = {
     message_received: observe("message_received", (event, ctx) => ({ kind: "message_received", correlation: correlation(event, ctx) })),
-    message_sent: observe("message_sent", (event, ctx) => ({ kind: "turn_end", outcome: event.success === false ? "failure" : "success", correlation: correlation(event, ctx) })),
+    message_sent: observe("message_sent", (event, ctx) => ({ kind: "delivery_end", outcome: event.success === false ? "failure" : "success", correlation: correlation(event, ctx) })),
     gateway_start: observe("gateway_start", () => ({ kind: "gateway_up", correlation: {} })),
     gateway_stop: observe("gateway_stop", () => ({ kind: "gateway_down", correlation: {} })),
   };
