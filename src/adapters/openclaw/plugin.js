@@ -15,7 +15,9 @@ import { createRuntimeDiagnosticsDelivery } from "../../delivery/runtime-diagnos
 import { createOpenClawAdapter } from "./index.js";
 import {
   createOpenClawUserTaskLifecycle,
+  openClawActiveWorkCursor,
   openClawAgentEventInput,
+  parseOpenClawActiveWorkCursor,
   registerOpenClawHooks,
 } from "./hooks.js";
 import {
@@ -28,22 +30,6 @@ import { createUpdateScheduler } from "../../update/scheduler.js";
 
 const VERSION = "0.2.18";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
-
-function parseActiveRunCursor(value) {
-  try {
-    const parsed = JSON.parse(value ?? "null");
-    const activeRunIds = Array.isArray(parsed) ? parsed : parsed?.activeRunIds;
-    return Array.isArray(activeRunIds)
-      ? [...new Set(activeRunIds.filter((runId) => typeof runId === "string" && runId.length > 0 && runId.length <= 128))].slice(0, 1000)
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-function hookCursor(sequence, activeRunIds) {
-  return JSON.stringify({ version: 1, sequence, activeRunIds });
-}
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -90,9 +76,25 @@ export default definePluginEntry({
     let healthTimer = null;
     let spoolFailure = null;
     let spoolFailureCount = 0;
-    const preStartEvents = [];
     const agentEventTelemetry = { observed: 0, emitted: 0, ignored: 0, failed: 0, lastObservedAt: null };
-    const userTaskLifecycle = createOpenClawUserTaskLifecycle();
+    const deferredAgentEventIds = new Set();
+    const deferredHookEventIds = new Set();
+    let settleDeferredHook = () => {};
+    let persistDeferredEvent = () => false;
+    const userTaskLifecycle = createOpenClawUserTaskLifecycle({
+      onDeferred(event) {
+        let persisted = false;
+        try { persisted = persistDeferredEvent(event); }
+        catch { persisted = false; }
+        if (persisted && deferredAgentEventIds.delete(event.eventId)) agentEventTelemetry.emitted += 1;
+        if (persisted && deferredHookEventIds.delete(event.eventId)) settleDeferredHook("emitted");
+        return persisted;
+      },
+      onSuppressed(event) {
+        if (deferredAgentEventIds.delete(event.eventId)) agentEventTelemetry.ignored += 1;
+        if (deferredHookEventIds.delete(event.eventId)) settleDeferredHook("ignored");
+      },
+    });
     const recordSpoolFailure = (error) => {
       spoolFailureCount += 1;
       spoolFailure = { code: error.code, at: new Date().toISOString() };
@@ -108,15 +110,11 @@ export default definePluginEntry({
     };
     const enqueueAcceptedEvents = (acceptedEvents) => {
       if (acceptedEvents.length === 0) return true;
-      if (!spool) {
-        if (preStartEvents.length + acceptedEvents.length > 1000) return false;
-        preStartEvents.push(...acceptedEvents);
-        return true;
-      }
+      if (!spool) return false;
       try {
         spool.enqueueSourceBatch(
           HOOK_EVENT_SOURCE,
-          hookCursor(acceptedEvents.at(-1).sequence, userTaskLifecycle.activeRunIds()),
+          openClawActiveWorkCursor(acceptedEvents.at(-1).sequence, userTaskLifecycle.activeWork()),
           acceptedEvents,
         );
         return true;
@@ -127,12 +125,16 @@ export default definePluginEntry({
       }
     };
     const enqueueAcceptedEvent = (acceptedEvent) => enqueueAcceptedEvents([acceptedEvent]);
-    let closeActiveRuns = () => true;
-    const persistEventDetailed = async (event) => {
+    persistDeferredEvent = enqueueAcceptedEvent;
+    let closeActiveRuns = async () => true;
+    const persistEventDetailed = async (event, source) => {
       const result = userTaskLifecycle.processDetailed(event);
+      if (result.disposition === "buffered" && source === "agent") deferredAgentEventIds.add(event.eventId);
+      if (result.disposition === "buffered" && source === "hook") deferredHookEventIds.add(event.eventId);
       if (result.disposition !== "accepted") return result;
       const emitted = enqueueAcceptedEvent(result.event);
       if (!emitted) userTaskLifecycle.rollback(result.event);
+      else userTaskLifecycle.commit(result.event);
       if (event.type === "gateway.disconnected") await closeActiveRuns();
       return Object.freeze({
         disposition: emitted ? "emitted" : "failed",
@@ -150,12 +152,13 @@ export default definePluginEntry({
         runtime: { version: api.runtime.version }, source: { kind: sourceKind, adapterVersion: VERSION },
       };
     };
-    const cancelledRunEvent = (turnId) => normalizeRuntimeEvent("openclaw", {
+    const cancelledRunEvent = (turnId, sessionId) => normalizeRuntimeEvent("openclaw", {
       kind: "turn_end",
       outcome: "cancelled",
-      correlation: { turnId },
-    }, makeEnvelope({ kind: "turn_end", correlation: { turnId } }, "hook")).event;
-    closeActiveRuns = () => {
+      correlation: { sessionId, turnId },
+    }, makeEnvelope({ kind: "turn_end", correlation: { sessionId, turnId } }, "hook")).event;
+    closeActiveRuns = async () => {
+      await userTaskLifecycle.flushPending();
       const terminals = userTaskLifecycle.cancelActiveRuns(cancelledRunEvent);
       const persisted = enqueueAcceptedEvents(terminals);
       if (!persisted) terminals.forEach((terminal) => userTaskLifecycle.rollback(terminal));
@@ -175,7 +178,7 @@ export default definePluginEntry({
       }));
     };
     const hookTelemetry = registerOpenClawHooks(api, {
-      emit: persistEvent,
+      emit: (event) => persistEventDetailed(event, "hook"),
       envelopeFactory: (_input, _event, ctx) => ({
         ...makeEnvelope(_input),
         correlation: { sessionId: ctx?.sessionId ?? ctx?.sessionKey, turnId: ctx?.runId },
@@ -183,6 +186,7 @@ export default definePluginEntry({
       }),
       onDiagnostic: () => {},
     });
+    settleDeferredHook = (outcome) => hookTelemetry.settle(outcome);
     api.agent.events.registerAgentEventSubscription({
       id: "sidewisp-runtime-events",
       description: "Content-free Sidewisp lifecycle and tool failure telemetry",
@@ -201,7 +205,7 @@ export default definePluginEntry({
             agentEventTelemetry.ignored += 1;
             return;
           }
-          const persisted = await persistEventDetailed(result.event);
+          const persisted = await persistEventDetailed(result.event, "agent");
           if (persisted.disposition === "emitted") agentEventTelemetry.emitted += 1;
           else if (persisted.disposition === "failed") agentEventTelemetry.failed += 1;
           else if (persisted.disposition === "coalesced") agentEventTelemetry.ignored += 1;
@@ -225,21 +229,18 @@ export default definePluginEntry({
             catch { ctx.logger.warn("Sidewisp setup-token cleanup pending; will retry on restart"); }
           }
           spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
-          const previouslyActive = parseActiveRunCursor(spool.cursor(HOOK_EVENT_SOURCE));
-          if (preStartEvents.length > 0) {
-            const installationId = auth.status().installationId;
-            const ready = preStartEvents.map((event) => installationId ? { ...event, installationId } : event);
-            spool.enqueueSourceBatch(
-              HOOK_EVENT_SOURCE,
-              hookCursor(ready.at(-1).sequence, userTaskLifecycle.activeRunIds()),
-              ready,
-            );
-            preStartEvents.splice(0, ready.length);
-          }
-          const activeNow = new Set(userTaskLifecycle.activeRunIds());
+          const previouslyActive = parseOpenClawActiveWorkCursor(spool.cursor(HOOK_EVENT_SOURCE));
+          const workIdentity = (entry) => entry.kind === "task"
+            ? JSON.stringify(["task", entry.sessionId, entry.messageId])
+            : JSON.stringify(["run", entry.sessionId ?? "", entry.turnId]);
+          const activeNow = new Set(userTaskLifecycle.activeWork().map(workIdentity));
           const recoveredTerminals = [];
-          for (const turnId of previouslyActive.filter((candidate) => !activeNow.has(candidate))) {
-            const terminal = userTaskLifecycle.processDetailed(cancelledRunEvent(turnId));
+          for (const previous of previouslyActive.filter((candidate) => !activeNow.has(workIdentity(candidate)))) {
+            if (previous.kind === "task" && !previous.started) continue;
+            const terminal = userTaskLifecycle.processDetailed(cancelledRunEvent(
+              previous.turnId,
+              previous.sessionId,
+            ));
             if (terminal.disposition === "accepted") recoveredTerminals.push(terminal.event);
           }
           if (!enqueueAcceptedEvents(recoveredTerminals)) {
