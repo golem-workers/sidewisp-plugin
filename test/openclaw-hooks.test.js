@@ -172,8 +172,8 @@ test("coalesces internal runs into one lifecycle for one incoming message", () =
     type,
     correlation: { sessionId, messageId, turnId },
   });
-  assert.ok(lifecycle.process(event("message.received", { messageId: "message-one" })));
-  assert.ok(lifecycle.process(event("turn.started", { turnId: "internal-run-one" })));
+  assert.equal(lifecycle.process(event("message.received", { messageId: "message-one" })).type, "turn.started");
+  assert.equal(lifecycle.process(event("turn.started", { turnId: "internal-run-one" })), null);
   assert.ok(lifecycle.process(event("tool.started", { turnId: "internal-run-one" })));
   assert.ok(lifecycle.process(event("tool.completed", { turnId: "internal-run-one" })));
   assert.equal(lifecycle.process(event("turn.completed", { turnId: "internal-run-one" })), null);
@@ -201,7 +201,7 @@ test("preserves waiting, failures, autonomous runs, and concurrent sessions", ()
   };
   const event = (type, correlation) => ({ type, correlation });
   assert.ok(lifecycle.process(event("message.received", { sessionId: "waiting", messageId: "m-wait" })));
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "waiting", turnId: "r-wait" })));
+  assert.equal(lifecycle.process(event("turn.started", { sessionId: "waiting", turnId: "r-wait" })), null);
   assert.ok(lifecycle.process(event("tool.started", { sessionId: "waiting", turnId: "r-wait", toolCallId: "approval" })));
   assert.ok(lifecycle.process(event("tool.completed", { sessionId: "waiting", turnId: "r-wait", toolCallId: "approval" })));
   assert.equal(lifecycle.process(event("turn.failed", { sessionId: "waiting", turnId: "r-wait" })), null);
@@ -216,7 +216,7 @@ test("preserves waiting, failures, autonomous runs, and concurrent sessions", ()
     ["cancel", "m-cancel", "turn.cancelled"],
   ]) {
     assert.ok(lifecycle.process(event("message.received", { sessionId, messageId })));
-    assert.ok(lifecycle.process(event("turn.started", { sessionId, turnId: `run-${sessionId}` })));
+    assert.equal(lifecycle.process(event("turn.started", { sessionId, turnId: `run-${sessionId}` })), null);
     assert.equal(lifecycle.process(event(terminal, { sessionId, turnId: `run-${sessionId}` })), null);
     flushDeferred();
     assert.equal(released.at(-1).type, terminal);
@@ -224,8 +224,8 @@ test("preserves waiting, failures, autonomous runs, and concurrent sessions", ()
 
   assert.ok(lifecycle.process(event("message.received", { sessionId: "a", messageId: "m-a" })));
   assert.ok(lifecycle.process(event("message.received", { sessionId: "b", messageId: "m-b" })));
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "a", turnId: "run-a" })));
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "b", turnId: "run-b" })));
+  assert.equal(lifecycle.process(event("turn.started", { sessionId: "a", turnId: "run-a" })), null);
+  assert.equal(lifecycle.process(event("turn.started", { sessionId: "b", turnId: "run-b" })), null);
   assert.ok(lifecycle.process(event("turn.completed", { sessionId: "b", messageId: "m-b" })));
   assert.ok(lifecycle.process(event("turn.completed", { sessionId: "a", messageId: "m-a" })));
 
@@ -235,7 +235,7 @@ test("preserves waiting, failures, autonomous runs, and concurrent sessions", ()
   assert.equal(lifecycle.process(event("turn.failed", { turnId: "autonomous" })), null);
 
   assert.ok(lifecycle.process(event("message.received", { sessionId: "same", messageId: "same-message" })));
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "same", turnId: "user-run" })));
+  assert.equal(lifecycle.process(event("turn.started", { sessionId: "same", turnId: "user-run" })), null);
   assert.ok(lifecycle.process(event("turn.completed", { sessionId: "same", messageId: "user-out" })));
   assert.ok(lifecycle.process(event("turn.started", { sessionId: "same", turnId: "autonomous-same-session" })));
   assert.ok(lifecycle.process(event("turn.completed", { sessionId: "same", turnId: "autonomous-same-session" })));
@@ -246,7 +246,7 @@ test("queues multiple incoming messages within one session without cross-linking
   const event = (type, correlation) => ({ type, correlation });
   assert.ok(lifecycle.process(event("message.received", { sessionId: "shared", messageId: "m-one" })));
   assert.ok(lifecycle.process(event("message.received", { sessionId: "shared", messageId: "m-two" })));
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-one" })));
+  assert.equal(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-one" })), null);
   assert.equal(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "internal-one" })), null);
   assert.ok(lifecycle.process(event("turn.completed", { sessionId: "shared", messageId: "out-one" })));
   assert.equal(lifecycle.process(event("turn.completed", { sessionId: "shared", messageId: "extra-out" })), null);
@@ -265,7 +265,7 @@ test("does not mistake a queued message for a retry during terminal grace", asyn
   });
   const event = (type, correlation) => ({ type, correlation });
   assert.ok(lifecycle.process(event("message.received", { sessionId: "shared", messageId: "m-one" })));
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-one" })));
+  assert.equal(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-one" })), null);
   assert.equal(lifecycle.process(event("turn.failed", { sessionId: "shared", turnId: "run-one" })), null);
   assert.ok(lifecycle.process(event("message.received", { sessionId: "shared", messageId: "m-two" })));
   assert.ok(lifecycle.process(event("turn.started", { sessionId: "shared", turnId: "run-two" })));
@@ -319,7 +319,7 @@ test("refreshes task TTL from bounded lifecycle activity", () => {
   const event = (type, correlation) => ({ type, correlation });
   assert.ok(lifecycle.process(event("message.received", { sessionId: "long", messageId: "message" })));
   nowMs += 40;
-  assert.ok(lifecycle.process(event("turn.started", { sessionId: "long", turnId: "run" })));
+  assert.equal(lifecycle.process(event("turn.started", { sessionId: "long", turnId: "run" })), null);
   nowMs += 40;
   assert.ok(lifecycle.process(event("tool.started", { sessionId: "long", turnId: "run", toolCallId: "tool" })));
   nowMs += 40;

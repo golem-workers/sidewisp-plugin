@@ -98,18 +98,20 @@ export function createOpenClawUserTaskLifecycle({
     const messageKey = taskKey(correlation.sessionId, correlation.messageId);
     if (event?.type === "message.received") {
       if (!messageKey || runs.has(messageKey)) return messageKey ? coalesced() : accepted(event);
+      const startsImmediately = !taskQueue(correlation.sessionId)
+        .some((key) => !runs.get(key)?.terminal);
       track(messageKey, {
         createdAt: nowMs,
         messageId: correlation.messageId,
         sessionId: correlation.sessionId,
-        started: false,
+        started: startsImmediately,
         terminal: false,
         updatedAt: nowMs,
         pendingEvent: null,
         pendingTimer: null,
       });
       tasksBySession.set(correlation.sessionId, [...taskQueue(correlation.sessionId), messageKey]);
-      return accepted(event);
+      return accepted(startsImmediately ? { ...event, type: "turn.started" } : event);
     }
     const started = event?.type === "turn.started";
     const terminal = TURN_TERMINALS.has(event?.type);
