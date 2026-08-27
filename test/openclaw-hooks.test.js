@@ -183,6 +183,22 @@ test("coalesces internal runs into one lifecycle for one incoming message", () =
   assert.equal(lifecycle.process(event("turn.completed", { messageId: "outgoing-two" })), null);
 });
 
+test("correlates sessionless official lifecycle with one active user task", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  const emitted = [];
+  const accept = (event) => {
+    const accepted = lifecycle.process(event);
+    if (accepted?.type?.startsWith("turn.")) emitted.push(accepted.type);
+  };
+
+  accept({ type: "message.received", correlation: { sessionId: "telegram", messageId: "inbound" } });
+  accept({ type: "turn.started", correlation: { turnId: "official-run" } });
+  accept({ type: "turn.completed", correlation: { turnId: "official-run" } });
+  accept({ type: "turn.completed", correlation: { sessionId: "telegram", messageId: "outbound" } });
+
+  assert.deepEqual(emitted, ["turn.started", "turn.completed"]);
+});
+
 test("preserves waiting, failures, autonomous runs, and concurrent sessions", () => {
   const deferred = new Set();
   const released = [];

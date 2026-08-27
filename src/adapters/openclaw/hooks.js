@@ -118,6 +118,13 @@ export function createOpenClawUserTaskLifecycle({
     const queue = taskQueue(correlation.sessionId);
     let activeKey = queue.find((key) => !runs.get(key)?.terminal) ?? null;
     let active = activeKey ? runs.get(activeKey) : null;
+    if (!active && !correlation.sessionId && correlation.turnId) {
+      const userTasks = [...runs].filter(([key]) => key.startsWith("message:"));
+      const exact = userTasks.find(([, state]) => state.turnId === correlation.turnId);
+      const open = userTasks.filter(([, state]) => !state.terminal);
+      const matched = exact ?? (open.length === 1 ? open[0] : null);
+      if (matched) [activeKey, active] = matched;
+    }
     if (!started && !terminal) {
       if (active) active.updatedAt = nowMs;
       return accepted(event);
@@ -130,6 +137,7 @@ export function createOpenClawUserTaskLifecycle({
       }
       if (active) {
         active.updatedAt = nowMs;
+        active.turnId ??= correlation.turnId;
         if (active.pendingEvent) {
           clearPending(active, { suppressed: true });
           return coalesced();
