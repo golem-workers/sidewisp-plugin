@@ -97,6 +97,8 @@ export function createOpenClawUserTaskLifecycle({
   const retiredBindings = new Set();
   const currentBySession = new Map();
   const pendingInboundBySession = new Map();
+  const retiredInboundMessages = new Map();
+  const pendingObservationTransitions = new WeakMap();
   const taskKey = (sessionId, messageId) => sessionId && messageId
     ? JSON.stringify(["task", sessionId, messageId])
     : null;
@@ -111,6 +113,47 @@ export function createOpenClawUserTaskLifecycle({
       while (retiredBindings.size >= maxRuns) retiredBindings.delete(retiredBindings.values().next().value);
       retiredBindings.add(binding);
     }
+  };
+  const copyPendingInbound = (pending) => pending ? {
+    ...pending,
+    runIds: new Set(pending.runIds),
+  } : null;
+  const validPendingInbound = (pending) => {
+    let candidate = pending;
+    while (candidate?.token?.rolledBack) {
+      candidate = candidate.token.previous;
+    }
+    return copyPendingInbound(candidate);
+  };
+  const pendingObservationDepth = () => {
+    let maximum = 0;
+    for (const pending of pendingInboundBySession.values()) {
+      let candidate = pending;
+      let depth = 0;
+      const visited = new Set();
+      while (candidate?.token?.previous && !visited.has(candidate.token)) {
+        visited.add(candidate.token);
+        candidate = candidate.token.previous;
+        depth += 1;
+      }
+      maximum = Math.max(maximum, depth);
+    }
+    return maximum;
+  };
+  const pendingRunIds = (pending) => [
+    ...pending.runIds,
+    pending.outerRunId,
+  ].filter(Boolean);
+  const retirePendingInbound = (sessionId, pending, nowMs = now()) => {
+    if (!pending) return;
+    rememberRetiredRuns(sessionId, pendingRunIds(pending));
+    const key = taskKey(sessionId, pending.messageId);
+    if (!key || maxRuns < 1) return;
+    retiredInboundMessages.delete(key);
+    while (retiredInboundMessages.size >= maxRuns) {
+      retiredInboundMessages.delete(retiredInboundMessages.keys().next().value);
+    }
+    retiredInboundMessages.set(key, nowMs + ttlMs);
   };
   const retarget = (event, state) => {
     const descriptors = Object.getOwnPropertyDescriptors(event);
@@ -159,9 +202,12 @@ export function createOpenClawUserTaskLifecycle({
       if (state.terminal && state.durable && nowMs - state.updatedAt >= ttlMs) remove(key);
     }
     for (const [sessionId, pending] of pendingInboundBySession) {
-      if (nowMs - pending.updatedAt < ttlMs) continue;
-      rememberRetiredRuns(sessionId, pending.runIds);
+      if (nowMs < pending.expiresAt) continue;
+      retirePendingInbound(sessionId, pending, nowMs);
       pendingInboundBySession.delete(sessionId);
+    }
+    for (const [key, expiresAt] of retiredInboundMessages) {
+      if (nowMs >= expiresAt) retiredInboundMessages.delete(key);
     }
   };
   const track = (key, state) => {
@@ -185,12 +231,10 @@ export function createOpenClawUserTaskLifecycle({
     }
   };
   const rememberRetired = (state) => {
-    for (const runId of [...state.internalRunIds, state.outerRunId].filter(Boolean)) {
-      const binding = runKey(state.sessionId, runId);
-      retiredBindings.delete(binding);
-      while (retiredBindings.size >= maxRuns) retiredBindings.delete(retiredBindings.values().next().value);
-      retiredBindings.add(binding);
-    }
+    rememberRetiredRuns(
+      state.sessionId,
+      [...state.internalRunIds, state.outerRunId].filter(Boolean),
+    );
   };
   const forgetRetired = (state) => {
     for (const runId of [...state.internalRunIds, state.outerRunId].filter(Boolean)) {
@@ -319,6 +363,7 @@ export function createOpenClawUserTaskLifecycle({
     ...state,
     internalRunIds: [...state.internalRunIds],
     previousOnRollback: null,
+    pendingInboundOnRollback: null,
   });
   const restorePrevious = (transition) => {
     if (!transition) return;
@@ -340,36 +385,54 @@ export function createOpenClawUserTaskLifecycle({
     const component = event?.details?.component;
     if (event?.type === "message.received" && component === "message_observation") {
       if (!correlation.sessionId || !correlation.messageId) return accepted(event);
+      const key = taskKey(correlation.sessionId, correlation.messageId);
+      if (key && (records.has(key) || retiredInboundMessages.has(key))) return accepted(event);
       const previous = pendingInboundBySession.get(correlation.sessionId);
-      if (previous?.messageId === correlation.messageId) {
-        previous.updatedAt = nowMs;
-        return accepted(event);
-      }
-      if (previous && previous.messageId !== correlation.messageId) {
-        rememberRetiredRuns(correlation.sessionId, previous.runIds);
-      }
+      if (previous?.messageId === correlation.messageId) return accepted(event);
       pendingInboundBySession.delete(correlation.sessionId);
       if (maxRuns < 1) return accepted(event);
+      const evicted = [];
       while (pendingInboundBySession.size >= maxRuns) {
         const sessionId = pendingInboundBySession.keys().next().value;
-        const evicted = pendingInboundBySession.get(sessionId);
-        rememberRetiredRuns(sessionId, evicted.runIds);
+        evicted.push([sessionId, copyPendingInbound(pendingInboundBySession.get(sessionId))]);
         pendingInboundBySession.delete(sessionId);
       }
-      pendingInboundBySession.set(correlation.sessionId, {
+      const token = {
+        rolledBack: false,
+        previous: copyPendingInbound(previous),
+      };
+      const next = {
+        token,
         messageId: correlation.messageId,
+        outerRunId: correlation.turnId,
         runIds: new Set(),
-        updatedAt: nowMs,
+        expiresAt: nowMs + ttlMs,
+      };
+      pendingInboundBySession.set(correlation.sessionId, next);
+      pendingObservationTransitions.set(event, {
+        sessionId: correlation.sessionId,
+        previous: copyPendingInbound(previous),
+        evicted,
+        next,
       });
       return accepted(event);
     }
     if (event?.type === "message.received" && component === "before_dispatch") {
       const key = taskKey(correlation.sessionId, correlation.messageId);
-      if (!key || records.has(key)) return coalesced();
       const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
+      if (!key || records.has(key) || retiredInboundMessages.has(key)) {
+        if (pendingInbound?.messageId === correlation.messageId) {
+          retirePendingInbound(correlation.sessionId, pendingInbound);
+          pendingInboundBySession.delete(correlation.sessionId);
+        }
+        return coalesced();
+      }
       const preDispatchRunIds = pendingInbound?.messageId === correlation.messageId
         ? [...pendingInbound.runIds]
         : [];
+      const pendingInboundOnRollback = pendingInbound?.messageId === correlation.messageId
+        ? copyPendingInbound(pendingInbound)
+        : null;
       if (pendingInbound?.messageId === correlation.messageId) {
         pendingInboundBySession.delete(correlation.sessionId);
       }
@@ -384,6 +447,7 @@ export function createOpenClawUserTaskLifecycle({
         pendingPersistAttempts: 0, pendingDeadline: null, pendingTimer: null,
         registrationEvent: event, startEvent: null, terminalEvent: null,
         previousOnRollback: null,
+        pendingInboundOnRollback,
         staged: true,
         updatedAt: nowMs,
       };
@@ -405,6 +469,9 @@ export function createOpenClawUserTaskLifecycle({
         }
       }
       if (!track(key, state)) {
+        if (pendingInboundOnRollback && !pendingInboundBySession.has(state.sessionId)) {
+          pendingInboundBySession.set(state.sessionId, copyPendingInbound(pendingInboundOnRollback));
+        }
         restorePrevious(state.previousOnRollback);
         return coalesced();
       }
@@ -415,9 +482,26 @@ export function createOpenClawUserTaskLifecycle({
       return accepted(event);
     }
     if (component === "final_reply" && event?.type === "turn.completed") {
-      if (!correlation.turnId) return coalesced();
+      const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
+      if (!correlation.turnId) {
+        if (pendingInbound && correlation.messageId === pendingInbound.messageId) {
+          retirePendingInbound(correlation.sessionId, pendingInbound, nowMs);
+          pendingInboundBySession.delete(correlation.sessionId);
+        }
+        return coalesced();
+      }
       const [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
-      if (!state) return coalesced();
+      if (!state) {
+        if (!key) {
+          rememberRetiredRuns(correlation.sessionId, [correlation.turnId]);
+          if (pendingInbound
+            && (!correlation.messageId || correlation.messageId === pendingInbound.messageId)) {
+            retirePendingInbound(correlation.sessionId, pendingInbound, nowMs);
+            pendingInboundBySession.delete(correlation.sessionId);
+          }
+        }
+        return coalesced();
+      }
       state.updatedAt = nowMs;
       if (state.terminal) return coalesced();
       if (!state.started) {
@@ -454,7 +538,6 @@ export function createOpenClawUserTaskLifecycle({
     if (!state && !key && (started || terminal)) {
       const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
       if (pendingInbound) {
-        pendingInbound.updatedAt = nowMs;
         if (correlation.turnId) {
           pendingInbound.runIds.delete(correlation.turnId);
           while (pendingInbound.runIds.size >= 64) {
@@ -522,23 +605,63 @@ export function createOpenClawUserTaskLifecycle({
     process: (event) => processDetailed(event).event,
     processDetailed,
     commit(event) {
+      const pendingTransition = pendingObservationTransitions.get(event);
+      if (pendingTransition) {
+        retirePendingInbound(
+          pendingTransition.sessionId,
+          validPendingInbound(pendingTransition.previous),
+        );
+        for (const [sessionId, pending] of pendingTransition.evicted) {
+          retirePendingInbound(sessionId, validPendingInbound(pending));
+        }
+        pendingTransition.next.token.previous = null;
+        pendingObservationTransitions.delete(event);
+      }
       const state = [...records.values()].find((candidate) => candidate.registrationEvent === event
         || candidate.terminalEvent === event);
       if (!state) return;
-      if (state.registrationEvent === event) state.previousOnRollback = null;
+      if (state.registrationEvent === event) {
+        state.previousOnRollback = null;
+        state.pendingInboundOnRollback = null;
+      }
       if (state.replacedPending) {
         onSuppressed(state.replacedPending.event);
         state.replacedPending = null;
       }
     },
     rollback(event) {
+      const pendingTransition = pendingObservationTransitions.get(event);
+      if (pendingTransition) {
+        pendingTransition.next.token.rolledBack = true;
+        if (pendingInboundBySession.get(pendingTransition.sessionId)?.token
+          === pendingTransition.next.token) {
+          pendingInboundBySession.delete(pendingTransition.sessionId);
+          for (const [sessionId, pending] of pendingTransition.evicted) {
+            const restored = validPendingInbound(pending);
+            if (restored) pendingInboundBySession.set(sessionId, restored);
+          }
+          const previous = validPendingInbound(pendingTransition.previous);
+          if (previous) {
+            pendingInboundBySession.set(
+              pendingTransition.sessionId,
+              previous,
+            );
+          }
+        }
+        pendingObservationTransitions.delete(event);
+        return;
+      }
       const entry = [...records].find(([, state]) => state.registrationEvent === event
         || state.startEvent === event || state.terminalEvent === event);
       const [key, state] = entry ?? [];
       if (!state) return;
       if (state.registrationEvent === event && !state.started) {
         const previous = state.previousOnRollback;
+        const pendingInbound = state.pendingInboundOnRollback;
         remove(key);
+        if (pendingInbound && !pendingInboundBySession.has(state.sessionId)) {
+          pendingInboundBySession.set(state.sessionId, copyPendingInbound(pendingInbound));
+        }
         restorePrevious(previous);
       }
       else if (state.startEvent === event && !state.terminal) {
@@ -617,6 +740,8 @@ export function createOpenClawUserTaskLifecycle({
       awaitingFinals: [...records.values()].filter((state) => state.pendingAwaitingFinal).length,
       pendingTimers: [...records.values()].filter((state) => state.pendingTimer != null).length,
       trackedRuns: records.size,
+      pendingInboundObservations: pendingInboundBySession.size,
+      pendingObservationDepth: pendingObservationDepth(),
     }),
   });
 }
@@ -797,8 +922,8 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       }
       finally { pending -= 1; }
     };
-    if (immediate) void dispatch();
-    else queueMicrotask(dispatch);
+    if (immediate) return dispatch();
+    queueMicrotask(dispatch);
   };
   const correlation = (event, ctx) => ({
     sessionId: ctx.sessionKey ?? ctx.sessionId ?? event.sessionKey ?? event.sessionId,
@@ -846,7 +971,7 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       kind: "message_received",
       component: "message_observation",
       correlation: rememberInboundRun(inboundCorrelation(event, ctx)),
-    })),
+    }), true),
     message_sent: observe("message_sent", (event, ctx) => ({
       kind: "delivery_end",
       outcome: event.success === false ? "failure" : "success",

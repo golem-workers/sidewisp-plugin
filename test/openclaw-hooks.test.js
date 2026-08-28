@@ -252,7 +252,7 @@ test("runtime message_received id owns one task across internal agent runs", () 
   );
 });
 
-test("two active-memory runs before dispatch produce only the user task pair", async () => {
+test("two active-memory runs in the message hook tick produce only the user task pair", () => {
   const registered = new Map();
   const persisted = [];
   const lifecycle = createOpenClawUserTaskLifecycle();
@@ -273,7 +273,6 @@ test("two active-memory runs before dispatch produce only the user task pair", a
     { inboundMessageId: "telegram-message", runId: "outer-run" },
     { sessionKey: sessionId },
   );
-  await new Promise((resolve) => setImmediate(resolve));
 
   for (const runId of ["active-memory-1", "active-memory-2"]) {
     assert.equal(lifecycle.process(official("turn.started", sessionId, runId)), null);
@@ -293,6 +292,250 @@ test("two active-memory runs before dispatch produce only the user task pair", a
       .filter((event) => event?.type.startsWith("turn."))
       .map(({ type, correlation }) => [type, correlation.turnId]),
     [["turn.started", "telegram-message"], ["turn.completed", "telegram-message"]],
+  );
+});
+
+test("an immediate message hook returns its async ownership registration", async () => {
+  const registered = new Map();
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  let resume;
+  const blocked = new Promise((resolve) => { resume = resolve; });
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    {
+      emit: async (event) => {
+        await blocked;
+        return lifecycle.processDetailed(event);
+      },
+      envelopeFactory: envelope,
+    },
+  );
+
+  const registration = registered.get("message_received")(
+    { inboundMessageId: "message", runId: "outer" },
+    { sessionKey: "s" },
+  );
+  assert.ok(registration instanceof Promise);
+  resume();
+  await registration;
+  assert.equal(lifecycle.process(official("turn.started", "s", "memory")), null);
+});
+
+test("a fast final with exact message or unique run correlation releases autonomous work", async () => {
+  for (const finalCorrelation of [
+    { messageId: "fast-command" },
+    { runId: "different-run" },
+  ]) {
+    const registered = new Map();
+    const lifecycle = createOpenClawUserTaskLifecycle();
+    registerOpenClawHooks(
+      { on: (name, handler) => registered.set(name, handler) },
+      { emit: (event) => lifecycle.processDetailed(event), envelopeFactory: envelope },
+    );
+
+    await registered.get("message_received")(
+      { inboundMessageId: "fast-command", runId: "command-run" },
+      { sessionKey: "s" },
+    );
+    await registered.get("reply_payload_sending")(
+      { kind: "final", ...finalCorrelation },
+      { sessionKey: "s" },
+    );
+    await registered.get("message_received")(
+      { inboundMessageId: "fast-command", runId: "command-run" },
+      { sessionKey: "s" },
+    );
+    await registered.get("before_dispatch")({}, { sessionKey: "s" });
+
+    const start = lifecycle.process(official("turn.started", "s", "autonomous"));
+    const end = lifecycle.process(official("turn.completed", "s", "autonomous"));
+    assert.deepEqual(
+      [start, end].map(({ type, correlation }) => [type, correlation.turnId]),
+      [["turn.started", "autonomous"], ["turn.completed", "autonomous"]],
+    );
+  }
+});
+
+test("an uncorrelated duplicate final cannot clear the next inbound ownership", async () => {
+  const registered = new Map();
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    { emit: (event) => lifecycle.processDetailed(event), envelopeFactory: envelope },
+  );
+
+  await registered.get("message_received")(
+    { inboundMessageId: "first", runId: "first-run" },
+    { sessionKey: "s" },
+  );
+  await registered.get("reply_payload_sending")({ kind: "final" }, { sessionKey: "s" });
+  await registered.get("message_received")(
+    { inboundMessageId: "second", runId: "second-run" },
+    { sessionKey: "s" },
+  );
+  await registered.get("reply_payload_sending")({ kind: "final" }, { sessionKey: "s" });
+
+  assert.equal(lifecycle.process(official("turn.started", "s", "memory")), null);
+  await registered.get("before_dispatch")({}, { sessionKey: "s" });
+  assert.equal(
+    lifecycle.process(official("turn.started", "s", "main")).correlation.turnId,
+    "second",
+  );
+});
+
+test("a retired mismatched final cannot clear the next inbound ownership", async () => {
+  const registered = new Map();
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    { emit: (event) => lifecycle.processDetailed(event), envelopeFactory: envelope },
+  );
+
+  await registered.get("message_received")(
+    { inboundMessageId: "first", runId: "first-run" },
+    { sessionKey: "s" },
+  );
+  await registered.get("reply_payload_sending")(
+    { kind: "final", runId: "mismatched-final" },
+    { sessionKey: "s" },
+  );
+  await registered.get("message_received")(
+    { inboundMessageId: "second", runId: "second-run" },
+    { sessionKey: "s" },
+  );
+  await registered.get("reply_payload_sending")(
+    { kind: "final", runId: "mismatched-final" },
+    { sessionKey: "s" },
+  );
+
+  assert.equal(lifecycle.process(official("turn.started", "s", "memory")), null);
+  await registered.get("before_dispatch")({}, { sessionKey: "s" });
+  assert.equal(
+    lifecycle.process(official("turn.started", "s", "main")).correlation.turnId,
+    "second",
+  );
+});
+
+test("a mismatched final for an older message cannot clear newer inbound ownership", async () => {
+  const registered = new Map();
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    { emit: (event) => lifecycle.processDetailed(event), envelopeFactory: envelope },
+  );
+
+  await registered.get("message_received")(
+    { inboundMessageId: "first", runId: "first-run" },
+    { sessionKey: "s" },
+  );
+  await registered.get("message_received")(
+    { inboundMessageId: "second", runId: "second-run" },
+    { sessionKey: "s" },
+  );
+  await registered.get("reply_payload_sending")(
+    { kind: "final", messageId: "first", runId: "late-first-run" },
+    { sessionKey: "s" },
+  );
+
+  assert.equal(lifecycle.process(official("turn.started", "s", "memory")), null);
+  await registered.get("before_dispatch")({}, { sessionKey: "s" });
+  assert.equal(
+    lifecycle.process(official("turn.started", "s", "main")).correlation.turnId,
+    "second",
+  );
+});
+
+test("observation rollback releases autonomous work", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  const observation = {
+    type: "message.received",
+    correlation: { sessionId: "s", messageId: "message", turnId: "outer" },
+    details: { component: "message_observation" },
+  };
+  const accepted = lifecycle.processDetailed(observation);
+  lifecycle.rollback(accepted.event);
+
+  assert.equal(
+    lifecycle.process(official("turn.started", "s", "autonomous")).correlation.turnId,
+    "autonomous",
+  );
+});
+
+test("overlapping observation rollbacks cannot restore stale ownership", () => {
+  for (const rollbackOrder of [[1, 0], [0, 1]]) {
+    const lifecycle = createOpenClawUserTaskLifecycle();
+    const observations = ["first", "second"].map((messageId, index) => (
+      lifecycle.processDetailed({
+        type: "message.received",
+        correlation: { sessionId: "s", messageId, turnId: `outer-${index + 1}` },
+        details: { component: "message_observation" },
+      })
+    ));
+    for (const index of rollbackOrder) lifecycle.rollback(observations[index].event);
+
+    assert.equal(
+      lifecycle.process(official("turn.started", "s", "autonomous")).correlation.turnId,
+      "autonomous",
+    );
+  }
+});
+
+test("committed observations do not retain an unbounded predecessor chain", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle({ maxRuns: 2 });
+  for (let index = 0; index < 100; index += 1) {
+    const observation = lifecycle.processDetailed({
+      type: "message.received",
+      correlation: {
+        sessionId: "s",
+        messageId: `message-${index}`,
+        turnId: `outer-${index}`,
+      },
+      details: { component: "message_observation" },
+    });
+    lifecycle.commit(observation.event);
+    assert.equal(lifecycle.status().pendingInboundObservations, 1);
+    assert.equal(lifecycle.status().pendingObservationDepth, 0);
+  }
+});
+
+test("dispatch rollback restores coalesced pre-dispatch runs", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  const observation = {
+    type: "message.received",
+    correlation: { sessionId: "s", messageId: "message", turnId: "outer" },
+    details: { component: "message_observation" },
+  };
+  const observed = lifecycle.processDetailed(observation);
+  lifecycle.commit(observed.event);
+  assert.equal(lifecycle.process(official("turn.started", "s", "memory")), null);
+  assert.equal(lifecycle.process(official("turn.completed", "s", "memory")), null);
+
+  const firstDispatch = lifecycle.processDetailed(boundary("s", "message", "outer"));
+  lifecycle.rollback(firstDispatch.event);
+  const retriedDispatch = lifecycle.processDetailed(boundary("s", "message", "outer"));
+  lifecycle.commit(retriedDispatch.event);
+  const started = lifecycle.process(official("turn.started", "s", "main"));
+
+  assert.equal(started.correlation.turnId, "message");
+  assert.deepEqual(lifecycle.activeWork()[0].internalRunIds, ["memory", "main"]);
+});
+
+test("pre-dispatch expiry is absolute and not extended by lifecycle noise", () => {
+  let clock = 0;
+  const lifecycle = createOpenClawUserTaskLifecycle({ now: () => clock, ttlMs: 10 });
+  const observation = {
+    type: "message.received",
+    correlation: { sessionId: "s", messageId: "message", turnId: "outer" },
+    details: { component: "message_observation" },
+  };
+  const observed = lifecycle.processDetailed(observation);
+  lifecycle.commit(observed.event);
+  clock = 9;
+  assert.equal(lifecycle.process(official("turn.started", "s", "noise")), null);
+  clock = 11;
+  assert.equal(
+    lifecycle.process(official("turn.started", "s", "autonomous")).correlation.turnId,
+    "autonomous",
   );
 });
 
