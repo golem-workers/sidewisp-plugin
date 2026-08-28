@@ -30,11 +30,11 @@ test("registers supported official hooks with bounded host timeouts and no tools
   assert.equal("registerProvider" in api, false);
   registered.get("message_received").handler(
     { inboundMessageId: "message-1", text: "private inbound" },
-    { sessionKey: "agent:main:telegram:group:one" },
+    { sessionKey: "agent:main:telegram:group:one", sessionId: "runtime-session-uuid" },
   );
   registered.get("message_sent").handler(
     { outboundMessageId: "response-1", text: "private outbound", success: true },
-    { sessionKey: "agent:main:telegram:group:one" },
+    { sessionKey: "agent:main:telegram:group:one", sessionId: "runtime-session-uuid" },
   );
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(events.map(({ type }) => type), ["message.received", "message.delivered"]);
@@ -130,7 +130,7 @@ test("typed hook counters distinguish accepted and coalesced events", async () =
   assert.equal(telemetry.status().ignored, 1);
 });
 
-test("registers before_dispatch ownership synchronously before a direct agent start", async () => {
+test("registers inbound ownership synchronously before a direct agent start", async () => {
   const registered = new Map();
   const lifecycle = createOpenClawUserTaskLifecycle();
   registerOpenClawHooks(
@@ -141,14 +141,7 @@ test("registers before_dispatch ownership synchronously before a direct agent st
     { inboundMessageId: "inbound", runId: "outer-run" },
     { sessionKey: "race" },
   );
-  registered.get("before_dispatch")(
-    {
-      messageId: "inbound",
-      get content() { throw new Error("content read"); },
-      get body() { throw new Error("body read"); },
-    },
-    { sessionKey: "race" },
-  );
+  registered.get("before_dispatch")({}, { sessionKey: "race" });
   const started = lifecycle.process(official("turn.started", "race", "internal-run"));
   assert.equal(started.correlation.turnId, "inbound");
   assert.deepEqual(lifecycle.activeWork(), [
@@ -160,6 +153,131 @@ test("registers before_dispatch ownership synchronously before a direct agent st
   await new Promise((resolve) => setImmediate(resolve));
 });
 
+test("canonical session key coalesces internal runs with a different runtime session id", () => {
+  const deferred = [];
+  const lifecycle = createOpenClawUserTaskLifecycle({
+    onDeferred: (event) => { deferred.push(event); return true; },
+  });
+  const emitted = [];
+  lifecycle.process(boundary("agent:main:telegram:group:one", "inbound", "outer"));
+
+  for (const runId of ["internal-1", "internal-2"]) {
+    for (const phase of ["start", "end"]) {
+      const input = openClawAgentEventInput({
+        stream: "lifecycle",
+        sessionKey: "agent:main:telegram:group:one",
+        sessionId: "runtime-session-uuid",
+        runId,
+        data: { phase, success: true },
+      });
+      emitted.push(lifecycle.process(normalizeRuntimeEvent("openclaw", input, envelope()).event));
+    }
+  }
+  emitted.push(lifecycle.process(finalReply("agent:main:telegram:group:one", "outer")));
+
+  assert.deepEqual(
+    [...emitted.filter(Boolean), ...deferred].map(({ type, correlation }) => [type, correlation.turnId]),
+    [["turn.started", "inbound"], ["turn.completed", "inbound"]],
+  );
+});
+
+test("runtime message_received id owns one task across internal agent runs", () => {
+  const registered = new Map();
+  const persisted = [];
+  const lifecycle = createOpenClawUserTaskLifecycle({
+    onDeferred: (event) => { persisted.push(event); return true; },
+  });
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    {
+      emit: (event) => {
+        const result = lifecycle.processDetailed(event);
+        if (result.disposition === "accepted") persisted.push(result.event);
+        return result;
+      },
+      envelopeFactory: envelope,
+    },
+  );
+
+  registered.get("message_received")(
+    {
+      id: "inbound",
+      runId: "outer",
+      get content() { throw new Error("content read"); },
+    },
+    { sessionKey: "agent:main:telegram:group:one" },
+  );
+  registered.get("before_dispatch")({}, { sessionKey: "agent:main:telegram:group:one" });
+  assert.deepEqual(lifecycle.activeWork(), [{
+    kind: "task",
+    sessionId: "agent:main:telegram:group:one",
+    messageId: "inbound",
+    turnId: "inbound",
+    started: false,
+    outerRunId: "outer",
+    internalRunIds: [],
+  }]);
+  for (const runId of ["internal-1", "internal-2"]) {
+    for (const phase of ["start", "end"]) {
+      const input = openClawAgentEventInput({
+        stream: "lifecycle",
+        sessionKey: "agent:main:telegram:group:one",
+        sessionId: "runtime-session-uuid",
+        runId,
+        data: { phase, success: true },
+      });
+      const result = lifecycle.processDetailed(normalizeRuntimeEvent("openclaw", input, envelope()).event);
+      if (result.disposition === "accepted") persisted.push(result.event);
+    }
+  }
+  registered.get("reply_payload_sending")(
+    { kind: "final", runId: "outer" },
+    { sessionKey: "agent:main:telegram:group:one" },
+  );
+
+  assert.deepEqual(
+    persisted.filter(({ type }) => type.startsWith("turn."))
+      .map(({ type, correlation }) => [type, correlation.turnId]),
+    [["turn.started", "inbound"], ["turn.completed", "inbound"]],
+  );
+});
+
+test("latest same-session inbound replaces a stale observation without shifting later tasks", () => {
+  const registered = new Map();
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    { emit: (event) => lifecycle.processDetailed(event), envelopeFactory: envelope },
+  );
+
+  registered.get("message_received")({ messageId: "fast-abort" }, { sessionKey: "s" });
+  registered.get("message_received")({ messageId: "m1", runId: "outer-1" }, { sessionKey: "s" });
+  registered.get("before_dispatch")({}, { sessionKey: "s" });
+  assert.equal(lifecycle.process(official("turn.started", "s", "inner-1")).correlation.turnId, "m1");
+  registered.get("reply_payload_sending")({ kind: "final", runId: "outer-1" }, { sessionKey: "s" });
+
+  registered.get("message_received")({ messageId: "m2", runId: "outer-2" }, { sessionKey: "s" });
+  registered.get("before_dispatch")({}, { sessionKey: "s" });
+  assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
+});
+
+test("pending inbound correlation stays isolated between sessions", () => {
+  const registered = new Map();
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    { emit: (event) => lifecycle.processDetailed(event), envelopeFactory: envelope },
+  );
+
+  registered.get("message_received")({ messageId: "a" }, { sessionKey: "session-a" });
+  registered.get("message_received")({ messageId: "b" }, { sessionKey: "session-b" });
+  registered.get("before_dispatch")({}, { sessionKey: "session-b" });
+  registered.get("before_dispatch")({}, { sessionKey: "session-a" });
+
+  assert.equal(lifecycle.process(official("turn.started", "session-a", "inner-a")).correlation.turnId, "a");
+  assert.equal(lifecycle.process(official("turn.started", "session-b", "inner-b")).correlation.turnId, "b");
+});
+
 test("final reply releases exact ownership synchronously before the next task starts", () => {
   const registered = new Map();
   const lifecycle = createOpenClawUserTaskLifecycle();
@@ -168,11 +286,11 @@ test("final reply releases exact ownership synchronously before the next task st
     { emit: (event) => lifecycle.processDetailed(event), envelopeFactory: envelope },
   );
   registered.get("message_received")({ inboundMessageId: "m1", runId: "outer-1" }, { sessionKey: "s" });
-  registered.get("before_dispatch")({ messageId: "m1" }, { sessionKey: "s" });
+  registered.get("before_dispatch")({}, { sessionKey: "s" });
   lifecycle.process(official("turn.started", "s", "inner-1"));
   registered.get("reply_payload_sending")({ kind: "final", runId: "outer-1" }, { sessionKey: "s" });
   registered.get("message_received")({ inboundMessageId: "m2", runId: "outer-2" }, { sessionKey: "s" });
-  registered.get("before_dispatch")({ messageId: "m2" }, { sessionKey: "s" });
+  registered.get("before_dispatch")({}, { sessionKey: "s" });
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
 });
 
@@ -184,7 +302,7 @@ test("missing correlation fails closed while an unbound final closes the current
     { emit: (event) => lifecycle.processDetailed(event), envelopeFactory: envelope },
   );
   registered.get("message_received")({ inboundMessageId: "m1" }, { sessionKey: "missing-run" });
-  registered.get("before_dispatch")({ messageId: "m1" }, { sessionKey: "missing-run" });
+  registered.get("before_dispatch")({}, { sessionKey: "missing-run" });
   lifecycle.process(official("turn.started", "missing-run", "inner"));
   registered.get("reply_payload_sending")({ kind: "final", runId: "inner" }, { sessionKey: "missing-run" });
   assert.equal(lifecycle.activeWork().length, 0);
@@ -193,7 +311,7 @@ test("missing correlation fails closed while an unbound final closes the current
   lifecycle.process(official("turn.started", "missing-id", "autonomous"));
   assert.deepEqual(lifecycle.activeWork(), [{ kind: "run", sessionId: "missing-id", turnId: "autonomous" }]);
 
-  registered.get("message_received")({ inboundMessageId: "observed", runId: "outer" }, { sessionKey: "mismatch" });
+  registered.get("message_received")({ messageId: "observed", runId: "outer" }, { sessionKey: "mismatch" });
   registered.get("before_dispatch")({ messageId: "canonical" }, { sessionKey: "mismatch" });
   lifecycle.process(official("turn.started", "mismatch", "inner"));
   registered.get("reply_payload_sending")({ kind: "final", runId: "outer" }, { sessionKey: "mismatch" });

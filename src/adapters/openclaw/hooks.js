@@ -613,7 +613,7 @@ function toolDetails(data, failed, fallbackOperation) {
 export function openClawAgentEventInput(event = {}) {
   const data = event.data && typeof event.data === "object" ? event.data : {};
   const correlation = {
-    sessionId: event.sessionId ?? event.sessionKey,
+    sessionId: event.sessionKey ?? event.sessionId,
     turnId: event.runId,
     toolCallId: data.toolCallId
       ?? data.itemId
@@ -729,27 +729,34 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     else queueMicrotask(dispatch);
   };
   const correlation = (event, ctx) => ({
-    sessionId: ctx.sessionId ?? ctx.sessionKey ?? event.sessionId ?? event.sessionKey,
+    sessionId: ctx.sessionKey ?? ctx.sessionId ?? event.sessionKey ?? event.sessionId,
     turnId: ctx.runId ?? event.runId,
     toolCallId: ctx.toolCallId ?? event.toolCallId,
     messageId: ctx.messageId ?? event.messageId ?? event.inboundMessageId ?? event.outboundMessageId,
   });
-  const inboundKey = ({ sessionId, messageId }) => sessionId && messageId
-    ? JSON.stringify([sessionId, messageId])
-    : null;
+  const inboundCorrelation = (event, ctx) => {
+    const value = correlation(event, ctx);
+    value.messageId ??= event.id;
+    return value;
+  };
   const rememberInboundRun = (value) => {
-    const key = inboundKey(value);
-    if (!key || !value.turnId) return value;
-    inboundRuns.delete(key);
+    if (!value.sessionId || !value.messageId) return value;
+    // OpenClaw admits one normal dispatch per session and calls message_received
+    // immediately before before_dispatch. Keep only the latest observation so a
+    // fast-abort message, which has no before_dispatch, cannot shift the next task.
+    inboundRuns.delete(value.sessionId);
     while (inboundRuns.size >= Math.max(1, maxPending)) inboundRuns.delete(inboundRuns.keys().next().value);
-    inboundRuns.set(key, value.turnId);
+    inboundRuns.set(value.sessionId, value);
     return value;
   };
   const correlateDispatch = (event, ctx) => {
     const value = correlation(event, ctx);
-    const key = inboundKey(value);
-    value.turnId = key ? inboundRuns.get(key) : undefined;
-    if (key) inboundRuns.delete(key);
+    const matched = value.sessionId ? inboundRuns.get(value.sessionId) : null;
+    if (!matched) return value;
+    inboundRuns.delete(value.sessionId);
+    if (value.messageId && value.messageId !== matched.messageId) return value;
+    value.messageId ??= matched.messageId;
+    value.turnId ??= matched.turnId;
     return value;
   };
   const hooks = {
@@ -766,7 +773,7 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     message_received: observe("message_received", (event, ctx) => ({
       kind: "message_received",
       component: "message_observation",
-      correlation: rememberInboundRun(correlation(event, ctx)),
+      correlation: rememberInboundRun(inboundCorrelation(event, ctx)),
     })),
     message_sent: observe("message_sent", (event, ctx) => ({
       kind: "delivery_end",
