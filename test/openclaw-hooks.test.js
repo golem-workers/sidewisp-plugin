@@ -252,6 +252,50 @@ test("runtime message_received id owns one task across internal agent runs", () 
   );
 });
 
+test("two active-memory runs before dispatch produce only the user task pair", async () => {
+  const registered = new Map();
+  const persisted = [];
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  registerOpenClawHooks(
+    { on: (name, handler) => registered.set(name, handler) },
+    {
+      emit: (event) => {
+        const result = lifecycle.processDetailed(event);
+        if (result.disposition === "accepted") persisted.push(result.event);
+        return result;
+      },
+      envelopeFactory: envelope,
+    },
+  );
+
+  const sessionId = "agent:main:telegram:group:real";
+  registered.get("message_received")(
+    { inboundMessageId: "telegram-message", runId: "outer-run" },
+    { sessionKey: sessionId },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+
+  for (const runId of ["active-memory-1", "active-memory-2"]) {
+    assert.equal(lifecycle.process(official("turn.started", sessionId, runId)), null);
+    assert.equal(lifecycle.process(official("turn.completed", sessionId, runId)), null);
+  }
+
+  registered.get("before_dispatch")({}, { sessionKey: sessionId });
+  const userStart = lifecycle.process(official("turn.started", sessionId, "main-run"));
+  assert.equal(lifecycle.process(official("turn.completed", sessionId, "main-run")), null);
+  registered.get("reply_payload_sending")(
+    { kind: "final", runId: "outer-run" },
+    { sessionKey: sessionId },
+  );
+
+  assert.deepEqual(
+    [userStart, ...persisted]
+      .filter((event) => event?.type.startsWith("turn."))
+      .map(({ type, correlation }) => [type, correlation.turnId]),
+    [["turn.started", "telegram-message"], ["turn.completed", "telegram-message"]],
+  );
+});
+
 test("latest same-session inbound replaces a stale observation without shifting later tasks", () => {
   const registered = new Map();
   const lifecycle = createOpenClawUserTaskLifecycle();

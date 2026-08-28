@@ -96,12 +96,22 @@ export function createOpenClawUserTaskLifecycle({
   const bindings = new Map();
   const retiredBindings = new Set();
   const currentBySession = new Map();
+  const pendingInboundBySession = new Map();
   const taskKey = (sessionId, messageId) => sessionId && messageId
     ? JSON.stringify(["task", sessionId, messageId])
     : null;
   const runKey = (sessionId, runId) => runId
     ? JSON.stringify(["run", sessionId ?? "", runId])
     : null;
+  const rememberRetiredRuns = (sessionId, runIds) => {
+    if (maxRuns < 1) return;
+    for (const runId of runIds) {
+      const binding = runKey(sessionId, runId);
+      retiredBindings.delete(binding);
+      while (retiredBindings.size >= maxRuns) retiredBindings.delete(retiredBindings.values().next().value);
+      retiredBindings.add(binding);
+    }
+  };
   const retarget = (event, state) => {
     const descriptors = Object.getOwnPropertyDescriptors(event);
     delete descriptors.correlation;
@@ -147,6 +157,11 @@ export function createOpenClawUserTaskLifecycle({
   const prune = (nowMs) => {
     for (const [key, state] of records) {
       if (state.terminal && state.durable && nowMs - state.updatedAt >= ttlMs) remove(key);
+    }
+    for (const [sessionId, pending] of pendingInboundBySession) {
+      if (nowMs - pending.updatedAt < ttlMs) continue;
+      rememberRetiredRuns(sessionId, pending.runIds);
+      pendingInboundBySession.delete(sessionId);
     }
   };
   const track = (key, state) => {
@@ -323,15 +338,47 @@ export function createOpenClawUserTaskLifecycle({
     prune(nowMs);
     const correlation = event?.correlation ?? {};
     const component = event?.details?.component;
+    if (event?.type === "message.received" && component === "message_observation") {
+      if (!correlation.sessionId || !correlation.messageId) return accepted(event);
+      const previous = pendingInboundBySession.get(correlation.sessionId);
+      if (previous?.messageId === correlation.messageId) {
+        previous.updatedAt = nowMs;
+        return accepted(event);
+      }
+      if (previous && previous.messageId !== correlation.messageId) {
+        rememberRetiredRuns(correlation.sessionId, previous.runIds);
+      }
+      pendingInboundBySession.delete(correlation.sessionId);
+      if (maxRuns < 1) return accepted(event);
+      while (pendingInboundBySession.size >= maxRuns) {
+        const sessionId = pendingInboundBySession.keys().next().value;
+        const evicted = pendingInboundBySession.get(sessionId);
+        rememberRetiredRuns(sessionId, evicted.runIds);
+        pendingInboundBySession.delete(sessionId);
+      }
+      pendingInboundBySession.set(correlation.sessionId, {
+        messageId: correlation.messageId,
+        runIds: new Set(),
+        updatedAt: nowMs,
+      });
+      return accepted(event);
+    }
     if (event?.type === "message.received" && component === "before_dispatch") {
       const key = taskKey(correlation.sessionId, correlation.messageId);
       if (!key || records.has(key)) return coalesced();
+      const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
+      const preDispatchRunIds = pendingInbound?.messageId === correlation.messageId
+        ? [...pendingInbound.runIds]
+        : [];
+      if (pendingInbound?.messageId === correlation.messageId) {
+        pendingInboundBySession.delete(correlation.sessionId);
+      }
       const previousKey = currentBySession.get(correlation.sessionId);
       const previous = previousKey ? records.get(previousKey) : null;
       const state = {
         kind: "task", sessionId: correlation.sessionId, messageId: correlation.messageId,
         turnId: correlation.messageId, outerRunId: correlation.turnId,
-        internalRunIds: [], started: false, terminal: false, durable: false,
+        internalRunIds: preDispatchRunIds, started: false, terminal: false, durable: false,
         pendingTerminal: null, pendingRetryable: false, pendingAwaitingFinal: false,
         pendingConfirmed: false,
         pendingPersistAttempts: 0, pendingDeadline: null, pendingTimer: null,
@@ -363,6 +410,7 @@ export function createOpenClawUserTaskLifecycle({
       }
       currentBySession.set(state.sessionId, key);
       bind(state, key, state.outerRunId);
+      for (const runId of preDispatchRunIds) bind(state, key, runId);
       state.staged = false;
       return accepted(event);
     }
@@ -401,6 +449,20 @@ export function createOpenClawUserTaskLifecycle({
       // even when OpenClaw omits an explicit continuation marker.
       if (candidate) {
         [key, state] = [candidateKey, candidate];
+      }
+    }
+    if (!state && !key && (started || terminal)) {
+      const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
+      if (pendingInbound) {
+        pendingInbound.updatedAt = nowMs;
+        if (correlation.turnId) {
+          pendingInbound.runIds.delete(correlation.turnId);
+          while (pendingInbound.runIds.size >= 64) {
+            pendingInbound.runIds.delete(pendingInbound.runIds.values().next().value);
+          }
+          pendingInbound.runIds.add(correlation.turnId);
+        }
+        return coalesced();
       }
     }
     if (state) {
