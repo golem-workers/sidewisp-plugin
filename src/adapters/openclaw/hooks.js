@@ -130,6 +130,7 @@ export function createOpenClawUserTaskLifecycle({
     clearPendingTimer(state);
     state.pendingTerminal = null;
     state.pendingRetryable = false;
+    state.pendingAwaitingFinal = false;
     state.pendingConfirmed = false;
     state.pendingPersistAttempts = 0;
     state.pendingDeadline = null;
@@ -200,6 +201,7 @@ export function createOpenClawUserTaskLifecycle({
     const event = state.pendingTerminal;
     if (!event || state.terminal || records.get(key) !== state) return false;
     clearPendingTimer(state);
+    state.pendingAwaitingFinal = false;
     state.pendingConfirmed = true;
     state.terminal = true;
     state.durable = true;
@@ -255,6 +257,7 @@ export function createOpenClawUserTaskLifecycle({
     clearPending(state, true);
     state.pendingTerminal = retarget(event, state);
     state.pendingRetryable = NEGATIVE_TURN_TERMINALS.has(event?.type);
+    state.pendingAwaitingFinal = event?.type === "turn.completed";
     state.pendingConfirmed = false;
     state.pendingPersistAttempts = 0;
     state.pendingDeadline = isRetryableNegative(event)
@@ -269,6 +272,7 @@ export function createOpenClawUserTaskLifecycle({
       ? {
           event: state.pendingTerminal,
           retryable: state.pendingRetryable,
+          awaitingFinal: state.pendingAwaitingFinal,
           confirmed: state.pendingConfirmed,
           persistAttempts: state.pendingPersistAttempts,
           deadline: state.pendingDeadline,
@@ -277,6 +281,7 @@ export function createOpenClawUserTaskLifecycle({
     clearPendingTimer(state);
     state.pendingTerminal = null;
     state.pendingRetryable = false;
+    state.pendingAwaitingFinal = false;
     state.pendingConfirmed = false;
     state.pendingPersistAttempts = 0;
     state.pendingDeadline = null;
@@ -327,7 +332,8 @@ export function createOpenClawUserTaskLifecycle({
         kind: "task", sessionId: correlation.sessionId, messageId: correlation.messageId,
         turnId: correlation.messageId, outerRunId: correlation.turnId,
         internalRunIds: [], started: false, terminal: false, durable: false,
-        pendingTerminal: null, pendingRetryable: false, pendingConfirmed: false,
+        pendingTerminal: null, pendingRetryable: false, pendingAwaitingFinal: false,
+        pendingConfirmed: false,
         pendingPersistAttempts: 0, pendingDeadline: null, pendingTimer: null,
         registrationEvent: event, startEvent: null, terminalEvent: null,
         previousOnRollback: null,
@@ -361,8 +367,8 @@ export function createOpenClawUserTaskLifecycle({
       return accepted(event);
     }
     if (component === "final_reply" && event?.type === "turn.completed") {
-      let [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
-      if (!state && !key) [key, state] = currentTask(correlation.sessionId);
+      if (!correlation.turnId) return coalesced();
+      const [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
       if (!state) return coalesced();
       state.updatedAt = nowMs;
       if (state.terminal) return coalesced();
@@ -371,13 +377,6 @@ export function createOpenClawUserTaskLifecycle({
         state.durable = true;
         state.updatedAt = nowMs;
         clearCurrent(key, state);
-        return coalesced();
-      }
-      if (state.pendingTerminal) {
-        if (state.pendingRetryable && !state.pendingConfirmed) {
-          return accepted(complete(key, state, retarget(event, state), nowMs));
-        }
-        attemptPending(key, state);
         return coalesced();
       }
       return accepted(complete(key, state, retarget(event, state), nowMs));
@@ -395,8 +394,16 @@ export function createOpenClawUserTaskLifecycle({
       return accepted(event);
     }
     let [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
-    const exact = Boolean(state);
-    if (!state && !key) [key, state] = currentTask(correlation.sessionId);
+    if (!state && !key && started) {
+      const [candidateKey, candidate] = currentTask(correlation.sessionId);
+      const claimsFirstRun = candidate && !candidate.started;
+      const claimsRetry = candidate?.pendingRetryable === true;
+      const claimsContinuation = candidate?.pendingAwaitingFinal === true
+        && candidate.pendingTerminal?.details?.status === "continuation-pending";
+      if (claimsFirstRun || claimsRetry || claimsContinuation) {
+        [key, state] = [candidateKey, candidate];
+      }
+    }
     if (state) {
       state.updatedAt = nowMs;
       if (state.terminal) return coalesced();
@@ -409,24 +416,6 @@ export function createOpenClawUserTaskLifecycle({
         state.started = true;
         state.startEvent = retarget(event, state);
         return accepted(state.startEvent);
-      }
-      if (
-        exact
-        && state.started
-        && component === "agent_lifecycle_end"
-        && state.outerRunId
-        && correlation.turnId === state.outerRunId
-        && !NEGATIVE_TURN_TERMINALS.has(event.type)
-      ) {
-        return accepted(complete(key, state, retarget(event, state), nowMs));
-      }
-      if (
-        exact
-        && correlation.turnId === state.outerRunId
-        && component !== "agent_lifecycle_error"
-        && !NEGATIVE_TURN_TERMINALS.has(event.type)
-      ) {
-        return accepted(complete(key, state, retarget(event, state), nowMs));
       }
       if (!state.started) return coalesced();
       return deferTerminal(key, state, event, nowMs) ? buffered() : coalesced();
@@ -509,6 +498,7 @@ export function createOpenClawUserTaskLifecycle({
         if (state.replacedPending) {
           state.pendingTerminal = state.replacedPending.event;
           state.pendingRetryable = state.replacedPending.retryable;
+          state.pendingAwaitingFinal = state.replacedPending.awaitingFinal;
           state.pendingConfirmed = state.replacedPending.confirmed;
           state.pendingPersistAttempts = state.replacedPending.persistAttempts;
           state.pendingDeadline = state.replacedPending.deadline;
@@ -517,6 +507,7 @@ export function createOpenClawUserTaskLifecycle({
         } else if (state.kind === "task") {
           state.pendingTerminal = event;
           state.pendingRetryable = false;
+          state.pendingAwaitingFinal = false;
           state.pendingConfirmed = true;
           state.pendingPersistAttempts = 0;
           state.pendingDeadline = now() + persistRetryBaseMs;
@@ -529,7 +520,9 @@ export function createOpenClawUserTaskLifecycle({
     },
     async flushPending() {
       for (const [key, state] of records) {
-        if (state.pendingTerminal && !state.terminal) attemptPending(key, state);
+        if (state.pendingTerminal && !state.pendingAwaitingFinal && !state.terminal) {
+          attemptPending(key, state);
+        }
       }
     },
     activeRunIds,
@@ -538,7 +531,8 @@ export function createOpenClawUserTaskLifecycle({
       const terminals = [];
       for (const [key, state] of [...records]) {
         if (state.terminal) continue;
-        if (state.pendingTerminal) continue;
+        if (state.pendingTerminal && !state.pendingAwaitingFinal) continue;
+        if (state.pendingAwaitingFinal) clearPending(state, true);
         if (state.kind === "task" && !state.started) {
           state.terminal = true;
           state.durable = true;
@@ -559,6 +553,7 @@ export function createOpenClawUserTaskLifecycle({
     status: () => Object.freeze({
       activeRuns: activeWork().length,
       pendingTerminals: [...records.values()].filter((state) => state.pendingTerminal).length,
+      awaitingFinals: [...records.values()].filter((state) => state.pendingAwaitingFinal).length,
       pendingTimers: [...records.values()].filter((state) => state.pendingTimer != null).length,
       trackedRuns: records.size,
     }),
@@ -628,13 +623,29 @@ export function openClawAgentEventInput(event = {}) {
         || ["cancelled", "canceled", "aborted", "killed"].includes(
           typeof data.stopReason === "string" ? data.stopReason.toLowerCase() : "",
         );
+      const terminalOrUnknown = data.phase !== "end"
+        || data.success === false
+        || data.aborted === true
+        || data.timedOut === true
+        || data.outcome === "timeout"
+        || data.status === "cancelled"
+        || data.status === "timed_out"
+        || data.timeoutPhase != null
+        || Object.hasOwn(data, "error");
+      const yieldedContinuation = !terminalOrUnknown
+        && data.yielded === true
+        && data.livenessState === "paused"
+        && data.stopReason === "end_turn";
+      const toolCallsContinuation = !terminalOrUnknown
+        && data.stopReason === "tool_calls";
+      const continuationPending = yieldedContinuation || toolCallsContinuation;
       return {
         kind: "turn_end",
         outcome: cancelled ? "cancelled" : timedOut ? "timeout" : data.phase === "error" || data.success === false ? "failure" : "success",
         component: data.phase === "end" ? "agent_lifecycle_end" : "agent_lifecycle_error",
         status: data.phase === "error" && Number.isSafeInteger(data.endedAt)
           ? "terminal-candidate"
-          : undefined,
+          : continuationPending ? "continuation-pending" : undefined,
         durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
         correlation,
       };

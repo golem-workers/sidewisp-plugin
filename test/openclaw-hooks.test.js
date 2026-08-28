@@ -168,7 +168,13 @@ test("canonical session key coalesces internal runs with a different runtime ses
         sessionKey: "agent:main:telegram:group:one",
         sessionId: "runtime-session-uuid",
         runId,
-        data: { phase, success: true },
+        data: {
+          phase,
+          success: true,
+          ...(phase === "end" && runId === "internal-1"
+            ? { yielded: true, livenessState: "paused", stopReason: "end_turn" }
+            : {}),
+        },
       });
       emitted.push(lifecycle.process(normalizeRuntimeEvent("openclaw", input, envelope()).event));
     }
@@ -224,7 +230,11 @@ test("runtime message_received id owns one task across internal agent runs", () 
         sessionKey: "agent:main:telegram:group:one",
         sessionId: "runtime-session-uuid",
         runId,
-        data: { phase, success: true },
+        data: {
+          phase,
+          success: true,
+          ...(phase === "end" && runId === "internal-1" ? { stopReason: "tool_calls" } : {}),
+        },
       });
       const result = lifecycle.processDetailed(normalizeRuntimeEvent("openclaw", input, envelope()).event);
       if (result.disposition === "accepted") persisted.push(result.event);
@@ -294,7 +304,7 @@ test("final reply releases exact ownership synchronously before the next task st
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
 });
 
-test("missing correlation fails closed while an unbound final closes the current task", () => {
+test("missing correlation fails closed until a final uses an exact bound run", () => {
   const registered = new Map();
   const lifecycle = createOpenClawUserTaskLifecycle();
   registerOpenClawHooks(
@@ -315,7 +325,7 @@ test("missing correlation fails closed while an unbound final closes the current
   registered.get("before_dispatch")({ messageId: "canonical" }, { sessionKey: "mismatch" });
   lifecycle.process(official("turn.started", "mismatch", "inner"));
   registered.get("reply_payload_sending")({ kind: "final", runId: "outer" }, { sessionKey: "mismatch" });
-  assert.equal(lifecycle.activeWork().some(({ sessionId }) => sessionId === "mismatch"), false);
+  assert.equal(lifecycle.activeWork().some(({ sessionId }) => sessionId === "mismatch"), true);
   registered.get("reply_payload_sending")({ kind: "final", runId: "inner" }, { sessionKey: "mismatch" });
   assert.equal(lifecycle.activeWork().some(({ sessionId }) => sessionId === "mismatch"), false);
 });
@@ -377,6 +387,47 @@ test("lifecycle phase components never read private errors or messages", () => {
     assert.equal(mapped.status, phase === "error" ? "terminal-candidate" : undefined);
     assert.equal(JSON.stringify(mapped).includes("123"), false);
   }
+});
+
+test("maps only host-confirmed continuation markers", () => {
+  for (const data of [
+    {
+      phase: "end", success: true, yielded: true,
+      livenessState: "paused", stopReason: "end_turn",
+    },
+    { phase: "end", success: true, stopReason: "tool_calls" },
+  ]) {
+    assert.equal(openClawAgentEventInput({
+      runId: "run", sessionId: "s", stream: "lifecycle", data,
+    }).status, "continuation-pending");
+  }
+  for (const data of [
+    { phase: "end", success: true, yielded: true, livenessState: "working", stopReason: "completed" },
+    { phase: "end", success: true, yielded: true, livenessState: "paused", stopReason: "completed" },
+    { phase: "end", success: true, yielded: false, livenessState: "paused", stopReason: "end_turn" },
+    { phase: "end", success: false, stopReason: "tool_calls" },
+    { phase: "end", aborted: true, stopReason: "tool_calls" },
+    { phase: "end", timedOut: true, stopReason: "tool_calls" },
+    { phase: "end", outcome: "timeout", stopReason: "tool_calls" },
+    { phase: "end", status: "cancelled", stopReason: "tool_calls" },
+    { phase: "end", status: "timed_out", stopReason: "tool_calls" },
+    { phase: "end", timeoutPhase: "model", stopReason: "tool_calls" },
+    { phase: "end", error: undefined, stopReason: "tool_calls" },
+    { phase: "end", success: true, stopReason: "complete" },
+  ]) {
+    assert.equal(openClawAgentEventInput({
+      runId: "run", sessionId: "s", stream: "lifecycle", data,
+    }).status, undefined);
+  }
+
+  const privateError = {
+    phase: "end",
+    stopReason: "tool_calls",
+    get error() { throw new Error("private error read"); },
+  };
+  assert.equal(openClawAgentEventInput({
+    runId: "run", sessionId: "s", stream: "lifecycle", data: privateError,
+  }).status, undefined);
 });
 
 test("official agent event API covers cancellation and user approval without content", () => {
@@ -457,7 +508,11 @@ const finalReply = (sessionId, runId) => ({
   correlation: { sessionId, turnId: runId },
   details: { component: "final_reply" },
 });
-const official = (type, sessionId, turnId) => ({ type, correlation: { sessionId, turnId }, details: {} });
+const official = (type, sessionId, turnId, details = {}) => ({
+  type,
+  correlation: { sessionId, turnId },
+  details,
+});
 const manualTimers = () => {
   let clock = 0;
   let sequence = 0;
@@ -496,9 +551,15 @@ test("coalesces three internal pairs and completes only on one final payload", (
     onDeferred: (event) => { observed.push(event); return true; },
   });
   observed.push(lifecycle.process(boundary("s", "message", "outer")));
-  for (const runId of ["internal-1", "internal-2", "internal-3"]) {
+  const runIds = ["internal-1", "internal-2", "internal-3"];
+  for (const [index, runId] of runIds.entries()) {
     observed.push(lifecycle.process(official("turn.started", "s", runId)));
-    observed.push(lifecycle.process(official("turn.completed", "s", runId)));
+    observed.push(lifecycle.process(official(
+      "turn.completed",
+      "s",
+      runId,
+      index < runIds.length - 1 ? { status: "continuation-pending" } : {},
+    )));
   }
   observed.push(lifecycle.process(finalReply("s", "outer")));
   const transitions = observed.filter((event) => event?.type.startsWith("turn."));
@@ -508,31 +569,37 @@ test("coalesces three internal pairs and completes only on one final payload", (
 
 test("successful lifecycle end stays pending until an exact final boundary", () => {
   const deferred = [];
+  const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
     onDeferred: (event) => { deferred.push(event); return true; },
+    onSuppressed: (event) => suppressed.push(event),
   });
   lifecycle.process(boundary("s", "m", "outer"));
   lifecycle.process(official("turn.started", "s", "inner"));
   assert.equal(lifecycle.process(official("turn.completed", "s", "inner")), null);
   assert.equal(lifecycle.status().pendingTerminals, 1);
   assert.equal(deferred.length, 0);
-  assert.equal(lifecycle.process(finalReply("s", "outer")), null);
-  assert.deepEqual(deferred.map(({ type, correlation }) => [type, correlation.turnId]), [["turn.completed", "m"]]);
+  const final = lifecycle.process(finalReply("s", "outer"));
+  assert.deepEqual([final.type, final.correlation.turnId], ["turn.completed", "m"]);
+  lifecycle.commit(final);
+  assert.deepEqual(deferred, []);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed"]);
   assert.equal(lifecycle.status().activeRuns, 0);
 });
 
-test("new dispatch durably closes pending internal success before replacing current", () => {
-  const deferred = [];
+test("final reply durably closes pending internal success before the next dispatch", () => {
+  const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
-    onDeferred: (event) => { deferred.push(event); return true; },
+    onSuppressed: (event) => suppressed.push(event),
   });
   lifecycle.process(boundary("s", "m1", "outer-1"));
   lifecycle.process(official("turn.started", "s", "inner-1"));
   lifecycle.process(official("turn.completed", "s", "inner-1"));
-  assert.equal(lifecycle.process(finalReply("s")), null);
+  const final = lifecycle.process(finalReply("s", "outer-1"));
+  lifecycle.commit(final);
   lifecycle.process(boundary("s", "m2", "outer-2"));
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
-  assert.deepEqual(deferred.map(({ correlation }) => correlation.turnId), ["m1"]);
+  assert.deepEqual(suppressed.map(({ correlation }) => correlation.turnId), ["m1"]);
   assert.deepEqual(lifecycle.activeWork(), [{
     kind: "task", sessionId: "s", messageId: "m2", turnId: "m2", started: true,
     outerRunId: "outer-2", internalRunIds: ["inner-2"],
@@ -627,7 +694,12 @@ test("two lifecycle runs without trusted outer produce one task pair on final", 
   lifecycle.process(boundary("s", "m"));
   for (const runId of ["r1", "r2"]) {
     observed.push(lifecycle.process(official("turn.started", "s", runId)));
-    observed.push(lifecycle.process(official("turn.completed", "s", runId)));
+    observed.push(lifecycle.process(official(
+      "turn.completed",
+      "s",
+      runId,
+      runId === "r1" ? { status: "continuation-pending" } : {},
+    )));
   }
   observed.push(lifecycle.process(finalReply("s", "r2")));
   assert.deepEqual(
@@ -636,16 +708,20 @@ test("two lifecycle runs without trusted outer produce one task pair on final", 
   );
 });
 
-test("authoritative final without run id closes the only current task", () => {
-  const deferred = [];
+test("final without a run id fails closed until an exact final arrives", () => {
+  const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
-    onDeferred: (event) => { deferred.push(event); return true; },
+    onSuppressed: (event) => suppressed.push(event),
   });
   lifecycle.process(boundary("s", "m"));
   lifecycle.process(official("turn.started", "s", "r1"));
   lifecycle.process(official("turn.completed", "s", "r1"));
   assert.equal(lifecycle.process(finalReply("s")), null);
-  assert.deepEqual(deferred.map(({ type, correlation }) => [type, correlation.turnId]), [["turn.completed", "m"]]);
+  assert.equal(lifecycle.status().activeRuns, 1);
+  assert.equal(lifecycle.status().pendingTerminals, 1);
+  const final = lifecycle.process(finalReply("s", "r1"));
+  lifecycle.commit(final);
+  assert.deepEqual(suppressed.map(({ type, correlation }) => [type, correlation.turnId]), [["turn.completed", "m"]]);
   assert.equal(lifecycle.status().activeRuns, 0);
 });
 
@@ -654,12 +730,14 @@ test("late final with an old exact binding cannot close newer current task", () 
   lifecycle.process(boundary("s", "m1"));
   lifecycle.process(official("turn.started", "s", "old-run"));
   lifecycle.process(official("turn.completed", "s", "old-run"));
-  lifecycle.process(finalReply("s"));
+  lifecycle.process(finalReply("s", "old-run"));
   lifecycle.process(boundary("s", "m2"));
+  lifecycle.process(official("turn.started", "s", "new-run"));
+  assert.equal(lifecycle.process(finalReply("s")), null);
   assert.equal(lifecycle.process(finalReply("s", "old-run")), null);
   assert.deepEqual(lifecycle.activeWork(), [{
-    kind: "task", sessionId: "s", messageId: "m2", turnId: "m2", started: false,
-    internalRunIds: [],
+    kind: "task", sessionId: "s", messageId: "m2", turnId: "m2", started: true,
+    internalRunIds: ["new-run"],
   }]);
 });
 
@@ -674,12 +752,67 @@ test("retry start suppresses first internal failure without trusted outer", () =
   assert.equal(lifecycle.status().pendingTerminals, 0);
 });
 
-test("authoritative outer completion emits immediately", () => {
-  const lifecycle = createOpenClawUserTaskLifecycle();
+test("authoritative outer completion stays pending until the final reply", () => {
+  const suppressed = [];
+  const lifecycle = createOpenClawUserTaskLifecycle({
+    onSuppressed: (event) => suppressed.push(event),
+  });
   lifecycle.process(boundary("s", "m", "outer"));
   lifecycle.process(official("turn.started", "s", "outer"));
-  assert.equal(lifecycle.process(official("turn.completed", "s", "outer")).type, "turn.completed");
-  assert.equal(lifecycle.process(finalReply("s", "outer")), null);
+  assert.equal(lifecycle.process(official("turn.completed", "s", "outer")), null);
+  assert.equal(lifecycle.status().activeRuns, 1);
+  const final = lifecycle.process(finalReply("s", "outer"));
+  assert.equal(final.type, "turn.completed");
+  lifecycle.commit(final);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed"]);
+});
+
+test("outer lifecycle end and continuation form one task pair before final reply", () => {
+  const suppressed = [];
+  const lifecycle = createOpenClawUserTaskLifecycle({
+    onSuppressed: (event) => suppressed.push(event),
+  });
+  lifecycle.process(boundary("s", "m1", "outer-1"));
+  const start = lifecycle.process(official("turn.started", "s", "outer-1"));
+  assert.equal(lifecycle.process(official(
+    "turn.completed", "s", "outer-1", { status: "continuation-pending" },
+  )), null);
+  assert.equal(lifecycle.process(official("turn.started", "s", "continuation")), null);
+  lifecycle.process({
+    type: "tool.started",
+    correlation: { sessionId: "s", turnId: "continuation" },
+    details: { operation: "user_approval" },
+  });
+  assert.equal(lifecycle.process(official("turn.completed", "s", "continuation")), null);
+  const final = lifecycle.process(finalReply("s", "continuation"));
+  lifecycle.commit(final);
+
+  assert.deepEqual([start, final].map(({ type, correlation }) => [type, correlation.turnId]), [
+    ["turn.started", "m1"], ["turn.completed", "m1"],
+  ]);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed", "turn.completed"]);
+
+  assert.equal(lifecycle.process(official("turn.started", "s", "autonomous")).correlation.turnId, "autonomous");
+  assert.equal(lifecycle.process(official("turn.completed", "s", "autonomous")).correlation.turnId, "autonomous");
+
+  lifecycle.process(boundary("s", "m2", "outer-2"));
+  assert.equal(lifecycle.process(official("turn.started", "s", "outer-2")).correlation.turnId, "m2");
+});
+
+test("unmarked same-session run after a no-reply success stays autonomous", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  lifecycle.process(boundary("s", "m", "outer"));
+  lifecycle.process(official("turn.started", "s", "task-run"));
+  lifecycle.process(official("turn.completed", "s", "task-run"));
+
+  const autonomousStart = lifecycle.process(official("turn.started", "s", "cron-run"));
+  const autonomousEnd = lifecycle.process(official("turn.completed", "s", "cron-run"));
+  assert.deepEqual(
+    [autonomousStart, autonomousEnd].map(({ type, correlation }) => [type, correlation.turnId]),
+    [["turn.started", "cron-run"], ["turn.completed", "cron-run"]],
+  );
+  assert.equal(lifecycle.status().activeRuns, 1);
+  assert.equal(lifecycle.process(finalReply("s", "task-run")).correlation.turnId, "m");
 });
 
 test("exact outer negative outcomes recover when a final payload follows within grace", () => {
@@ -719,13 +852,20 @@ test("untrusted lifecycle runs coalesce through normalized input until final", (
     onDeferred: (event) => { deferred.push(event); return true; },
     onSuppressed: (event) => suppressed.push(event),
   });
-  const mapped = (phase, runId) => normalizeRuntimeEvent("openclaw", openClawAgentEventInput({
-    stream: "lifecycle", sessionId: "s", runId, data: { phase, success: true },
+  const mapped = (phase, runId, continuationPending = false) => normalizeRuntimeEvent("openclaw", openClawAgentEventInput({
+    stream: "lifecycle", sessionId: "s", runId,
+    data: {
+      phase,
+      success: true,
+      ...(continuationPending
+        ? { yielded: true, livenessState: "paused", stopReason: "end_turn" }
+        : {}),
+    },
   }), envelope()).event;
   lifecycle.process(boundary("s", "m"));
   const emitted = [
     lifecycle.process(mapped("start", "r1")),
-    lifecycle.process(mapped("end", "r1")),
+    lifecycle.process(mapped("end", "r1", true)),
     lifecycle.process(mapped("start", "r2")),
     lifecycle.process(mapped("end", "r2")),
     lifecycle.process(finalReply("s", "r2")),
@@ -763,13 +903,15 @@ test("negative lifecycle end uses grace even for a trusted outer run", () => {
   assert.equal(trusted.status().pendingTimers, 1);
   assert.equal(trusted.process(official("turn.started", "s", "retry")), null);
   trusted.process(official("turn.completed", "s", "retry"));
-  assert.equal(trusted.process(finalReply("s", "retry")), null);
-  assert.deepEqual(deferred.map(({ type }) => type), ["turn.completed"]);
-  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
+  const final = trusted.process(finalReply("s", "retry"));
+  trusted.commit(final);
+  assert.equal(final.type, "turn.completed");
+  assert.deepEqual(deferred, []);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed", "turn.completed"]);
   assert.equal(trusted.status().activeRuns, 0);
 });
 
-test("lifecycle end replaces an intermediate error before final", () => {
+test("final reply transactionally replaces an intermediate lifecycle error", () => {
   const deferred = [];
   const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
@@ -785,10 +927,12 @@ test("lifecycle end replaces an intermediate error before final", () => {
   const end = mapped("end", true);
   assert.equal(error.eventId, end.eventId);
   lifecycle.process(error);
-  lifecycle.process(end);
-  lifecycle.process(finalReply("s", "run"));
+  assert.equal(lifecycle.process(end), null);
   assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
-  assert.deepEqual(deferred.map(({ type }) => type), ["turn.completed"]);
+  const final = lifecycle.process(finalReply("s", "run"));
+  lifecycle.commit(final);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed", "turn.completed"]);
+  assert.deepEqual(deferred, []);
 });
 
 test("negative lifecycle candidate settles once after the OpenClaw retry grace", () => {
@@ -852,7 +996,7 @@ test("retry start before grace suppresses failure and exact final completes once
   assert.equal(lifecycle.status().activeRuns, 0);
 });
 
-test("successful lifecycle end replaces error candidate without a success timer", () => {
+test("final reply replaces an error candidate and cancels its timer", () => {
   const timers = manualTimers();
   const deferred = [];
   const suppressed = [];
@@ -870,13 +1014,15 @@ test("successful lifecycle end replaces error candidate without a success timer"
   lifecycle.process(boundary("s", "m", "outer"));
   lifecycle.process(official("turn.started", "s", "inner"));
   lifecycle.process(mapped("error", false));
-  lifecycle.process(mapped("end", true));
+  assert.equal(lifecycle.process(mapped("end", true)), null);
   assert.equal(lifecycle.status().pendingTimers, 0);
+  assert.equal(lifecycle.status().awaitingFinals, 1);
   timers.advance(60_000);
   assert.deepEqual(deferred, []);
-  assert.equal(lifecycle.process(finalReply("s", "outer")), null);
-  assert.deepEqual(deferred.map(({ type }) => type), ["turn.completed"]);
-  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
+  const final = lifecycle.process(finalReply("s", "outer"));
+  lifecycle.commit(final);
+  assert.equal(lifecycle.status().pendingTimers, 0);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed", "turn.completed"]);
 });
 
 test("pending success never expires and a later internal start remains coalesced", () => {
@@ -892,15 +1038,19 @@ test("pending success never expires and a later internal start remains coalesced
   });
   lifecycle.process(boundary("s", "m", "outer"));
   lifecycle.process(official("turn.started", "s", "inner-1"));
-  lifecycle.process(official("turn.completed", "s", "inner-1"));
+  lifecycle.process(official(
+    "turn.completed", "s", "inner-1", { status: "continuation-pending" },
+  ));
   assert.equal(lifecycle.status().pendingTimers, 0);
   timers.advance(60_000);
   assert.deepEqual(deferred, []);
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")), null);
   lifecycle.process(official("turn.completed", "s", "inner-2"));
-  assert.equal(lifecycle.process(finalReply("s", "outer")), null);
-  assert.deepEqual(deferred.map(({ type }) => type), ["turn.completed"]);
-  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed"]);
+  const final = lifecycle.process(finalReply("s", "outer"));
+  lifecycle.commit(final);
+  assert.equal(final.type, "turn.completed");
+  assert.deepEqual(deferred, []);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed", "turn.completed"]);
 });
 
 test("final commit cancels negative timer while rollback restores its remaining grace", () => {
@@ -1130,17 +1280,44 @@ test("flush attempts each pending terminal once and leaves failed writes active"
   assert.equal(lifecycle.status().activeRuns, 1);
 });
 
-test("shutdown flush durably completes pending success before cancellation", async () => {
+test("shutdown cancels a task that never reached a final reply", async () => {
   const deferred = [];
+  const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
     onDeferred: (event) => { deferred.push(event); return true; },
+    onSuppressed: (event) => suppressed.push(event),
   });
   lifecycle.process(boundary("s", "m", "outer"));
   lifecycle.process(official("turn.started", "s", "inner"));
   lifecycle.process(official("turn.completed", "s", "inner"));
+  assert.equal(lifecycle.status().awaitingFinals, 1);
   await lifecycle.flushPending();
-  assert.deepEqual(deferred.map(({ type }) => type), ["turn.completed"]);
-  assert.deepEqual(lifecycle.cancelActiveRuns(() => assert.fail("must not cancel durable success")), []);
+  assert.deepEqual(deferred, []);
+  const cancelled = lifecycle.cancelActiveRuns((turnId, sessionId) => ({
+    type: "turn.cancelled", correlation: { turnId, sessionId }, details: {},
+  }));
+  assert.deepEqual(cancelled.map(({ type, correlation }) => [type, correlation.turnId]), [
+    ["turn.cancelled", "m"],
+  ]);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed"]);
+  assert.equal(lifecycle.status().awaitingFinals, 0);
+});
+
+test("next inbound closes a no-reply success before opening the new task", () => {
+  const deferred = [];
+  const lifecycle = createOpenClawUserTaskLifecycle({
+    onDeferred: (event) => { deferred.push(event); return true; },
+  });
+  lifecycle.process(boundary("s", "m1", "outer-1"));
+  lifecycle.process(official("turn.started", "s", "inner-1"));
+  lifecycle.process(official("turn.completed", "s", "inner-1"));
+  assert.equal(lifecycle.status().awaitingFinals, 1);
+
+  assert.ok(lifecycle.process(boundary("s", "m2", "outer-2")));
+  assert.deepEqual(deferred.map(({ type, correlation }) => [type, correlation.turnId]), [
+    ["turn.completed", "m1"],
+  ]);
+  assert.deepEqual(lifecycle.activeWork().map(({ messageId }) => messageId), ["m2"]);
 });
 
 test("shutdown preserves the original pending terminal after failed flush", async () => {
@@ -1170,13 +1347,15 @@ test("direct terminal rollback restores current ownership when no task replaced 
   lifecycle.process(official("turn.started", "s", "inner-1"));
   const terminal = lifecycle.process(finalReply("s", "outer-1"));
   lifecycle.rollback(terminal);
-  assert.equal(lifecycle.process(finalReply("s", "outer-1")), null);
+  const retried = lifecycle.process(finalReply("s", "outer-1"));
+  lifecycle.commit(retried);
+  assert.equal(retried.type, "turn.completed");
   assert.equal(lifecycle.status().activeRuns, 0);
   lifecycle.process(boundary("s", "m2", "outer-2"));
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
 });
 
-test("replaced pending terminal settles only after commit and rollback restores it", () => {
+test("confirmed recovery survives final rollback and settles after commit", () => {
   const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({ onSuppressed: (event) => suppressed.push(event) });
   const lifecycleError = {
@@ -1190,17 +1369,19 @@ test("replaced pending terminal settles only after commit and rollback restores 
   lifecycle.process(boundary("s", "m", "outer"));
   lifecycle.process(official("turn.started", "s", "outer"));
   lifecycle.process(lifecycleError);
-  const rolledBack = lifecycle.process(lifecycleEnd());
+  assert.equal(lifecycle.process(lifecycleEnd()), null);
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
+  const rolledBack = lifecycle.process(finalReply("s", "outer"));
   lifecycle.rollback(rolledBack);
   assert.equal(lifecycle.status().pendingTerminals, 1);
-  assert.deepEqual(suppressed, []);
+  assert.equal(lifecycle.status().awaitingFinals, 1);
 
-  const committed = lifecycle.process(lifecycleEnd());
+  const committed = lifecycle.process(finalReply("s", "outer"));
   lifecycle.commit(committed);
   lifecycle.commit(committed);
   assert.deepEqual(
     suppressed.map(({ type, correlation }) => [type, correlation.turnId]),
-    [["turn.failed", "m"]],
+    [["turn.failed", "m"], ["turn.completed", "m"]],
   );
   assert.equal(lifecycle.status().activeRuns, 0);
 });
@@ -1211,10 +1392,10 @@ test("before_dispatch rollback restores the previous current task", () => {
   lifecycle.process(official("turn.started", "s", "inner-1"));
   const replacement = lifecycle.process(boundary("s", "m2", "outer-2"));
   lifecycle.rollback(replacement);
-  assert.equal(lifecycle.process(official("turn.started", "s", "retry")), null);
+  assert.equal(lifecycle.process(official("turn.started", "s", "inner-1")), null);
   assert.deepEqual(lifecycle.activeWork(), [{
     kind: "task", sessionId: "s", messageId: "m1", turnId: "m1", started: true,
-    outerRunId: "outer-1", internalRunIds: ["inner-1", "retry"],
+    outerRunId: "outer-1", internalRunIds: ["inner-1"],
   }]);
 
   const bounded = createOpenClawUserTaskLifecycle({ maxRuns: 1 });
@@ -1304,12 +1485,12 @@ test("exact activity refreshes durable tombstone TTL", () => {
   assert.equal(lifecycle.status().trackedRuns, 0);
 });
 
-test("active pending task survives beyond TTL and completes its pair", () => {
+test("active pending task survives beyond TTL and final reply completes its pair", () => {
   let now = 0;
-  const deferred = [];
+  const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
     now: () => now,
-    onDeferred: (event) => { deferred.push(event); return true; },
+    onSuppressed: (event) => suppressed.push(event),
     ttlMs: 100,
   });
   lifecycle.process(boundary("s", "m"));
@@ -1319,8 +1500,10 @@ test("active pending task survives beyond TTL and completes its pair", () => {
   lifecycle.process({ type: "gateway.connected", correlation: {}, details: {} });
   assert.equal(lifecycle.status().pendingTerminals, 1);
   assert.equal(lifecycle.status().activeRuns, 1);
-  lifecycle.process(finalReply("s", "r1"));
-  assert.deepEqual(deferred.map(({ type }) => type), ["turn.completed"]);
+  const final = lifecycle.process(finalReply("s", "r1"));
+  lifecycle.commit(final);
+  assert.equal(final.type, "turn.completed");
+  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed"]);
 });
 
 test("bounded tracker evicts only durable terminals and never reads content", () => {
@@ -1332,7 +1515,8 @@ test("bounded tracker evicts only durable terminals and never reads content", ()
   assert.ok(lifecycle.process(privateBoundary));
   assert.ok(lifecycle.process(boundary("s2", "m2", "outer-2")));
   assert.equal(lifecycle.process(boundary("s3", "m3", "outer-3")), null);
-  assert.ok(lifecycle.process(official("turn.completed", "s1", "outer-1")));
+  assert.equal(lifecycle.process(official("turn.completed", "s1", "outer-1")), null);
+  assert.equal(lifecycle.process(finalReply("s1", "outer-1")), null);
   assert.ok(lifecycle.process(boundary("s3", "m3", "outer-3")));
   assert.equal(lifecycle.status().trackedRuns, 2);
 });
