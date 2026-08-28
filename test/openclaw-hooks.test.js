@@ -587,6 +587,106 @@ test("successful lifecycle end stays pending until an exact final boundary", () 
   assert.equal(lifecycle.status().activeRuns, 0);
 });
 
+test("one inbound task coalesces unmarked internal run pairs until the final reply", () => {
+  const emitted = [];
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  lifecycle.process(boundary("s", "message", "outer"));
+
+  emitted.push(lifecycle.process(official("turn.started", "s", "run-1")));
+  emitted.push(lifecycle.process(official("turn.completed", "s", "run-1")));
+
+  emitted.push(lifecycle.process(official("turn.started", "s", "run-2")));
+  emitted.push(lifecycle.process(official("turn.completed", "s", "run-2")));
+  emitted.push(lifecycle.process(finalReply("s", "run-2")));
+
+  assert.deepEqual(
+    emitted.filter(Boolean).map(({ type, correlation }) => [type, correlation.turnId]),
+    [["turn.started", "message"], ["turn.completed", "message"]],
+  );
+  assert.equal(lifecycle.status().activeRuns, 0);
+});
+
+test("same-session lifecycle noise stays inside the inbound task until its final reply", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  lifecycle.process(boundary("s", "message", "outer"));
+  const userStart = lifecycle.process(official("turn.started", "s", "user-run"));
+  lifecycle.process(official("turn.completed", "s", "user-run"));
+
+  const extraStart = lifecycle.process(official("turn.started", "s", "extra-run"));
+  const extraEnd = lifecycle.process(official("turn.completed", "s", "extra-run"));
+  const userEnd = lifecycle.process(finalReply("s", "extra-run"));
+
+  assert.deepEqual(
+    [userStart, extraStart, extraEnd, userEnd]
+      .filter(Boolean)
+      .map(({ type, correlation }) => [type, correlation.turnId]),
+    [
+      ["turn.started", "message"],
+      ["turn.completed", "message"],
+    ],
+  );
+  assert.equal(lifecycle.status().activeRuns, 0);
+});
+
+test("overlapping same-session lifecycle runs stay inside one inbound task", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  lifecycle.process(boundary("s", "message", "outer"));
+
+  const start = lifecycle.process(official("turn.started", "s", "run-1"));
+  assert.equal(lifecycle.process(official("turn.started", "s", "run-2")), null);
+  assert.equal(lifecycle.process(official("turn.completed", "s", "run-2")), null);
+  assert.equal(lifecycle.process(official("turn.completed", "s", "run-1")), null);
+  const end = lifecycle.process(finalReply("s", "run-2"));
+
+  assert.deepEqual(
+    [start, end].map(({ type, correlation }) => [type, correlation.turnId]),
+    [["turn.started", "message"], ["turn.completed", "message"]],
+  );
+  assert.equal(lifecycle.status().activeRuns, 0);
+});
+
+test("approval resolution and a resumed run stay inside one inbound task", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  lifecycle.process(boundary("s", "message", "outer"));
+
+  const start = lifecycle.process(official("turn.started", "s", "run-1"));
+  assert.equal(lifecycle.process(official("turn.completed", "s", "run-1")), null);
+  lifecycle.process({
+    type: "tool.started",
+    correlation: { sessionId: "s", turnId: "run-1", toolCallId: "approval" },
+    details: { operation: "user_approval" },
+  });
+  lifecycle.process({
+    type: "tool.completed",
+    correlation: { sessionId: "s", turnId: "run-1", toolCallId: "approval" },
+    details: { operation: "user_approval" },
+  });
+  assert.equal(lifecycle.process(official("turn.started", "s", "run-2")), null);
+  assert.equal(lifecycle.process(official("turn.completed", "s", "run-2")), null);
+  const end = lifecycle.process(finalReply("s", "run-2"));
+
+  assert.deepEqual(
+    [start, end].map(({ type, correlation }) => [type, correlation.turnId]),
+    [["turn.started", "message"], ["turn.completed", "message"]],
+  );
+  assert.equal(lifecycle.status().activeRuns, 0);
+});
+
+test("autonomous lifecycle without an inbound task remains independent", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  const autonomousStart = lifecycle.process(official("turn.started", "s", "autonomous-run"));
+  const autonomousEnd = lifecycle.process(official("turn.completed", "s", "autonomous-run"));
+
+  assert.deepEqual(
+    [autonomousStart, autonomousEnd].map(({ type, correlation }) => [type, correlation.turnId]),
+    [
+      ["turn.started", "autonomous-run"],
+      ["turn.completed", "autonomous-run"],
+    ],
+  );
+  assert.equal(lifecycle.status().activeRuns, 0);
+});
+
 test("final reply durably closes pending internal success before the next dispatch", () => {
   const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
@@ -799,20 +899,16 @@ test("outer lifecycle end and continuation form one task pair before final reply
   assert.equal(lifecycle.process(official("turn.started", "s", "outer-2")).correlation.turnId, "m2");
 });
 
-test("unmarked same-session run after a no-reply success stays autonomous", () => {
+test("unmarked same-session run after internal success stays in task until final reply", () => {
   const lifecycle = createOpenClawUserTaskLifecycle();
   lifecycle.process(boundary("s", "m", "outer"));
   lifecycle.process(official("turn.started", "s", "task-run"));
   lifecycle.process(official("turn.completed", "s", "task-run"));
 
-  const autonomousStart = lifecycle.process(official("turn.started", "s", "cron-run"));
-  const autonomousEnd = lifecycle.process(official("turn.completed", "s", "cron-run"));
-  assert.deepEqual(
-    [autonomousStart, autonomousEnd].map(({ type, correlation }) => [type, correlation.turnId]),
-    [["turn.started", "cron-run"], ["turn.completed", "cron-run"]],
-  );
+  assert.equal(lifecycle.process(official("turn.started", "s", "next-run")), null);
+  assert.equal(lifecycle.process(official("turn.completed", "s", "next-run")), null);
   assert.equal(lifecycle.status().activeRuns, 1);
-  assert.equal(lifecycle.process(finalReply("s", "task-run")).correlation.turnId, "m");
+  assert.equal(lifecycle.process(finalReply("s", "next-run")).correlation.turnId, "m");
 });
 
 test("exact outer negative outcomes recover when a final payload follows within grace", () => {

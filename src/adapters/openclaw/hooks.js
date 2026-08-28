@@ -396,11 +396,10 @@ export function createOpenClawUserTaskLifecycle({
     let [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
     if (!state && !key && started) {
       const [candidateKey, candidate] = currentTask(correlation.sessionId);
-      const claimsFirstRun = candidate && !candidate.started;
-      const claimsRetry = candidate?.pendingRetryable === true;
-      const claimsContinuation = candidate?.pendingAwaitingFinal === true
-        && candidate.pendingTerminal?.details?.status === "continuation-pending";
-      if (claimsFirstRun || claimsRetry || claimsContinuation) {
+      // A user task is bounded by its admitted inbound message and exact final reply.
+      // Every same-session lifecycle run inside that window belongs to the task,
+      // even when OpenClaw omits an explicit continuation marker.
+      if (candidate) {
         [key, state] = [candidateKey, candidate];
       }
     }
