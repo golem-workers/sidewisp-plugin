@@ -792,6 +792,12 @@ function toolDetails(data, failed, fallbackOperation) {
 }
 
 export function openClawAgentEventInput(event = {}) {
+  const activeMemoryRun = typeof event.runId === "string"
+    && event.runId.startsWith("active-memory-")
+    && event.sessionId === event.runId
+    && typeof event.sessionKey === "string"
+    && event.sessionKey.includes(":active-memory:");
+  if (activeMemoryRun) return null;
   const data = event.data && typeof event.data === "object" ? event.data : {};
   const correlation = {
     sessionId: event.sessionKey ?? event.sessionId,

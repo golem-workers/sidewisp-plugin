@@ -295,6 +295,59 @@ test("two active-memory runs in the message hook tick produce only the user task
   );
 });
 
+test("confirmed active-memory embedded runs before inbound ownership are not user work", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  const observed = [];
+  const processRuntimeEvent = (event) => {
+    const input = openClawAgentEventInput(event);
+    if (!input) return;
+    const normalized = normalizeRuntimeEvent("openclaw", input, envelope()).event;
+    const transition = lifecycle.process(normalized);
+    if (transition?.type.startsWith("turn.")) observed.push(transition);
+  };
+  const sessionId = "agent:main:telegram:group:real";
+
+  for (const runId of ["active-memory-first", "active-memory-second"]) {
+    processRuntimeEvent({
+      stream: "lifecycle", sessionKey: `${sessionId}:active-memory:${runId}`, sessionId: runId, runId,
+      data: { phase: "start" },
+    });
+    processRuntimeEvent({
+      stream: "lifecycle", sessionKey: `${sessionId}:active-memory:${runId}`, sessionId: runId, runId,
+      data: { phase: "end", success: true },
+    });
+  }
+
+  lifecycle.process(boundary(sessionId, "telegram-message", "outer-run"));
+  processRuntimeEvent({
+    stream: "lifecycle", sessionKey: sessionId, runId: "main-run",
+    data: { phase: "start" },
+  });
+  processRuntimeEvent({
+    stream: "lifecycle", sessionKey: sessionId, runId: "main-run",
+    data: { phase: "end", success: true },
+  });
+  observed.push(lifecycle.process(finalReply(sessionId, "main-run")));
+
+  assert.deepEqual(
+    observed.filter(Boolean).map(({ type, correlation }) => [type, correlation.turnId]),
+    [["turn.started", "telegram-message"], ["turn.completed", "telegram-message"]],
+  );
+});
+
+test("an autonomous run with an active-memory-like id remains observable", () => {
+  const input = openClawAgentEventInput({
+    stream: "lifecycle",
+    sessionKey: "agent:main:autonomous",
+    sessionId: "runtime-session",
+    runId: "active-memory-manual-task",
+    data: { phase: "start" },
+  });
+
+  assert.equal(input.kind, "turn_start");
+  assert.equal(input.correlation.turnId, "active-memory-manual-task");
+});
+
 test("an immediate message hook returns its async ownership registration", async () => {
   const registered = new Map();
   const lifecycle = createOpenClawUserTaskLifecycle();
