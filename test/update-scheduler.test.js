@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 
-import { validUpdateDirective } from "../src/update/directive.js";
+import { isNewerVersion, validUpdateDirective } from "../src/update/directive.js";
+import { createUpdateScheduler } from "../src/update/scheduler.js";
 import { createHermesUpdateScheduler } from "../src/update/hermes-scheduler.js";
 
 const directive = {
@@ -17,7 +18,44 @@ test("update directives accept immutable SemVer releases only", () => {
   assert.equal(validUpdateDirective(directive), true);
   assert.equal(validUpdateDirective({ ...directive, targetSpec: "git:github.com/golem-workers/sidewisp-plugin@main" }), false);
   assert.equal(validUpdateDirective({ ...directive, targetSpec: "git:github.com/attacker/plugin@v0.1.15" }), false);
+  assert.equal(validUpdateDirective({ ...directive, targetVersion: "0.1.16" }), false);
+  assert.equal(validUpdateDirective({ ...directive, targetVersion: "01.1.15", targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v01.1.15" }), false);
+  assert.equal(validUpdateDirective({ ...directive, targetVersion: "0.1.15-rc.01", targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.1.15-rc.01" }), false);
+  assert.equal(validUpdateDirective({ ...directive, targetVersion: "0.1.15-rc..1", targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.1.15-rc..1" }), false);
   assert.equal(validUpdateDirective({ ...directive, restartDelaySeconds: 0 }), false);
+});
+
+test("version ordering follows SemVer and rejects downgrades", () => {
+  assert.equal(isNewerVersion("0.2.17", "0.2.18"), false);
+  assert.equal(isNewerVersion("0.2.18", "0.2.18"), false);
+  assert.equal(isNewerVersion("0.2.19", "0.2.18"), true);
+  assert.equal(isNewerVersion("0.2.18", "0.2.18-rc.1"), true);
+  assert.equal(isNewerVersion("0.2.18-rc.2", "0.2.18-rc.10"), false);
+  assert.equal(isNewerVersion("0.2.18-rc.10", "0.2.18-rc.2"), true);
+});
+
+test("OpenClaw scheduler ignores a stable-channel downgrade", () => {
+  const calls = [];
+  const scheduler = createUpdateScheduler({
+    stateDir: "/tmp/sidewisp-state",
+    currentVersion: "0.2.18",
+    logger: { info() {} },
+    spawnImpl(...args) {
+      calls.push(args);
+      return { unref() {} };
+    },
+  });
+  assert.equal(scheduler.schedule({
+    ...directive,
+    targetVersion: "0.2.17",
+    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.17",
+  }), false);
+  assert.equal(scheduler.schedule({
+    ...directive,
+    targetVersion: "0.2.19",
+    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.19",
+  }), true);
+  assert.equal(calls.length, 1);
 });
 
 test("Hermes scheduler launches one detached helper with bounded non-secret state", () => {

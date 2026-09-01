@@ -13,11 +13,23 @@ import { openSpool, SpoolError } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
 import { createRuntimeDiagnosticsDelivery } from "../../delivery/runtime-diagnostics.js";
 import { createOpenClawAdapter } from "./index.js";
-import { openClawAgentEventInput, registerOpenClawHooks } from "./hooks.js";
-import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
+import {
+  createOpenClawUserTaskLifecycle,
+  openClawActiveWorkCursor,
+  openClawAgentEventInput,
+  parseOpenClawActiveWorkCursor,
+  registerOpenClawHooks,
+} from "./hooks.js";
+import {
+  discoverOpenClawSources,
+  isOpenClawHookRecoveryFact,
+  recoverJsonl,
+  stableOpenClawEventId,
+} from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.17";
+const VERSION = "0.2.18";
+const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -64,7 +76,25 @@ export default definePluginEntry({
     let healthTimer = null;
     let spoolFailure = null;
     let spoolFailureCount = 0;
-    const preStartEvents = [];
+    const agentEventTelemetry = { observed: 0, emitted: 0, ignored: 0, failed: 0, lastObservedAt: null };
+    const deferredAgentEventIds = new Set();
+    const deferredHookEventIds = new Set();
+    let settleDeferredHook = () => {};
+    let persistDeferredEvent = () => false;
+    const userTaskLifecycle = createOpenClawUserTaskLifecycle({
+      onDeferred(event) {
+        let persisted = false;
+        try { persisted = persistDeferredEvent(event); }
+        catch { persisted = false; }
+        if (persisted && deferredAgentEventIds.delete(event.eventId)) agentEventTelemetry.emitted += 1;
+        if (persisted && deferredHookEventIds.delete(event.eventId)) settleDeferredHook("emitted");
+        return persisted;
+      },
+      onSuppressed(event) {
+        if (deferredAgentEventIds.delete(event.eventId)) agentEventTelemetry.ignored += 1;
+        if (deferredHookEventIds.delete(event.eventId)) settleDeferredHook("ignored");
+      },
+    });
     const recordSpoolFailure = (error) => {
       spoolFailureCount += 1;
       spoolFailure = { code: error.code, at: new Date().toISOString() };
@@ -78,13 +108,15 @@ export default definePluginEntry({
         else api.logger.warn(`Sidewisp ${label} failed; gateway continues`);
       });
     };
-    const persistEvent = async (event) => {
-      if (!spool) {
-        if (preStartEvents.length < 1000) preStartEvents.push(event);
-        return false;
-      }
+    const enqueueAcceptedEvents = (acceptedEvents) => {
+      if (acceptedEvents.length === 0) return true;
+      if (!spool) return false;
       try {
-        spool.enqueueSourceBatch("openclaw-hooks", String(event.sequence), [event]);
+        spool.enqueueSourceBatch(
+          HOOK_EVENT_SOURCE,
+          openClawActiveWorkCursor(acceptedEvents.at(-1).sequence, userTaskLifecycle.activeWork()),
+          acceptedEvents,
+        );
         return true;
       } catch (error) {
         if (!(error instanceof SpoolError)) throw error;
@@ -92,6 +124,24 @@ export default definePluginEntry({
         return false;
       }
     };
+    const enqueueAcceptedEvent = (acceptedEvent) => enqueueAcceptedEvents([acceptedEvent]);
+    persistDeferredEvent = enqueueAcceptedEvent;
+    let closeActiveRuns = async () => true;
+    const persistEventDetailed = async (event, source) => {
+      const result = userTaskLifecycle.processDetailed(event);
+      if (result.disposition === "buffered" && source === "agent") deferredAgentEventIds.add(event.eventId);
+      if (result.disposition === "buffered" && source === "hook") deferredHookEventIds.add(event.eventId);
+      if (result.disposition !== "accepted") return result;
+      const emitted = enqueueAcceptedEvent(result.event);
+      if (!emitted) userTaskLifecycle.rollback(result.event);
+      else userTaskLifecycle.commit(result.event);
+      if (event.type === "gateway.disconnected") await closeActiveRuns();
+      return Object.freeze({
+        disposition: emitted ? "emitted" : "failed",
+        event: result.event,
+      });
+    };
+    const persistEvent = async (event) => (await persistEventDetailed(event)).disposition === "emitted";
     const makeEnvelope = (input, sourceKind = "hook", fallback = "") => {
       const now = new Date().toISOString();
       sequence += 1;
@@ -101,6 +151,18 @@ export default definePluginEntry({
         sequence, occurredAt: now, observedAt: now,
         runtime: { version: api.runtime.version }, source: { kind: sourceKind, adapterVersion: VERSION },
       };
+    };
+    const cancelledRunEvent = (turnId, sessionId) => normalizeRuntimeEvent("openclaw", {
+      kind: "turn_end",
+      outcome: "cancelled",
+      correlation: { sessionId, turnId },
+    }, makeEnvelope({ kind: "turn_end", correlation: { sessionId, turnId } }, "hook")).event;
+    closeActiveRuns = async () => {
+      await userTaskLifecycle.flushPending();
+      const terminals = userTaskLifecycle.cancelActiveRuns(cancelledRunEvent);
+      const persisted = enqueueAcceptedEvents(terminals);
+      if (!persisted) terminals.forEach((terminal) => userTaskLifecycle.rollback(terminal));
+      return persisted;
     };
     const emitHeartbeat = async () => {
       if (!spool || !auth.canSend()) return;
@@ -116,15 +178,19 @@ export default definePluginEntry({
       }));
     };
     const hookTelemetry = registerOpenClawHooks(api, {
-      emit: persistEvent,
-      envelopeFactory: (_input, _event, ctx) => ({ ...makeEnvelope(_input), correlation: { sessionId: ctx?.sessionId, turnId: ctx?.runId }, details: {} }),
+      emit: (event) => persistEventDetailed(event, "hook"),
+      envelopeFactory: (_input, _event, ctx) => ({
+        ...makeEnvelope(_input),
+        correlation: { sessionId: ctx?.sessionId ?? ctx?.sessionKey, turnId: ctx?.runId },
+        details: {},
+      }),
       onDiagnostic: () => {},
     });
-    const agentEventTelemetry = { observed: 0, emitted: 0, ignored: 0, failed: 0, lastObservedAt: null };
+    settleDeferredHook = (outcome) => hookTelemetry.settle(outcome);
     api.agent.events.registerAgentEventSubscription({
       id: "sidewisp-runtime-events",
       description: "Content-free Sidewisp lifecycle and tool failure telemetry",
-      streams: ["lifecycle", "tool"],
+      streams: ["lifecycle", "tool", "approval"],
       async handle(event) {
         agentEventTelemetry.observed += 1;
         agentEventTelemetry.lastObservedAt = new Date().toISOString();
@@ -139,8 +205,10 @@ export default definePluginEntry({
             agentEventTelemetry.ignored += 1;
             return;
           }
-          await persistEvent(result.event);
-          agentEventTelemetry.emitted += 1;
+          const persisted = await persistEventDetailed(result.event, "agent");
+          if (persisted.disposition === "emitted") agentEventTelemetry.emitted += 1;
+          else if (persisted.disposition === "failed") agentEventTelemetry.failed += 1;
+          else if (persisted.disposition === "coalesced") agentEventTelemetry.ignored += 1;
         } catch {
           agentEventTelemetry.failed += 1;
         }
@@ -153,18 +221,28 @@ export default definePluginEntry({
         if (!config.enabled) return;
         try {
           await auth.load();
-          if (setupToken && !auth.canSend()) {
-            try { await auth.enroll(setupToken); }
+          if (setupToken) {
+            try { await auth.applySetupToken(setupToken); }
             catch { ctx.logger.warn("Sidewisp enrollment failed; will retry on restart"); }
-          } else if (setupToken && auth.canSend()) {
-            try { await auth.clearStoredSetupToken(); }
-            catch { ctx.logger.warn("Sidewisp setup-token cleanup pending; will retry on restart"); }
           }
           spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
-          if (preStartEvents.length > 0) {
-            const installationId = auth.status().installationId;
-            const ready = preStartEvents.splice(0).map((event) => installationId ? { ...event, installationId } : event);
-            spool.enqueueSourceBatch("openclaw-hooks", String(ready.at(-1).sequence), ready);
+          const previouslyActive = parseOpenClawActiveWorkCursor(spool.cursor(HOOK_EVENT_SOURCE));
+          const workIdentity = (entry) => entry.kind === "task"
+            ? JSON.stringify(["task", entry.sessionId, entry.messageId])
+            : JSON.stringify(["run", entry.sessionId ?? "", entry.turnId]);
+          const activeNow = new Set(userTaskLifecycle.activeWork().map(workIdentity));
+          const recoveredTerminals = [];
+          for (const previous of previouslyActive.filter((candidate) => !activeNow.has(workIdentity(candidate)))) {
+            if (previous.kind === "task" && !previous.started) continue;
+            const terminal = userTaskLifecycle.processDetailed(cancelledRunEvent(
+              previous.turnId,
+              previous.sessionId,
+            ));
+            if (terminal.disposition === "accepted") recoveredTerminals.push(terminal.event);
+          }
+          if (!enqueueAcceptedEvents(recoveredTerminals)) {
+            recoveredTerminals.forEach((terminal) => userTaskLifecycle.rollback(terminal));
+            throw new SpoolError("active-run-recovery-failed");
           }
           const discovery = await discoverOpenClawSources(stateDir, api.runtime.version);
           for (const source of discovery.sources) {
@@ -172,7 +250,10 @@ export default definePluginEntry({
             let cursor = null;
             try { cursor = stored ? JSON.parse(stored) : null; } catch { cursor = null; }
             const recovered = await recoverJsonl(source.file, cursor);
-            const events = recovered.facts.map((fact, index) => normalizeRuntimeEvent("openclaw", fact, makeEnvelope(fact, "log", `${source.ino}|${recovered.cursor.offset}|${index}`)).event).filter(Boolean);
+            const events = recovered.facts
+              .filter(isOpenClawHookRecoveryFact)
+              .map((fact, index) => normalizeRuntimeEvent("openclaw", fact, makeEnvelope(fact, "log", `${source.ino}|${recovered.cursor.offset}|${index}`)).event)
+              .filter(Boolean);
             if (events.length > 0) spool.enqueueSourceBatch(source.file, JSON.stringify(recovered.cursor), events);
             else spool.advanceCursor(source.file, JSON.stringify(recovered.cursor));
           }
@@ -215,6 +296,7 @@ export default definePluginEntry({
         healthTimer = null;
         if (uploadTimer) clearInterval(uploadTimer);
         uploadTimer = null;
+        await closeActiveRuns();
         if (uploader) {
           try { await uploader.drain({ maxAttempts: 1 }); }
           catch (error) {
@@ -252,6 +334,7 @@ export default definePluginEntry({
         update: updates.status(),
         hooks: hookTelemetry.status(),
         agentEvents: { ...agentEventTelemetry },
+        userTasks: userTaskLifecycle.status(),
         failures: { spool: spoolFailure, spoolCount: spoolFailureCount },
         ...(await collector.status()),
       });

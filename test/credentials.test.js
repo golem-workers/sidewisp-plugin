@@ -84,3 +84,50 @@ test("credential remains active when config cleanup fails and cleanup can be ret
   assert.equal(await manager.clearStoredSetupToken(), true);
   assert.equal(cleanupAttempts, 2);
 });
+
+test("a fresh setup token replaces an existing active credential", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "sidewisp-auth-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const store = createFileCredentialStore({ stateDir: root });
+  await store.write(credential);
+  const replacement = {
+    installationId: "sw_ins_replacement01",
+    secret: `sw_secret_${"z".repeat(32)}`,
+  };
+  let exchanges = 0;
+  let cleared = 0;
+  const manager = createEnrollmentManager({
+    endpoint: "https://sidewisp.test",
+    store,
+    clearSetupToken: async () => { cleared += 1; },
+    fetchImpl: async () => {
+      exchanges += 1;
+      return { ok: true, json: async () => ({
+        installationId: replacement.installationId,
+        installationSecret: replacement.secret,
+      }) };
+    },
+  });
+  await manager.load();
+  assert.deepEqual(await manager.applySetupToken("sw_setup_replacement"), {
+    installationId: replacement.installationId,
+    status: "active",
+  });
+  assert.equal(exchanges, 1);
+  assert.equal(cleared, 1);
+  assert.deepEqual(manager.credential(), { ...replacement, status: "active" });
+
+  const restarted = createEnrollmentManager({
+    endpoint: "https://sidewisp.test",
+    store,
+    clearSetupToken: async () => { cleared += 1; },
+    fetchImpl: async () => { throw new Error("setup token must not be exchanged twice"); },
+  });
+  await restarted.load();
+  assert.deepEqual(await restarted.applySetupToken("sw_setup_replacement"), {
+    installationId: replacement.installationId,
+    status: "active",
+  });
+  assert.equal(exchanges, 1);
+  assert.equal(cleared, 2);
+});
