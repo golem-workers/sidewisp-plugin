@@ -58,6 +58,44 @@ test("OpenClaw scheduler ignores a stable-channel downgrade", () => {
   assert.equal(calls.length, 1);
 });
 
+test("OpenClaw scheduler escapes the Gateway cgroup through a transient user unit", () => {
+  const calls = [];
+  const previousInvocationId = process.env.INVOCATION_ID;
+  const previousSecret = process.env.SIDEWISP_SETUP_TOKEN;
+  process.env.INVOCATION_ID = "gateway-invocation";
+  process.env.SIDEWISP_SETUP_TOKEN = "must-not-be-forwarded";
+  try {
+    const scheduler = createUpdateScheduler({
+      stateDir: "/tmp/sidewisp-state",
+      currentVersion: "0.2.18",
+      logger: { info() {} },
+      spawnImpl(command, args, options) {
+        calls.push({ command, args, options });
+        return { unref() {} };
+      },
+    });
+    assert.equal(scheduler.schedule({
+      ...directive,
+      targetVersion: "0.2.20",
+      targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.20",
+    }), true);
+  } finally {
+    if (previousInvocationId === undefined) delete process.env.INVOCATION_ID;
+    else process.env.INVOCATION_ID = previousInvocationId;
+    if (previousSecret === undefined) delete process.env.SIDEWISP_SETUP_TOKEN;
+    else process.env.SIDEWISP_SETUP_TOKEN = previousSecret;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "systemd-run");
+  assert.equal(calls[0].args.includes("--user"), true);
+  assert.equal(calls[0].args.includes("--collect"), true);
+  assert.equal(calls[0].args.includes("--unit=sidewisp-update-0_2_20"), true);
+  assert.equal(calls[0].args.includes(process.execPath), true);
+  assert.equal(path.basename(calls[0].args.at(-2)), "openclaw-update-helper.mjs");
+  assert.equal(JSON.stringify(calls[0]).includes("must-not-be-forwarded"), false);
+});
+
 test("Hermes scheduler launches one detached helper with bounded non-secret state", () => {
   const calls = [];
   const child = { unrefCalled: false, unref() { this.unrefCalled = true; } };
