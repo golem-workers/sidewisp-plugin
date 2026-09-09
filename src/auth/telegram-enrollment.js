@@ -71,7 +71,9 @@ export function createTelegramEnrollmentHook({
         });
         handoff = parseTelegramEnrollmentMessage(message, expectedEndpoint, now());
         await auth.load();
-        if (auth.canSend()) return { handled: true, text: "Sidewisp is already connected on this agent." };
+        if (auth.canSend() && auth.status().installationId === handoff.installationId) {
+          return { handled: true, text: "Sidewisp is already connected on this agent." };
+        }
         const result = await auth.enroll(handoff.setupToken);
         return { handled: true, text: `Sidewisp connected. Installation: ${result.installationId}` };
       } catch {
