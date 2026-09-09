@@ -770,6 +770,32 @@ test("maps only host-confirmed continuation markers", () => {
   }).status, undefined);
 });
 
+test("gateway restart interruption remains a continuation instead of cancellation", () => {
+  const mapped = openClawAgentEventInput({
+    runId: "run",
+    sessionKey: "agent:main:telegram:group:one",
+    stream: "lifecycle",
+    data: {
+      phase: "error",
+      success: false,
+      aborted: true,
+      stopReason: "restart",
+      timeoutPhase: "gateway_draining",
+    },
+  });
+  assert.deepEqual(mapped, {
+    kind: "turn_end",
+    outcome: "success",
+    component: "gateway_restart_continuation",
+    status: "continuation-pending",
+    correlation: {
+      sessionId: "agent:main:telegram:group:one",
+      turnId: "run",
+      toolCallId: undefined,
+    },
+  });
+});
+
 test("official agent event API covers cancellation and user approval without content", () => {
   const cancelled = openClawAgentEventInput({
     runId: "run-cancelled",
@@ -1902,6 +1928,44 @@ test("cursor parses legacy runs and preserves task run ownership", () => {
   ]);
 });
 
+test("restored work emits one resumed transition with its stable work id", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  assert.equal(lifecycle.restoreActiveWork([{
+    kind: "task", sessionId: "agent:main:telegram:group:one",
+    messageId: "message", turnId: "message", started: true,
+    outerRunId: "old-run", internalRunIds: [],
+  }]), 1);
+
+  const resumed = lifecycle.processDetailed(official(
+    "turn.started",
+    "agent:main:telegram:group:one",
+    "new-run",
+  ));
+  assert.equal(resumed.disposition, "accepted");
+  assert.equal(resumed.event.correlation.turnId, "message");
+  assert.equal(resumed.event.details.status, "resumed");
+  assert.equal(resumed.event.details.component, "gateway_restart_resume");
+  lifecycle.commit(resumed.event);
+  assert.equal(lifecycle.process(official(
+    "turn.started",
+    "agent:main:telegram:group:one",
+    "another-run",
+  )), null);
+});
+
+test("failed resumed write is retryable", () => {
+  const lifecycle = createOpenClawUserTaskLifecycle();
+  lifecycle.restoreActiveWork([{
+    kind: "task", sessionId: "s", messageId: "message", turnId: "message",
+    started: true, outerRunId: "old-run", internalRunIds: [],
+  }]);
+  const first = lifecycle.processDetailed(official("turn.started", "s", "new-run"));
+  lifecycle.rollback(first.event);
+  const retry = lifecycle.processDetailed(official("turn.started", "s", "new-run"));
+  assert.equal(retry.disposition, "accepted");
+  assert.equal(retry.event.details.status, "resumed");
+});
+
 test("exact activity refreshes durable tombstone TTL", () => {
   let now = 0;
   const lifecycle = createOpenClawUserTaskLifecycle({
@@ -1970,11 +2034,12 @@ test("plugin subscribes through the official host-owned agent event API", () => 
   assert.match(source, /openClawActiveWorkCursor\(acceptedEvents\.at\(-1\)\.sequence, userTaskLifecycle\.activeWork\(\)\)/);
   assert.match(source, /\.filter\(isOpenClawHookRecoveryFact\)/);
   assert.match(source, /userTaskLifecycle\.rollback\(result\.event\)/);
-  assert.match(source, /userTaskLifecycle\.cancelActiveRuns\(cancelledRunEvent\)/);
+  assert.match(source, /userTaskLifecycle\.restoreActiveWork\(previouslyActive\)/);
   assert.match(source, /userTasks: userTaskLifecycle\.status\(\)/);
   assert.match(source, /persistDeferredEvent/);
   assert.match(source, /userTaskLifecycle\.flushPending\(\)/);
-  assert.match(source, /closeActiveRuns = async[\s\S]*?await userTaskLifecycle\.flushPending\(\)[\s\S]*?userTaskLifecycle\.cancelActiveRuns/);
+  assert.match(source, /persistActiveWork = async[\s\S]*?await userTaskLifecycle\.flushPending\(\)[\s\S]*?spool\.advanceCursor/);
+  assert.doesNotMatch(source, /cancelActiveRuns\(cancelledRunEvent\)/);
   assert.match(source, /if \(!spool\) return false/);
   assert.doesNotMatch(source, /preStartEvents|acceptsPreStartEvents/);
   assert.doesNotMatch(source, /onAgentEvent\s*\(/);
