@@ -2,8 +2,10 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import crypto from "node:crypto";
 import path from "node:path";
 import { mutateConfigFile } from "openclaw/plugin-sdk/config-mutation";
+import { resolveTelegramAccount } from "openclaw/plugin-sdk/telegram-account";
 import { readSetupToken, resolveConfig } from "../../../config.js";
 import { createEnrollmentManager, createFileCredentialStore } from "../../auth/credentials.js";
+import { createTelegramEnrollmentHook } from "../../auth/telegram-enrollment.js";
 import { createCollector } from "../../core/collector.js";
 import { normalizeRuntimeEvent } from "../../core/normalize.js";
 import { sanitizeTelemetryEvent } from "../../core/sanitize.js";
@@ -48,6 +50,31 @@ export default definePluginEntry({
         if (entry?.config && typeof entry.config === "object") delete entry.config.setupToken;
       } }),
     });
+    const ownerSenders = () => new Set((api.runtime.config.current().commands?.ownerAllowFrom ?? [])
+      .flatMap((value) => {
+        const normalized = String(value).trim();
+        return normalized.startsWith("telegram:") ? [normalized.slice("telegram:".length)] : [normalized];
+      }));
+    const deleteTelegramSourceMessage = async ({ accountId, conversationId, messageId }) => {
+      const account = resolveTelegramAccount({ cfg: api.runtime.config.current(), accountId });
+      if (!account.enabled || !account.token) throw new Error("Telegram account unavailable");
+      const body = new URLSearchParams({ chat_id: conversationId, message_id: messageId });
+      const response = await fetch(`https://api.telegram.org/bot${account.token}/deleteMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      if (!response.ok) throw new Error("Telegram source deletion failed");
+      const result = await response.json();
+      if (result?.ok !== true) throw new Error("Telegram source deletion rejected");
+    };
+    api.on("before_dispatch", createTelegramEnrollmentHook({
+      auth,
+      expectedEndpoint: config.endpoint,
+      logger: api.logger,
+      deleteSourceMessage: deleteTelegramSourceMessage,
+      isAuthorizedSender: (senderId) => typeof senderId === "string" && ownerSenders().has(senderId),
+    }), { timeoutMs: 20_000 });
     let spool = null;
     const healthy = async () => ({ status: "healthy" });
     const registry = createAdapterRegistry([createOpenClawAdapter({
