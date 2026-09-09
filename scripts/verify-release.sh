@@ -12,7 +12,7 @@ bash -n \
   scripts/promote-production.sh
 npm run check
 archive=$(npm pack --pack-destination "$release_dir" --silent)
-OPENCLAW_STATE_DIR="$release_dir/state" openclaw plugins install "$release_dir/$archive" --force >/dev/null
+OPENCLAW_STATE_DIR="$release_dir/state" openclaw plugins install "$release_dir/$archive" --force --accept-capabilities >/dev/null
 inspection=$(OPENCLAW_STATE_DIR="$release_dir/state" openclaw plugins inspect sidewisp --runtime --json)
 node -e '
 const value = JSON.parse(process.argv[1]);

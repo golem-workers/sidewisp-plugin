@@ -51,7 +51,7 @@ try {
   }
   backup = path.join(path.dirname(stateFile), `rollback-${Date.now()}`);
   cpSync(installed.pluginRoot, backup, { recursive: true, errorOnExist: true });
-  run(["plugins", "install", directive.targetSpec, "--force"]);
+  run(["plugins", "install", directive.targetSpec, "--force", "--accept-capabilities"]);
   const updated = inspectInstalled();
   if (updated.version !== directive.targetVersion) throw new Error("installed plugin version mismatch");
   writeState({ status: "restarting" });
