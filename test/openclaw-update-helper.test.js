@@ -26,7 +26,7 @@ test("OpenClaw helper rechecks the installed version before a delayed update", (
   writeFileSync(openclaw, `#!/bin/sh
 printf '%s\\n' "$*" >> "$SIDEWISP_TEST_LOG"
 if [ "$1 $2 $3" = "plugins inspect sidewisp" ]; then
-  printf '{"path":"%s"}\\n' "$SIDEWISP_TEST_PLUGIN_ROOT"
+  printf '{"plugin":{"rootDir":"%s","source":"%s/openclaw.plugin.json"},"install":{"installPath":"%s"}}\\n' "$SIDEWISP_TEST_PLUGIN_ROOT" "$SIDEWISP_TEST_PLUGIN_ROOT" "$SIDEWISP_TEST_PLUGIN_ROOT"
   exit 0
 fi
 exit 90
@@ -74,7 +74,7 @@ test("OpenClaw helper waits for stable task idle and avoids a second restart", (
   writeFileSync(openclaw, `#!/bin/sh
 printf '%s\\n' "$*" >> "$SIDEWISP_TEST_LOG"
 if [ "$1 $2 $3" = "plugins inspect sidewisp" ]; then
-  printf '{"path":"%s"}\\n' "$SIDEWISP_TEST_PLUGIN_ROOT"
+  printf '{"plugin":{"rootDir":"%s","source":"%s/openclaw.plugin.json"},"install":{"installPath":"%s"}}\\n' "$SIDEWISP_TEST_PLUGIN_ROOT" "$SIDEWISP_TEST_PLUGIN_ROOT" "$SIDEWISP_TEST_PLUGIN_ROOT"
   exit 0
 fi
 if [ "$1 $2 $3" = "gateway call sidewisp.status" ]; then

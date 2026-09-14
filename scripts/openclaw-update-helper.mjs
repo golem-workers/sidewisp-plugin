@@ -18,9 +18,16 @@ const run = (args) => execFileSync("openclaw", args, { encoding: "utf8", stdio: 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const inspectInstalled = () => {
   const inspected = JSON.parse(run(["plugins", "inspect", "sidewisp", "--runtime", "--json"]));
-  const pluginPath = inspected.path ?? inspected.plugin?.path ?? inspected.runtime?.path;
-  if (typeof pluginPath !== "string" || !existsSync(pluginPath)) throw new Error("installed plugin path unavailable");
-  const pluginRoot = [pluginPath, path.dirname(pluginPath)]
+  const pluginRoot = [
+    inspected.path,
+    inspected.plugin?.path,
+    inspected.runtime?.path,
+    inspected.plugin?.rootDir,
+    inspected.install?.installPath,
+    inspected.plugin?.source,
+  ]
+    .filter((candidate) => typeof candidate === "string" && existsSync(candidate))
+    .flatMap((candidate) => [candidate, path.dirname(candidate)])
     .find((candidate) => existsSync(path.join(candidate, "package.json")));
   if (!pluginRoot) throw new Error("installed plugin package unavailable");
   const version = JSON.parse(readFileSync(path.join(pluginRoot, "package.json"), "utf8")).version;
