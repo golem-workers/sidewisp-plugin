@@ -13,6 +13,8 @@ import { sanitizeTelemetryEvent } from "../src/core/sanitize.js";
 import { openSpool } from "../src/delivery/spool.js";
 import { createUploader } from "../src/delivery/uploader.js";
 import { createHermesUpdateScheduler } from "../src/update/hermes-scheduler.js";
+import { createUsageDelivery } from "../src/delivery/usage.js";
+import { collectHermesUsage } from "../src/usage/hermes.js";
 
 const endpoint = new URL(process.env.SIDEWISP_ENDPOINT || "https://api.sidewisp.com");
 const stateDir = path.resolve(process.env.SIDEWISP_STATE_DIR || "/var/lib/sidewisp-hermes-canary");
@@ -72,6 +74,12 @@ const uploader = createUploader({
   credentialProvider: { current: async () => credential },
   onUpdate: (directive) => updates.schedule(directive),
 });
+const usageDelivery = createUsageDelivery({
+  collect: ({ collectedAtMs }) => collectHermesUsage({ collectedAtMs }),
+  spool, endpoint,
+  credentialProvider: { current: async () => credential },
+  intervalMs: Number(process.env.SIDEWISP_USAGE_INTERVAL_MS || 5 * 60_000),
+});
 let sequence = 0;
 let stopped = false;
 
@@ -110,12 +118,14 @@ async function shutdown() {
   if (stopped) return;
   stopped = true;
   clearInterval(timer);
+  await usageDelivery.stop();
   await spool.close();
 }
 
 process.once("SIGTERM", () => shutdown().finally(() => process.exit(0)));
 process.once("SIGINT", () => shutdown().finally(() => process.exit(0)));
 await heartbeat();
+usageDelivery.start();
 const timer = setInterval(() => heartbeat().catch((error) => {
   process.stderr.write(`Hermes canary heartbeat failed: ${error.message}\n`);
 }), intervalMs);

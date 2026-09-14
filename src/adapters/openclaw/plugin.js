@@ -14,6 +14,8 @@ import { createSafeSupportBundle } from "../../core/support.js";
 import { openSpool, SpoolError } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
 import { createRuntimeDiagnosticsDelivery } from "../../delivery/runtime-diagnostics.js";
+import { createUsageDelivery } from "../../delivery/usage.js";
+import { collectOpenClawUsage } from "../../usage/openclaw.js";
 import { createOpenClawAdapter } from "./index.js";
 import {
   createOpenClawUserTaskLifecycle,
@@ -99,6 +101,7 @@ export default definePluginEntry({
     let sequence = 0;
     let uploader = null;
     let runtimeDiagnostics = null;
+    let usageDelivery = null;
     let uploadTimer = null;
     let healthTimer = null;
     let spoolFailure = null;
@@ -296,6 +299,13 @@ export default definePluginEntry({
             maxRefreshMs: config.diagnosticsMaxRefreshMs,
           });
           runtimeDiagnostics.start();
+          usageDelivery = createUsageDelivery({
+            collect: ({ collectedAtMs }) => collectOpenClawUsage({ stateDir, collectedAtMs }),
+            spool, endpoint: config.endpoint,
+            credentialProvider: { current: async () => auth.credential() },
+            intervalMs: config.usageIntervalMs,
+          });
+          usageDelivery.start();
           uploadTimer = setInterval(() => runDetached("upload", () => uploader.drain({ maxAttempts: 1 })), 5_000);
           uploadTimer.unref?.();
           await collector.start();
@@ -312,6 +322,8 @@ export default definePluginEntry({
           uploadTimer = null;
           if (runtimeDiagnostics) await runtimeDiagnostics.stop().catch(() => {});
           runtimeDiagnostics = null;
+          if (usageDelivery) await usageDelivery.stop().catch(() => {});
+          usageDelivery = null;
           if (spool) await spool.close().catch(() => {});
           spool = null;
           uploader = null;
@@ -340,6 +352,11 @@ export default definePluginEntry({
           }
         }
         runtimeDiagnostics = null;
+        if (usageDelivery) {
+          try { await usageDelivery.stop(); }
+          catch { api.logger.warn("Sidewisp usage delivery stop failed during shutdown"); }
+        }
+        usageDelivery = null;
         if (spool) await spool.close();
         spool = null;
         await collector.stop();
@@ -358,6 +375,7 @@ export default definePluginEntry({
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
         runtimeDiagnostics: runtimeDiagnostics?.status() ?? { status: "not-started", at: null },
+        usage: usageDelivery?.status() ?? { status: "not-started", at: null, observations: 0 },
         update: updates.status(),
         hooks: hookTelemetry.status(),
         agentEvents: { ...agentEventTelemetry },

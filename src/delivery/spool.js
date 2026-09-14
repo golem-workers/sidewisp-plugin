@@ -72,6 +72,12 @@ function initialize(file) {
       payload TEXT NOT NULL,
       created_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS usage_pending (
+      installation_id TEXT PRIMARY KEY,
+      batch_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
   `);
   const storedVersion = db.prepare("SELECT value FROM metadata WHERE key='schema_version'").get()?.value;
   if (storedVersion === undefined) db.prepare("INSERT INTO metadata(key,value) VALUES('schema_version',?)").run(String(SPOOL_SCHEMA_VERSION));
@@ -205,6 +211,22 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
     acknowledgeRuntimeDiagnostic(installationId, snapshotId) {
       return db.prepare(`DELETE FROM runtime_diagnostic_pending
         WHERE installation_id=? AND snapshot_id=?`).run(installationId, snapshotId).changes === 1;
+    },
+    coalesceUsageBatch(installationId, batchId, batch) {
+      const payload = JSON.stringify(batch);
+      assertQuota(Buffer.byteLength(payload));
+      db.prepare(`INSERT INTO usage_pending(installation_id,batch_id,payload,created_at)
+        VALUES(?,?,?,?) ON CONFLICT(installation_id) DO UPDATE SET
+          batch_id=excluded.batch_id,payload=excluded.payload,created_at=excluded.created_at`)
+        .run(installationId, batchId, payload, now());
+    },
+    pendingUsageBatch(installationId) {
+      const row = db.prepare("SELECT batch_id,payload FROM usage_pending WHERE installation_id=?").get(installationId);
+      return row ? { batchId: row.batch_id, batch: JSON.parse(row.payload) } : null;
+    },
+    acknowledgeUsageBatch(installationId, batchId) {
+      return db.prepare("DELETE FROM usage_pending WHERE installation_id=? AND batch_id=?")
+        .run(installationId, batchId).changes === 1;
     },
     prune() {
       const pruned = deleteAcknowledged();

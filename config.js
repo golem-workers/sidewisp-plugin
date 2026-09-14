@@ -19,6 +19,12 @@ export function resolveConfig(value) {
       && input.diagnosticsMaxRefreshMs <= 86_400_000
         ? input.diagnosticsMaxRefreshMs
         : 60 * 60_000,
+    usageIntervalMs:
+      Number.isSafeInteger(input.usageIntervalMs)
+      && input.usageIntervalMs >= 60_000
+      && input.usageIntervalMs <= 86_400_000
+        ? input.usageIntervalMs
+        : 5 * 60_000,
   };
 }
 

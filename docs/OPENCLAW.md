@@ -10,6 +10,14 @@
 No administrator privileges, inbound port, model provider, or LLM API key is
 required.
 
+The collector reads assistant usage counters from OpenClaw's local agent
+SQLite stores and the provider quota projection from the read-only Gateway
+`usage.status` method. It sends numeric counters plus opaque session/event,
+provider and model identifiers only. Prompts, responses, tool arguments,
+files, secrets and provider account identity are not included. Collection is
+zero-LLM and defaults to every five minutes; change the bounded interval with
+`plugins.entries.sidewisp.config.usageIntervalMs` when required.
+
 ## Install a signed release
 
 The shortest installation uses an immutable Git tag:
@@ -74,6 +82,7 @@ Check:
 - `installation.state` is `active`;
 - `spool.status` is `healthy`;
 - `uploader.status` becomes `idle` or `sent`;
+- `usage.status` becomes `idle` or `sent` after the first collection cycle;
 - `mode` is `zero-llm`;
 - adapter health has no unexpected degraded capability.
 

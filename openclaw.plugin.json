@@ -34,6 +34,13 @@
         "maximum": 86400000,
         "default": 3600000,
         "description": "Maximum interval before an unchanged snapshot is refreshed"
+      },
+      "usageIntervalMs": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 86400000,
+        "default": 300000,
+        "description": "Privacy-safe token usage collection cadence in milliseconds"
       }
     }
   },
