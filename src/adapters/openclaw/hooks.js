@@ -105,6 +105,19 @@ export function createOpenClawUserTaskLifecycle({
   const runKey = (sessionId, runId) => runId
     ? JSON.stringify(["run", sessionId ?? "", runId])
     : null;
+  const resumedStart = (event, state) => Object.freeze({
+    ...event,
+    correlation: Object.freeze({
+      ...(event?.correlation ?? {}),
+      sessionId: state.sessionId,
+      turnId: state.turnId,
+    }),
+    details: Object.freeze({
+      ...(event?.details ?? {}),
+      component: "gateway_restart_resume",
+      status: "resumed",
+    }),
+  });
   const rememberRetiredRuns = (sessionId, runIds) => {
     if (maxRuns < 1) return;
     for (const runId of runIds) {
@@ -446,6 +459,7 @@ export function createOpenClawUserTaskLifecycle({
         pendingConfirmed: false,
         pendingPersistAttempts: 0, pendingDeadline: null, pendingTimer: null,
         registrationEvent: event, startEvent: null, terminalEvent: null,
+        resumePending: false, resumeEvent: null,
         previousOnRollback: null,
         pendingInboundOnRollback,
         staged: true,
@@ -555,6 +569,11 @@ export function createOpenClawUserTaskLifecycle({
       if (started) {
         if (state.started) {
           if (state.pendingTerminal && !state.pendingConfirmed) clearPending(state, true);
+          if (state.resumePending) {
+            state.resumePending = false;
+            state.resumeEvent = resumedStart(event, state);
+            return accepted(state.resumeEvent);
+          }
           return coalesced();
         }
         state.started = true;
@@ -575,7 +594,8 @@ export function createOpenClawUserTaskLifecycle({
       }
       if (!track(autonomousKey, {
         kind: "run", sessionId: correlation.sessionId, turnId: correlation.turnId,
-        terminal: false, durable: false, startEvent: event, terminalEvent: null, updatedAt: nowMs,
+        terminal: false, durable: false, startEvent: event, terminalEvent: null,
+        resumePending: false, resumeEvent: null, updatedAt: nowMs,
       })) return coalesced();
       return accepted(event);
     }
@@ -586,7 +606,8 @@ export function createOpenClawUserTaskLifecycle({
     if (autonomous) Object.assign(autonomous, { terminal: true, durable: true, terminalEvent: event, updatedAt: nowMs });
     else if (!track(autonomousKey, {
       kind: "run", sessionId: correlation.sessionId, turnId: correlation.turnId,
-      terminal: true, durable: true, startEvent: null, terminalEvent: event, updatedAt: nowMs,
+      terminal: true, durable: true, startEvent: null, terminalEvent: event,
+      resumePending: false, resumeEvent: null, updatedAt: nowMs,
     })) return coalesced();
     return accepted(event);
   };
@@ -601,6 +622,43 @@ export function createOpenClawUserTaskLifecycle({
       kind: "run", turnId: state.turnId, ...(state.sessionId ? { sessionId: state.sessionId } : {}),
     })));
   const activeRunIds = () => Object.freeze(activeWork().map((state) => state.turnId));
+  const restoreActiveWork = (candidates = []) => {
+    let restored = 0;
+    for (const candidate of candidates) {
+      const nowMs = now();
+      if (candidate?.kind === "task") {
+        const key = taskKey(candidate.sessionId, candidate.messageId);
+        if (!key || records.has(key) || currentTask(candidate.sessionId)[1]) continue;
+        const state = {
+          kind: "task", sessionId: candidate.sessionId, messageId: candidate.messageId,
+          turnId: candidate.turnId, outerRunId: candidate.outerRunId,
+          internalRunIds: [...(candidate.internalRunIds ?? [])], started: candidate.started === true,
+          terminal: false, durable: false, pendingTerminal: null, pendingRetryable: false,
+          pendingAwaitingFinal: false, pendingConfirmed: false, pendingPersistAttempts: 0,
+          pendingDeadline: null, pendingTimer: null, registrationEvent: null, startEvent: null,
+          terminalEvent: null, resumePending: candidate.started === true, resumeEvent: null,
+          previousOnRollback: null, pendingInboundOnRollback: null, staged: false, updatedAt: nowMs,
+        };
+        if (!track(key, state)) continue;
+        currentBySession.set(state.sessionId, key);
+        bind(state, key, state.outerRunId);
+        for (const runId of state.internalRunIds) bind(state, key, runId);
+        restored += 1;
+        continue;
+      }
+      if (candidate?.kind === "run") {
+        const key = runKey(candidate.sessionId, candidate.turnId);
+        if (!key || records.has(key)) continue;
+        if (!track(key, {
+          kind: "run", sessionId: candidate.sessionId, turnId: candidate.turnId,
+          terminal: false, durable: false, startEvent: null, terminalEvent: null,
+          resumePending: true, resumeEvent: null, updatedAt: nowMs,
+        })) continue;
+        restored += 1;
+      }
+    }
+    return restored;
+  };
   return Object.freeze({
     process: (event) => processDetailed(event).event,
     processDetailed,
@@ -618,12 +676,13 @@ export function createOpenClawUserTaskLifecycle({
         pendingObservationTransitions.delete(event);
       }
       const state = [...records.values()].find((candidate) => candidate.registrationEvent === event
-        || candidate.terminalEvent === event);
+        || candidate.resumeEvent === event || candidate.terminalEvent === event);
       if (!state) return;
       if (state.registrationEvent === event) {
         state.previousOnRollback = null;
         state.pendingInboundOnRollback = null;
       }
+      if (state.resumeEvent === event) state.resumeEvent = null;
       if (state.replacedPending) {
         onSuppressed(state.replacedPending.event);
         state.replacedPending = null;
@@ -652,7 +711,7 @@ export function createOpenClawUserTaskLifecycle({
         return;
       }
       const entry = [...records].find(([, state]) => state.registrationEvent === event
-        || state.startEvent === event || state.terminalEvent === event);
+        || state.startEvent === event || state.resumeEvent === event || state.terminalEvent === event);
       const [key, state] = entry ?? [];
       if (!state) return;
       if (state.registrationEvent === event && !state.started) {
@@ -664,7 +723,10 @@ export function createOpenClawUserTaskLifecycle({
         }
         restorePrevious(previous);
       }
-      else if (state.startEvent === event && !state.terminal) {
+      else if (state.resumeEvent === event && !state.terminal) {
+        state.resumeEvent = null;
+        state.resumePending = true;
+      } else if (state.startEvent === event && !state.terminal) {
         if (state.kind === "run") {
           remove(key);
           return;
@@ -711,6 +773,7 @@ export function createOpenClawUserTaskLifecycle({
     },
     activeRunIds,
     activeWork,
+    restoreActiveWork,
     cancelActiveRuns(makeTerminalEvent) {
       const terminals = [];
       for (const [key, state] of [...records]) {
@@ -810,6 +873,18 @@ export function openClawAgentEventInput(event = {}) {
   if (event.stream === "lifecycle") {
     if (data.phase === "start") return { kind: "turn_start", correlation };
     if (["end", "error"].includes(data.phase)) {
+      const gatewayRestartInterrupted = data.timeoutPhase === "gateway_draining"
+        || data.stopReason === "restart"
+        || data.interruptionReason === "gateway-restart";
+      if (gatewayRestartInterrupted) {
+        return {
+          kind: "turn_end",
+          outcome: "success",
+          component: "gateway_restart_continuation",
+          status: "continuation-pending",
+          correlation,
+        };
+      }
       const timedOut = data.timedOut === true || data.outcome === "timeout";
       const cancelled = data.aborted === true
         || ["cancelled", "canceled", "aborted", "killed"].includes(
