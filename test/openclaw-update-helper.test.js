@@ -56,3 +56,68 @@ exit 90
     "plugins inspect sidewisp --runtime --json",
   ]);
 });
+
+test("OpenClaw helper waits for stable task idle and avoids a second restart", (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidewisp-openclaw-idle-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const bin = path.join(root, "bin");
+  const pluginRoot = path.join(root, "plugin");
+  const logFile = path.join(root, "openclaw.log");
+  const statusCountFile = path.join(root, "status-count");
+  const stateFile = path.join(root, "update-status.json");
+  const preload = path.join(root, "skip-delay.mjs");
+  mkdirSync(bin);
+  mkdirSync(pluginRoot);
+  writeFileSync(path.join(pluginRoot, "package.json"), `${JSON.stringify({ version: "0.2.19" })}\n`);
+  writeFileSync(preload, "globalThis.setTimeout = (fn) => { queueMicrotask(fn); return { unref() {} }; };\n");
+  const openclaw = path.join(bin, "openclaw");
+  writeFileSync(openclaw, `#!/bin/sh
+printf '%s\\n' "$*" >> "$SIDEWISP_TEST_LOG"
+if [ "$1 $2 $3" = "plugins inspect sidewisp" ]; then
+  printf '{"path":"%s"}\\n' "$SIDEWISP_TEST_PLUGIN_ROOT"
+  exit 0
+fi
+if [ "$1 $2 $3" = "gateway call sidewisp.status" ]; then
+  count=0
+  if [ -f "$SIDEWISP_TEST_STATUS_COUNT" ]; then count=$(sed -n '1p' "$SIDEWISP_TEST_STATUS_COUNT"); fi
+  count=$((count + 1))
+  printf '%s\\n' "$count" > "$SIDEWISP_TEST_STATUS_COUNT"
+  version=$(sed -n 's/.*"version":"\\([^"]*\\)".*/\\1/p' "$SIDEWISP_TEST_PLUGIN_ROOT/package.json")
+  if [ "$count" -eq 1 ]; then active=1; else active=0; fi
+  printf '{"version":"%s","userTasks":{"activeRuns":%s,"pendingTerminals":0,"awaitingFinals":0,"pendingInboundObservations":0}}\\n' "$version" "$active"
+  exit 0
+fi
+if [ "$1 $2" = "plugins install" ]; then
+  printf '{"version":"0.2.20"}\\n' > "$SIDEWISP_TEST_PLUGIN_ROOT/package.json"
+  exit 0
+fi
+if [ "$1 $2" = "gateway restart" ]; then exit 0; fi
+exit 90
+`);
+  chmodSync(openclaw, 0o755);
+
+  execFileSync(process.execPath, ["--import", preload, helper, JSON.stringify({
+    schema: "sidewisp.plugin-update.v1",
+    targetVersion: "0.2.20",
+    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.20",
+    sha256: "a".repeat(64),
+    restartDelaySeconds: 30,
+    stateFile,
+  })], {
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      SIDEWISP_TEST_LOG: logFile,
+      SIDEWISP_TEST_PLUGIN_ROOT: pluginRoot,
+      SIDEWISP_TEST_STATUS_COUNT: statusCountFile,
+    },
+    stdio: "pipe",
+  });
+
+  const state = JSON.parse(readFileSync(stateFile, "utf8"));
+  const calls = readFileSync(logFile, "utf8").trim().split("\n");
+  assert.equal(state.status, "completed");
+  assert.equal(calls.filter((line) => line.startsWith("plugins install ")).length, 1);
+  assert.equal(calls.filter((line) => line === "gateway restart").length, 0);
+  assert.equal(calls.filter((line) => line.startsWith("gateway call sidewisp.status ")).length, 5);
+});

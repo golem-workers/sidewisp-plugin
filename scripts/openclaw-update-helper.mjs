@@ -27,6 +27,42 @@ const inspectInstalled = () => {
   if (typeof version !== "string") throw new Error("installed plugin version unavailable");
   return { pluginRoot, version };
 };
+const gatewayStatus = () => JSON.parse(run(["gateway", "call", "sidewisp.status", "--params", "{}", "--json"]));
+const waitForAutomaticReload = async () => {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      if (gatewayStatus().version === directive.targetVersion) return true;
+    } catch { /* an install-triggered Gateway restart may still be in progress */ }
+    await sleep(5_000);
+  }
+  return false;
+};
+const waitForIdle = async () => {
+  let idleObservations = 0;
+  while (idleObservations < 3) {
+    let status;
+    try { status = gatewayStatus(); }
+    catch {
+      idleObservations = 0;
+      writeState({ status: "waiting_for_idle", reasonCode: "GATEWAY_UNAVAILABLE" });
+      await sleep(5_000);
+      continue;
+    }
+    const tasks = status?.userTasks;
+    const idle = tasks
+      && tasks.activeRuns === 0
+      && tasks.pendingTerminals === 0
+      && tasks.awaitingFinals === 0
+      && tasks.pendingInboundObservations === 0;
+    idleObservations = idle ? idleObservations + 1 : 0;
+    writeState({
+      status: "waiting_for_idle",
+      reasonCode: idle ? "IDLE_STABILITY_WINDOW" : tasks ? "ACTIVE_WORK" : "IDLE_SIGNAL_UNAVAILABLE",
+      idleObservations,
+    });
+    if (idleObservations < 3) await sleep(5_000);
+  }
+};
 const waitForGateway = async () => {
   for (let attempt = 0; attempt < 24; attempt += 1) {
     try {
@@ -43,20 +79,25 @@ await sleep(directive.restartDelaySeconds * 1000);
 
 let backup = null;
 try {
-  writeState({ status: "updating" });
   const installed = inspectInstalled();
   if (!isNewerVersion(directive.targetVersion, installed.version)) {
     writeState({ status: "skipped", reasonCode: "TARGET_NOT_NEWER" });
     process.exit(0);
   }
+  await waitForIdle();
+  writeState({ status: "updating" });
   backup = path.join(path.dirname(stateFile), `rollback-${Date.now()}`);
   cpSync(installed.pluginRoot, backup, { recursive: true, errorOnExist: true });
   run(["plugins", "install", directive.targetSpec, "--force", "--accept-capabilities"]);
   const updated = inspectInstalled();
   if (updated.version !== directive.targetVersion) throw new Error("installed plugin version mismatch");
-  writeState({ status: "restarting" });
-  run(["gateway", "restart"]);
-  await waitForGateway();
+  if (!(await waitForAutomaticReload())) {
+    writeState({ status: "restarting" });
+    run(["gateway", "restart"]);
+    await waitForGateway();
+  } else {
+    writeState({ status: "verifying" });
+  }
   writeState({ status: "completed" });
   if (backup) rmSync(backup, { recursive: true, force: true });
 } catch (error) {

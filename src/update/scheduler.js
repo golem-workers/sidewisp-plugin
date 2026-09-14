@@ -1,9 +1,13 @@
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { isNewerVersion, validUpdateDirective } from "./directive.js";
 
 const HELPER = fileURLToPath(new URL("../../scripts/openclaw-update-helper.mjs", import.meta.url));
+const ACTIVE_ATTEMPT_TTL_MS = 2 * 60_000;
+const TERMINAL_UPDATE_STATES = new Set(["completed", "failed", "rolled_back", "skipped"]);
+const UNSAFE_STALE_STATES = new Set(["updating", "restarting", "verifying"]);
 
 const SAFE_ENV_KEYS = Object.freeze([
   "DBUS_SESSION_BUS_ADDRESS",
@@ -30,18 +34,49 @@ function systemdUnitName(version) {
   return `sidewisp-update-${version.replace(/[^A-Za-z0-9_-]/g, "_")}`;
 }
 
-export function createUpdateScheduler({ stateDir, logger, currentVersion, spawnImpl = spawn }) {
+function readAttempt(stateFile) {
+  try {
+    const value = JSON.parse(readFileSync(stateFile, "utf8"));
+    return value && typeof value === "object" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function blocksAttempt(stateFile, targetVersion, nowMs) {
+  const attempt = readAttempt(stateFile);
+  if (attempt?.targetVersion !== targetVersion || typeof attempt.status !== "string") return null;
+  if (TERMINAL_UPDATE_STATES.has(attempt.status) || UNSAFE_STALE_STATES.has(attempt.status)) return attempt;
+  const updatedAt = Date.parse(attempt.updatedAt ?? "");
+  return Number.isFinite(updatedAt) && nowMs - updatedAt <= ACTIVE_ATTEMPT_TTL_MS ? attempt : null;
+}
+
+export function createUpdateScheduler({ stateDir, logger, currentVersion, spawnImpl = spawn, now = Date.now }) {
   let scheduledVersion = null;
+  const stateFile = path.join(stateDir, "sidewisp", "update-status.json");
   return Object.freeze({
-    status: () => ({ currentVersion, scheduledVersion }),
+    status: () => {
+      const attempt = readAttempt(stateFile);
+      return {
+        currentVersion,
+        scheduledVersion,
+        ...(attempt ? { lastAttempt: {
+          targetVersion: attempt.targetVersion,
+          status: attempt.status,
+          updatedAt: attempt.updatedAt,
+          reasonCode: attempt.reasonCode,
+        } } : {}),
+      };
+    },
     schedule(directive) {
       if (!validUpdateDirective(directive)
         || !isNewerVersion(directive.targetVersion, currentVersion)
-        || directive.targetVersion === scheduledVersion) return false;
+        || directive.targetVersion === scheduledVersion
+        || blocksAttempt(stateFile, directive.targetVersion, now())) return false;
       scheduledVersion = directive.targetVersion;
       const payload = JSON.stringify({
         ...directive,
-        stateFile: path.join(stateDir, "sidewisp", "update-status.json"),
+        stateFile,
       });
       const environment = safeHelperEnvironment(process.env);
       const insideSystemdUserService = process.platform === "linux"

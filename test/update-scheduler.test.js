@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
@@ -94,6 +96,61 @@ test("OpenClaw scheduler escapes the Gateway cgroup through a transient user uni
   assert.equal(calls[0].args.includes(process.execPath), true);
   assert.equal(path.basename(calls[0].args.at(-2)), "openclaw-update-helper.mjs");
   assert.equal(JSON.stringify(calls[0]).includes("must-not-be-forwarded"), false);
+});
+
+test("OpenClaw scheduler does not repeat the same update after a Gateway restart", (t) => {
+  const stateDir = path.join(os.tmpdir(), `sidewisp-update-state-${process.pid}-${Date.now()}`);
+  mkdirSync(path.join(stateDir, "sidewisp"), { recursive: true });
+  const stateFile = path.join(stateDir, "sidewisp", "update-status.json");
+  writeFileSync(stateFile, JSON.stringify({
+    targetVersion: "0.2.20",
+    status: "completed",
+    updatedAt: new Date().toISOString(),
+  }));
+  t.after(() => import("node:fs").then(({ rmSync }) => rmSync(stateDir, { recursive: true, force: true })));
+  const calls = [];
+  let restarted;
+  for (let gatewayStart = 0; gatewayStart < 3; gatewayStart += 1) {
+    restarted = createUpdateScheduler({
+      stateDir,
+      currentVersion: "0.2.19",
+      logger: { info() {} },
+      spawnImpl(...args) { calls.push(args); return { unref() {} }; },
+    });
+    assert.equal(restarted.schedule({
+      ...directive,
+      targetVersion: "0.2.20",
+      targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.20",
+    }), false);
+  }
+  assert.equal(calls.length, 0);
+  assert.equal(restarted.status().lastAttempt.status, "completed");
+});
+
+test("OpenClaw scheduler recovers only a stale pre-install idle wait", (t) => {
+  const stateDir = path.join(os.tmpdir(), `sidewisp-update-stale-${process.pid}-${Date.now()}`);
+  mkdirSync(path.join(stateDir, "sidewisp"), { recursive: true });
+  const stateFile = path.join(stateDir, "sidewisp", "update-status.json");
+  writeFileSync(stateFile, JSON.stringify({
+    targetVersion: "0.2.20",
+    status: "waiting_for_idle",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }));
+  t.after(() => import("node:fs").then(({ rmSync }) => rmSync(stateDir, { recursive: true, force: true })));
+  const calls = [];
+  const restarted = createUpdateScheduler({
+    stateDir,
+    currentVersion: "0.2.19",
+    now: () => Date.parse("2026-01-01T00:03:00.000Z"),
+    logger: { info() {} },
+    spawnImpl(...args) { calls.push(args); return { unref() {} }; },
+  });
+  assert.equal(restarted.schedule({
+    ...directive,
+    targetVersion: "0.2.20",
+    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.20",
+  }), true);
+  assert.equal(calls.length, 1);
 });
 
 test("Hermes scheduler launches one detached helper with bounded non-secret state", () => {
