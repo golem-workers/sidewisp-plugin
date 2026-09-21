@@ -16,8 +16,10 @@ export function createUploader({
 }) {
   if (!Number.isSafeInteger(maxBatch) || maxBatch < 1 || maxBatch > 1000) throw new TypeError("invalid maxBatch");
   let attempt = 0;
+  let lastDeliveredAt = null;
   let lastResult = { status: "not-started", sent: 0, remaining: 0, at: null };
   const finish = (result) => {
+    if (!["sent", "idle"].includes(result.status)) lastDeliveredAt = null;
     lastResult = { ...result, at: new Date(now()).toISOString() };
     return result;
   };
@@ -72,6 +74,7 @@ export function createUploader({
     const acknowledged = Array.isArray(result.acknowledgedEventIds)
       ? result.acknowledgedEventIds.filter((id) => sentIds.has(id)) : [];
     spool.acknowledge(acknowledged);
+    if (acknowledged.length > 0) lastDeliveredAt = new Date(now()).toISOString();
     if (Array.isArray(result.rejected)) {
       for (const rejected of result.rejected) {
         if (sentIds.has(rejected?.eventId) && typeof rejected.code === "string") spool.deadLetter(rejected.eventId, rejected.code);
@@ -83,7 +86,7 @@ export function createUploader({
 
   return Object.freeze({
     sendOnce,
-    status: () => ({ ...lastResult }),
+    status: () => ({ ...lastResult, ...(lastDeliveredAt ? { lastDeliveredAt } : {}) }),
     async drain({ maxAttempts = 10 } = {}) {
       let finalResult;
       for (let count = 0; count < maxAttempts; count += 1) {

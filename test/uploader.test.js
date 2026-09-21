@@ -94,3 +94,11 @@ test("gzip batches and partial rejection remove only terminal events", async () 
       json: async () => ({ acknowledgedEventIds: ["accepted"], rejected: [{ eventId: "invalid", code: "invalid_event" }] }) }; } });
   assert.equal((await uploader.sendOnce()).remaining, 0); assert.equal(request.headers["content-encoding"], "gzip");
 });
+
+test('idle is not recovery without a real acknowledgement; later failure clears proof',async()=>{
+ const empty=createUploader({spool:memorySpool([]),endpoint:'https://sidewisp.test',credentialProvider:{current:async()=>credential}});
+ await empty.drain();assert.equal(empty.status().lastDeliveredAt,undefined);
+ let reject=false;const spool=memorySpool([{eventId:'one'},{eventId:'two'}]);
+ const uploader=createUploader({spool,maxBatch:1,endpoint:'https://sidewisp.test',credentialProvider:{current:async()=>credential},fetchImpl:async()=>reject?{status:403,ok:false}:{status:200,ok:true,json:async()=>({acknowledgedEventIds:['one']})}});
+ await uploader.sendOnce();assert.ok(uploader.status().lastDeliveredAt);reject=true;await uploader.sendOnce();assert.equal(uploader.status().lastDeliveredAt,undefined);
+});

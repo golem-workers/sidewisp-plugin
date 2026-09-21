@@ -16,6 +16,7 @@ import { createUploader } from "../../delivery/uploader.js";
 import { createRuntimeDiagnosticsDelivery } from "../../delivery/runtime-diagnostics.js";
 import { createUsageDelivery } from "../../delivery/usage.js";
 import { collectOpenClawUsage } from "../../usage/openclaw.js";
+import { createOpenClawDiagnosticProbes } from "./diagnostic-probes.js";
 import { createOpenClawAdapter } from "./index.js";
 import {
   createOpenClawUserTaskLifecycle,
@@ -82,6 +83,14 @@ export default definePluginEntry({
     const registry = createAdapterRegistry([createOpenClawAdapter({
       logger: api.logger,
       version: api.runtime.version,
+      diagnosticProbes: createOpenClawDiagnosticProbes({
+        stateDir,
+        enrollment: () => auth.canSend(),
+        spool: () => spool?.health(),
+        uploader: () => uploader?.status(),
+        updates: () => updates.status(),
+        configuration: () => api.runtime.config.current(),
+      }),
       probes: {
         process: healthy,
         gateway: healthy,
