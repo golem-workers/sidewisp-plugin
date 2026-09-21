@@ -1,3 +1,4 @@
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import os from 'node:os';
 import path from 'node:path';
 import { readFile, stat, statfs } from 'node:fs/promises';
@@ -13,14 +14,25 @@ export function createOpenClawDiagnosticProbes({
   stateDir, enrollment = () => false, spool = () => null, uploader = () => null,
   updates = () => null, configuration = () => ({}),
   memoryUsage = () => process.memoryUsage(), heap = () => v8.getHeapStatistics(),
-  totalmem = () => os.totalmem(), freemem = () => os.freemem(),
+  totalmem = () => os.totalmem(), freemem = () => os.freemem(), cpus = () => os.cpus(),
+  eventLoopMonitor = () => monitorEventLoopDelay({resolution:20}),
   statfsImpl = statfs, readFileImpl = readFile, statImpl = stat, now = Date.now,
 } = {}) {
+  let previousCpu = null;
+  let loop = null;
   return {
+    dispose() { loop?.disable(); loop=null; previousCpu=null; },
     async runtime() {
       const memory = memoryUsage(); const limit = heap().heap_size_limit;
       const facts = [fact('process.alive', true), fact('process.rss_bytes', memory.rss, 'bytes'),
         fact('process.heap_used_percent', percent(memory.heapUsed, limit), 'percent')];
+      if(!loop) { loop=eventLoopMonitor(); loop.enable(); }
+      else if(loop.count>0 && Number.isFinite(loop.max)) { facts.push(fact('process.event_loop_delay_ms',Math.round(loop.max/1e6),'milliseconds')); loop.reset(); }
+      const cpu = cpus().reduce((sum, item) => ({idle:sum.idle + item.times.idle,total:sum.total + Object.values(item.times).reduce((a,b)=>a+b,0)}), {idle:0,total:0});
+      if (previousCpu && cpu.total > previousCpu.total && cpu.idle >= previousCpu.idle) {
+        facts.push(fact('host.cpu_used_percent', percent(cpu.total - previousCpu.total - (cpu.idle - previousCpu.idle), cpu.total - previousCpu.total), 'percent'));
+      }
+      previousCpu = cpu;
       // MemAvailable is preferable to MemFree (page cache is reclaimable).
       try {
         const text = await readFileImpl('/proc/meminfo', 'utf8');

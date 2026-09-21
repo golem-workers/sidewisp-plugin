@@ -49,9 +49,11 @@ export function createRuntimeDiagnosticsDelivery({
     const snapshot = await adapter.collectDiagnostics({
       installationId: credential.installationId,
       observedAt: new Date(now()).toISOString(),
+      now,
+      ttlSeconds: Math.min(86400, Math.max(60, Math.ceil((intervalMs + timeoutMs + 60000) / 1000))),
     });
     const fingerprint = contentFingerprint(snapshot);
-    if (fingerprint !== lastFingerprint || now() - lastQueuedAt >= maxRefreshMs) {
+    if (fingerprint !== lastFingerprint || now() - lastQueuedAt >= Math.min(maxRefreshMs, intervalMs, snapshot.ttlSeconds * 1000)) {
       spool.coalesceRuntimeDiagnostic(snapshot);
       lastFingerprint = fingerprint;
       lastQueuedAt = now();

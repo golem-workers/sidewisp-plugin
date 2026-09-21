@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { createHermesDiagnosticProbes } from "../src/adapters/hermes/diagnostic-probes.js";
+import { createRuntimeDiagnosticsDelivery } from "../src/delivery/runtime-diagnostics.js";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
@@ -56,6 +58,7 @@ const credential = auth.credential();
 assert.equal(credential?.status, "active");
 
 const adapter = createHermesAdapter({
+  diagnosticProbes:createHermesDiagnosticProbes({stateDir,uploader:()=>uploader.status()}),
   version: process.env.HERMES_RUNTIME_VERSION || "upstream-canary",
   probes: {
     process: async () => ({ status: fs.existsSync(upstream) ? "healthy" : "unhealthy", reason: fs.existsSync(upstream) ? "runtime-present" : "runtime-missing" }),
@@ -80,6 +83,7 @@ const usageDelivery = createUsageDelivery({
   credentialProvider: { current: async () => credential },
   intervalMs: Number(process.env.SIDEWISP_USAGE_INTERVAL_MS || 5 * 60_000),
 });
+const diagnosticsDelivery=createRuntimeDiagnosticsDelivery({adapter,spool,endpoint,credentialProvider:{current:async()=>credential}});
 let sequence = 0;
 let stopped = false;
 
@@ -119,6 +123,7 @@ async function shutdown() {
   stopped = true;
   clearInterval(timer);
   await usageDelivery.stop();
+  await diagnosticsDelivery.stop();
   await spool.close();
 }
 
@@ -126,6 +131,7 @@ process.once("SIGTERM", () => shutdown().finally(() => process.exit(0)));
 process.once("SIGINT", () => shutdown().finally(() => process.exit(0)));
 await heartbeat();
 usageDelivery.start();
+diagnosticsDelivery.start();
 const timer = setInterval(() => heartbeat().catch((error) => {
   process.stderr.write(`Hermes canary heartbeat failed: ${error.message}\n`);
 }), intervalMs);

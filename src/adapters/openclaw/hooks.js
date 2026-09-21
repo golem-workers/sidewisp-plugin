@@ -1,3 +1,4 @@
+import { classifyRuntimeCause } from "../../core/causes.js";
 import { localDiagnostic, normalizeRuntimeEvent } from "../../core/normalize.js";
 
 export const OPENCLAW_HOOK_SOURCES = Object.freeze({
@@ -844,11 +845,13 @@ function cancellation(data, exitCode) {
 function toolDetails(data, failed, fallbackOperation) {
   const exitCode = safeInteger(data.exitCode, data.result?.exitCode);
   const httpStatus = safeInteger(data.httpStatus, data.statusCode, data.result?.httpStatus, data.result?.statusCode);
+  const causeCode = failed ? classifyRuntimeCause({code:data.code ?? data.error?.code ?? data.result?.code, causeCode:data.causeCode, operation:data.name ?? data.toolName ?? fallbackOperation, httpStatus, kind:'tool_end'}) : null;
   return {
     operation: safeOperation(data.name, data.toolName, data.result?.name, data.result?.toolName, fallbackOperation) ?? "unknown",
     status: safeOperation(data.status, data.result?.status),
     exitCode,
     ...(Number.isSafeInteger(httpStatus) ? { httpStatus } : {}),
+    ...(causeCode ? {causeCode} : {}),
     code: failed ? classifyFailure(data, exitCode) : undefined,
     recoverable: failed ? !["AUTH_FAILED", "PERMISSION_DENIED"].includes(classifyFailure(data, exitCode)) : undefined,
   };

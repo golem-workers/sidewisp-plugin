@@ -24,5 +24,22 @@ test('unavailable cron and malformed storage remain unknown, never healthy', asy
 });
 test('probe registration passes real diagnostics providers', async()=>{
  const {readFile}=await import('node:fs/promises');const text=await readFile(new URL('../src/adapters/openclaw/plugin.js',import.meta.url),'utf8');
- assert.match(text,/diagnosticProbes: createOpenClawDiagnosticProbes/);
+ assert.match(text,/const diagnosticProbes = createOpenClawDiagnosticProbes/);
+});
+test('Hermes host diagnostics never claim sidecar memory is Hermes process memory',async()=>{
+ const {createHermesDiagnosticProbes}=await import('../src/adapters/hermes/diagnostic-probes.js');
+ const {createHermesAdapter}=await import('../src/adapters/hermes/index.js');
+ const probes=createHermesDiagnosticProbes({stateDir:'/unused',statfsImpl:async()=>({blocks:100,bavail:1,bsize:4096}),uploader:()=>({status:'idle'})});
+ const snapshot=await createHermesAdapter({diagnosticProbes:probes}).collectDiagnostics();
+ assert.ok(snapshot.sections.find(s=>s.key==='storage').facts.some(f=>f.key==='disk.used_percent'&&f.value===99));
+ assert.equal(snapshot.sections.find(s=>s.key==='scheduler').outcome,'unsupported');
+ assert.equal(snapshot.sections.flatMap(s=>s.facts).some(f=>f.key.startsWith('process.')),false);
+});
+test('event-loop observation is numeric, sampled and disposed without treating startup as healthy',async()=>{
+ let enabled=0,disabled=0,reset=0;
+ const monitor={count:1,max:2100000000,enable(){enabled++},disable(){disabled++},reset(){reset++}};
+ const probes=createOpenClawDiagnosticProbes({stateDir:'/unused',eventLoopMonitor:()=>monitor});
+ assert.equal((await probes.runtime()).facts.some(f=>f.key==='process.event_loop_delay_ms'),false);
+ assert.equal((await probes.runtime()).facts.find(f=>f.key==='process.event_loop_delay_ms').value,2100);
+ probes.dispose();assert.equal(enabled,1);assert.equal(disabled,1);assert.equal(reset,1);
 });

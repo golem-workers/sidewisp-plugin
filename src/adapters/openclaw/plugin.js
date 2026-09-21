@@ -33,7 +33,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.23";
+const VERSION = "0.2.24";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -80,17 +80,18 @@ export default definePluginEntry({
     }), { timeoutMs: 20_000 });
     let spool = null;
     const healthy = async () => ({ status: "healthy" });
-    const registry = createAdapterRegistry([createOpenClawAdapter({
-      logger: api.logger,
-      version: api.runtime.version,
-      diagnosticProbes: createOpenClawDiagnosticProbes({
+    const diagnosticProbes = createOpenClawDiagnosticProbes({
         stateDir,
         enrollment: () => auth.canSend(),
         spool: () => spool?.health(),
         uploader: () => uploader?.status(),
         updates: () => updates.status(),
         configuration: () => api.runtime.config.current(),
-      }),
+      });
+    const registry = createAdapterRegistry([createOpenClawAdapter({
+      logger: api.logger,
+      version: api.runtime.version,
+      diagnosticProbes,
       probes: {
         process: healthy,
         gateway: healthy,
@@ -317,6 +318,7 @@ export default definePluginEntry({
           uploadTimer = null;
           if (runtimeDiagnostics) await runtimeDiagnostics.stop().catch(() => {});
           runtimeDiagnostics = null;
+        diagnosticProbes.dispose();
           if (usageDelivery) await usageDelivery.stop().catch(() => {});
           usageDelivery = null;
           if (spool) await spool.close().catch(() => {});
@@ -347,6 +349,7 @@ export default definePluginEntry({
           }
         }
         runtimeDiagnostics = null;
+        diagnosticProbes.dispose();
         if (usageDelivery) {
           try { await usageDelivery.stop(); }
           catch { api.logger.warn("Sidewisp usage delivery stop failed during shutdown"); }
