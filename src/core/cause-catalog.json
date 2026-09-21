@@ -1,0 +1,3053 @@
+{
+  "schema": "sidewisp.incident-catalog.v2",
+  "causes": [
+    {
+      "causeCode": "agent_never_connected",
+      "category": "1. Availability and connectivity",
+      "description": "enrollment exists but no first heartbeat arrived.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Агент ещё не подключался",
+        "en": "Agent never connected"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "agent_offline",
+      "category": "1. Availability and connectivity",
+      "description": "heartbeats stopped beyond the offline threshold.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Агент не в сети",
+        "en": "Agent offline"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "agent_stale",
+      "category": "1. Availability and connectivity",
+      "description": "heartbeat is late but not yet offline.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Агент давно не присылал данные",
+        "en": "Agent stale"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_offline",
+      "category": "1. Availability and connectivity",
+      "description": "Sidewisp collector stopped reporting.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Сборщик Sidewisp недоступен",
+        "en": "Collector offline"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "gateway_unreachable",
+      "category": "1. Availability and connectivity",
+      "description": "runtime is alive but Gateway cannot be reached.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Gateway недоступен",
+        "en": "Gateway unreachable"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "gateway_disconnected",
+      "category": "1. Availability and connectivity",
+      "description": "an established Gateway connection was lost.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Соединение с Gateway прервано",
+        "en": "Gateway disconnected"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "gateway_auth_failed",
+      "category": "1. Availability and connectivity",
+      "description": "Gateway URL is reachable but authentication failed.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Gateway отклонил авторизацию",
+        "en": "Gateway auth failed"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "gateway_wrong_target",
+      "category": "1. Availability and connectivity",
+      "description": "configured URL points at the wrong Gateway or environment.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Указан другой Gateway",
+        "en": "Gateway wrong target"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "dns_failure",
+      "category": "1. Availability and connectivity",
+      "description": "a required service name cannot be resolved.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Не удалось определить адрес сервера",
+        "en": "Dns failure"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "connection_refused",
+      "category": "1. Availability and connectivity",
+      "description": "host reachable but target service is not listening.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Сервер отклонил соединение",
+        "en": "Connection refused"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "connection_reset",
+      "category": "1. Availability and connectivity",
+      "description": "an established connection was reset.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Соединение сброшено",
+        "en": "Connection reset"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tls_failure",
+      "category": "1. Availability and connectivity",
+      "description": "certificate, trust, hostname, or TLS negotiation failed.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Ошибка проверки TLS",
+        "en": "Tls failure"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "proxy_failure",
+      "category": "1. Availability and connectivity",
+      "description": "proxy is missing, unreachable, or incorrectly bypassed.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Не работает прокси",
+        "en": "Proxy failure"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "network_timeout",
+      "category": "1. Availability and connectivity",
+      "description": "network operation exceeded its deadline.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Истекло время сетевого запроса",
+        "en": "Network timeout"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "clock_skew",
+      "category": "1. Availability and connectivity",
+      "description": "host time makes signed requests or event timestamps invalid.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Системное время расходится",
+        "en": "Clock skew"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "intermittent_transport",
+      "category": "1. Availability and connectivity",
+      "description": "repeated short disconnect/reconnect cycles.",
+      "categoryId": "connectivity",
+      "title": {
+        "ru": "Соединение регулярно обрывается",
+        "en": "Intermittent transport"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "disk_warning",
+      "category": "2. Host resources and operating system",
+      "description": "disk use crossed the warning threshold.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Мало места на диске",
+        "en": "Disk warning"
+      },
+      "severity": "warning",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "disk_critical",
+      "category": "2. Host resources and operating system",
+      "description": "disk use or remaining bytes crossed the critical threshold.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Диск почти заполнен",
+        "en": "Disk critical"
+      },
+      "severity": "critical",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "disk_full",
+      "category": "2. Host resources and operating system",
+      "description": "write failed with ENOSPC or equivalent.",
+      "categoryId": "host",
+      "title": {
+        "ru": "На диске закончилось место",
+        "en": "Disk full"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "inode_exhaustion",
+      "category": "2. Host resources and operating system",
+      "description": "free bytes remain but no inodes are available.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Закончились свободные inode",
+        "en": "Inode exhaustion"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "memory_pressure",
+      "category": "2. Host resources and operating system",
+      "description": "sustained low available memory or heavy reclaim.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Недостаточно доступной памяти",
+        "en": "Memory pressure"
+      },
+      "severity": "warning",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "swap_pressure",
+      "category": "2. Host resources and operating system",
+      "description": "sustained swap use or thrashing.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Высокая нагрузка на swap",
+        "en": "Swap pressure"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "process_oom",
+      "category": "2. Host resources and operating system",
+      "description": "process was killed by the OS OOM killer.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Процесс завершён из-за нехватки памяти",
+        "en": "Process oom"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "node_heap_oom",
+      "category": "2. Host resources and operating system",
+      "description": "Node.js heap limit was exhausted.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Node.js исчерпал память heap",
+        "en": "Node heap oom"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "cpu_saturation",
+      "category": "2. Host resources and operating system",
+      "description": "sustained CPU saturation affects task latency.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Процессор длительно перегружен",
+        "en": "Cpu saturation"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "event_loop_stalled",
+      "category": "2. Host resources and operating system",
+      "description": "Gateway event loop lag exceeds its safe threshold.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Цикл событий зависает",
+        "en": "Event loop stalled"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "file_descriptor_exhaustion",
+      "category": "2. Host resources and operating system",
+      "description": "process cannot open files or sockets.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Исчерпан лимит открытых файлов",
+        "en": "File descriptor exhaustion"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "process_limit_exhaustion",
+      "category": "2. Host resources and operating system",
+      "description": "process/thread limit prevents new work.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Исчерпан лимит процессов",
+        "en": "Process limit exhaustion"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "read_only_filesystem",
+      "category": "2. Host resources and operating system",
+      "description": "runtime state cannot be written.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Файловая система доступна только для чтения",
+        "en": "Read only filesystem"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "filesystem_corrupt",
+      "category": "2. Host resources and operating system",
+      "description": "runtime or collector storage failed integrity checks.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Повреждена файловая система",
+        "en": "Filesystem corrupt"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "permission_denied_filesystem",
+      "category": "2. Host resources and operating system",
+      "description": "runtime cannot read/write required state.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Нет доступа к файлам среды",
+        "en": "Permission denied filesystem"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "host_rebooted",
+      "category": "2. Host resources and operating system",
+      "description": "unexpected host restart interrupted work.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Компьютер перезагрузился",
+        "en": "Host rebooted"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "systemd_unit_failed",
+      "category": "2. Host resources and operating system",
+      "description": "managed service entered failed state.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Системный сервис завершился с ошибкой",
+        "en": "Systemd unit failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "restart_loop",
+      "category": "2. Host resources and operating system",
+      "description": "service repeatedly starts and crashes.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Агент постоянно перезапускается",
+        "en": "Restart loop"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "supervisor_conflict",
+      "category": "2. Host resources and operating system",
+      "description": "duplicate supervisors fight over the same service/port.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Конфликт управляющих процессов",
+        "en": "Supervisor conflict"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "port_conflict",
+      "category": "2. Host resources and operating system",
+      "description": "required listener address is already in use.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Порт занят другим процессом",
+        "en": "Port conflict"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "unsupported_os_or_arch",
+      "category": "2. Host resources and operating system",
+      "description": "feature/runtime is unsupported on this platform.",
+      "categoryId": "host",
+      "title": {
+        "ru": "Система или архитектура не поддерживается",
+        "en": "Unsupported os or arch"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_crashed",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "agent runtime exited unexpectedly.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Среда агента аварийно завершилась",
+        "en": "Runtime crashed"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_stopped_unexpectedly",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "runtime stopped without an expected shutdown marker.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Среда агента неожиданно остановилась",
+        "en": "Runtime stopped unexpectedly"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_start_failed",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "process could not start.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Среда агента не запустилась",
+        "en": "Runtime start failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_restart_failed",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "restart did not restore health.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Перезапуск среды не удался",
+        "en": "Runtime restart failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_unhealthy_after_start",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "process exists but health checks fail.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Среда нездорова после запуска",
+        "en": "Runtime unhealthy after start"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_version_unsupported",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "installed runtime is below/above supported range.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Версия среды не поддерживается",
+        "en": "Runtime version unsupported"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_adapter_unsupported",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "Sidewisp has no compatible adapter.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Адаптер среды не поддерживается",
+        "en": "Runtime adapter unsupported"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_event_unmapped",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "adapter observed an event it cannot normalize.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Неизвестное событие среды",
+        "en": "Runtime event unmapped"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_event_normalization_failed",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "adapter could not safely normalize an event.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Не удалось обработать событие среды",
+        "en": "Runtime event normalization failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "gateway_config_invalid",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "Gateway rejected configuration.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Некорректная конфигурация Gateway",
+        "en": "Gateway config invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "gateway_service_missing",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "expected managed service is absent.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Сервис Gateway отсутствует",
+        "en": "Gateway service missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "gateway_service_mismatch",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "running service points at a different install/revision.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Запущен другой экземпляр Gateway",
+        "en": "Gateway service mismatch"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "gateway_scope_missing",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "caller lacks a required operator scope.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Недостаточно прав Gateway",
+        "en": "Gateway scope missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "gateway_crash_loop_suppression",
+      "category": "3. Runtime and Gateway lifecycle",
+      "description": "safety breaker suppresses automatic channel starts.",
+      "categoryId": "runtime",
+      "title": {
+        "ru": "Запуски приостановлены из-за повторных сбоев",
+        "en": "Gateway crash loop suppression"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_auth_failed",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "API key/OAuth credential was rejected.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Провайдер отклонил авторизацию",
+        "en": "Provider auth failed"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "provider_credential_expired",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "credential is known to be expired.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Срок авторизации провайдера истёк",
+        "en": "Provider credential expired"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_permission_denied",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "credential is valid but lacks required scope.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Провайдер запретил операцию",
+        "en": "Provider permission denied"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_unavailable",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "provider or upstream returned an outage/server failure.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Провайдер недоступен",
+        "en": "Provider unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_overloaded",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "provider reports overload or busy capacity.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Провайдер перегружен",
+        "en": "Provider overloaded"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_rate_limited",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "request/concurrency/token rate limit reached.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Провайдер ограничил частоту запросов",
+        "en": "Provider rate limited"
+      },
+      "severity": "warning",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "provider_quota_exhausted",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "daily/weekly/monthly usage quota exhausted.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Квота провайдера исчерпана",
+        "en": "Provider quota exhausted"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "provider_billing_disabled",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "balance, spend cap, or billing state blocks requests.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Оплата провайдера отключена",
+        "en": "Provider billing disabled"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_timeout",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "provider did not respond within the request deadline.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Провайдер не ответил вовремя",
+        "en": "Provider timeout"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_malformed_response",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "response is empty, malformed, or unusable.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Провайдер вернул некорректный ответ",
+        "en": "Provider malformed response"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "model_not_found",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "configured model identifier does not exist.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Модель не найдена",
+        "en": "Model not found"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "model_access_denied",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "account has no access to the selected model.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Нет доступа к модели",
+        "en": "Model access denied"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "model_retired",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "provider explicitly reports that model is retired.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Модель больше не обслуживается",
+        "en": "Model retired"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "model_context_overflow",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "model context window was exceeded.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Превышен контекст модели",
+        "en": "Model context overflow"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_request_too_large",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "provider transport/request-size ceiling was exceeded.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Запрос слишком большой для провайдера",
+        "en": "Provider request too large"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "model_output_empty",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "request completed with no usable model output.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Модель вернула пустой ответ",
+        "en": "Model output empty"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "model_refusal",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "provider/model refused the request by policy.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Модель отказалась выполнять запрос",
+        "en": "Model refusal"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "all_auth_profiles_failed",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "all eligible credentials for the provider failed.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Ни один профиль авторизации не сработал",
+        "en": "All auth profiles failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "all_model_fallbacks_failed",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "the complete configured fallback chain failed.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Все резервные модели недоступны",
+        "en": "All model fallbacks failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "fallback_misconfigured",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "missing, forbidden, duplicated, or invalid fallback target.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Неверно настроены резервные модели",
+        "en": "Fallback misconfigured"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "agent_run_terminal_timeout",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "bounded recovery exhausted its final timeout.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Превышено время работы агента",
+        "en": "Agent run terminal timeout"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "idle_timeout_circuit_breaker",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "runaway/idle timeout breaker stopped the run.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Сработала защита от простоя",
+        "en": "Idle timeout circuit breaker"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "unknown_provider_failure",
+      "category": "4. Models, providers, quotas, and billing",
+      "description": "provider error remains unclassified after normalization.",
+      "categoryId": "provider",
+      "title": {
+        "ru": "Неизвестная ошибка провайдера",
+        "en": "Unknown provider failure"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "turn_failed",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "agent task ended unsuccessfully without a more specific root cause.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Задача завершилась с ошибкой",
+        "en": "Turn failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "turn_timeout",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "task exceeded its allowed duration.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Превышено время задачи",
+        "en": "Turn timeout"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "turn_cancelled_unexpectedly",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "task cancellation was not user-requested/expected.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Задача неожиданно отменена",
+        "en": "Turn cancelled unexpectedly"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tool_failed",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "tool returned an error without a more specific class.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Инструмент завершился с ошибкой",
+        "en": "Tool failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tool_timeout",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "tool exceeded its deadline.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Инструмент не ответил вовремя",
+        "en": "Tool timeout"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tool_not_found",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "requested tool/capability is not installed or exposed.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Инструмент не найден",
+        "en": "Tool not found"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tool_invalid_input",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "tool request failed schema/argument validation.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Некорректные параметры инструмента",
+        "en": "Tool invalid input"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tool_policy_denied",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "tool is blocked by allow/deny policy.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Инструмент запрещён политикой",
+        "en": "Tool policy denied"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tool_approval_required",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "execution awaits explicit approval.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Инструмент ожидает подтверждения",
+        "en": "Tool approval required"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tool_approval_expired",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "approval expired before execution.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Срок подтверждения истёк",
+        "en": "Tool approval expired"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tool_approval_mismatch",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "approved plan differs from the dispatched plan.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Подтверждение не соответствует операции",
+        "en": "Tool approval mismatch"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "sandbox_unavailable",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "sandbox requested but Docker/runtime is unavailable.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Изолированная среда недоступна",
+        "en": "Sandbox unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "sandbox_start_failed",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "sandbox/container could not start.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Изолированная среда не запустилась",
+        "en": "Sandbox start failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "sandbox_resource_limit",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "sandbox hit CPU, memory, process, or disk limits.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Исчерпаны ресурсы изолированной среды",
+        "en": "Sandbox resource limit"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "exec_nonzero_exit",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "command returned a non-zero exit code.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Команда завершилась с ошибкой",
+        "en": "Exec nonzero exit"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "exec_signal_exit",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "command was killed by a signal.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Команда завершена сигналом",
+        "en": "Exec signal exit"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "exec_permission_denied",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "OS refused command execution.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Запуск команды запрещён",
+        "en": "Exec permission denied"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "dependency_missing",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "required binary/library/service is absent.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Отсутствует зависимость",
+        "en": "Dependency missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "dependency_version_mismatch",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "installed dependency version is incompatible.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Версия зависимости несовместима",
+        "en": "Dependency version mismatch"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "working_directory_missing",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "configured working directory does not exist.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Рабочий каталог отсутствует",
+        "en": "Working directory missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "result_too_large",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "tool/provider result exceeded a bounded output limit.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Результат слишком большой",
+        "en": "Result too large"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "unknown_tool_failure",
+      "category": "5. Tasks, turns, tools, and approvals",
+      "description": "failure is safe to display but not classified.",
+      "categoryId": "task",
+      "title": {
+        "ru": "Неизвестная ошибка инструмента",
+        "en": "Unknown tool failure"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "context_exhausted",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "current model/session context has no usable capacity.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Контекст переполнен",
+        "en": "Context exhausted"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "compaction_failed",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "session compaction could not complete.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Не удалось сократить контекст",
+        "en": "Compaction failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "memory_flush_failed",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "durable memory flush failed.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Не удалось сохранить память",
+        "en": "Memory flush failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "memory_search_unavailable",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "memory search engine cannot answer.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Поиск по памяти недоступен",
+        "en": "Memory search unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "memory_embedding_auth_failed",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "embedding provider rejected credentials.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Отклонена авторизация сервиса памяти",
+        "en": "Memory embedding auth failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "memory_embedding_unavailable",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "embedding provider/index service unavailable.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Сервис поиска по памяти недоступен",
+        "en": "Memory embedding unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "memory_index_stale",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "source changed but index is not current.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Индекс памяти устарел",
+        "en": "Memory index stale"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "memory_index_corrupt",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "index/store integrity check failed.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Индекс памяти повреждён",
+        "en": "Memory index corrupt"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "memory_profile_ambiguous",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "multiple agent profiles require explicit selection.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Не удалось выбрать профиль памяти",
+        "en": "Memory profile ambiguous"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "memory_source_unreadable",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "configured memory source cannot be read.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Источник памяти недоступен",
+        "en": "Memory source unreadable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "session_store_unavailable",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "session database/storage cannot be accessed.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Хранилище сессий недоступно",
+        "en": "Session store unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "session_store_corrupt",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "active session store fails integrity/shape checks.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Хранилище сессий повреждено",
+        "en": "Session store corrupt"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "transcript_missing",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "session row references a missing transcript.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Запись диалога отсутствует",
+        "en": "Transcript missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "orphan_transcript",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "transcript exists without a session record.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Обнаружена потерянная запись диалога",
+        "en": "Orphan transcript"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "session_binding_stale",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "provider/runtime conversation binding is stale.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Привязка сессии устарела",
+        "en": "Session binding stale"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "session_resume_failed",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "provider/runtime session could not be resumed.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Не удалось продолжить сессию",
+        "en": "Session resume failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "session_expired",
+      "category": "6. Sessions, context, state, and memory",
+      "description": "upstream or local session is no longer valid.",
+      "categoryId": "memory",
+      "title": {
+        "ru": "Срок сессии истёк",
+        "en": "Session expired"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_not_configured",
+      "category": "7. Channels and message delivery",
+      "description": "enabled workflow has no usable channel account.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Канал не настроен",
+        "en": "Channel not configured"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_credential_missing",
+      "category": "7. Channels and message delivery",
+      "description": "token/credential reference cannot be resolved.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Не настроена авторизация канала",
+        "en": "Channel credential missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_credential_rejected",
+      "category": "7. Channels and message delivery",
+      "description": "channel API rejected the token.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Канал отклонил авторизацию",
+        "en": "Channel credential rejected"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "channel_scope_missing",
+      "category": "7. Channels and message delivery",
+      "description": "app/bot lacks required permissions or intents.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Недостаточно прав канала",
+        "en": "Channel scope missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_disconnected",
+      "category": "7. Channels and message delivery",
+      "description": "channel transport is offline.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Канал отключён",
+        "en": "Channel disconnected"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_network_failure",
+      "category": "7. Channels and message delivery",
+      "description": "DNS/proxy/TLS/network blocks channel API.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Сетевая ошибка канала",
+        "en": "Channel network failure"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_rate_limited",
+      "category": "7. Channels and message delivery",
+      "description": "platform throttled delivery or polling.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Канал ограничил частоту сообщений",
+        "en": "Channel rate limited"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_send_failed",
+      "category": "7. Channels and message delivery",
+      "description": "outbound message failed.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Не удалось отправить сообщение",
+        "en": "Channel send failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_receive_failed",
+      "category": "7. Channels and message delivery",
+      "description": "inbound polling/webhook processing failed.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Не удалось получить сообщение",
+        "en": "Channel receive failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_webhook_invalid",
+      "category": "7. Channels and message delivery",
+      "description": "webhook URL/signature/configuration is invalid.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Некорректный webhook канала",
+        "en": "Channel webhook invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_pairing_required",
+      "category": "7. Channels and message delivery",
+      "description": "sender/device is not paired.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Канал ожидает сопряжения",
+        "en": "Channel pairing required"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_sender_blocked",
+      "category": "7. Channels and message delivery",
+      "description": "allowlist/group policy rejected the sender.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Отправитель заблокирован политикой",
+        "en": "Channel sender blocked"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_mention_required",
+      "category": "7. Channels and message delivery",
+      "description": "group message was intentionally ignored without mention.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Для ответа требуется упоминание",
+        "en": "Channel mention required"
+      },
+      "severity": "info",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_privacy_mode",
+      "category": "7. Channels and message delivery",
+      "description": "platform privacy mode hides required messages.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Мешает режим приватности канала",
+        "en": "Channel privacy mode"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_target_invalid",
+      "category": "7. Channels and message delivery",
+      "description": "room/chat/user target is missing or malformed.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Некорректный адрес получателя",
+        "en": "Channel target invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_target_not_found",
+      "category": "7. Channels and message delivery",
+      "description": "room/chat/user no longer exists or bot was removed.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Получатель не найден",
+        "en": "Channel target not found"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_message_too_large",
+      "category": "7. Channels and message delivery",
+      "description": "platform size/media limit exceeded.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Сообщение слишком большое",
+        "en": "Channel message too large"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_unsupported_media",
+      "category": "7. Channels and message delivery",
+      "description": "platform cannot deliver requested media type.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Канал не поддерживает этот тип вложения",
+        "en": "Channel unsupported media"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_command_limit",
+      "category": "7. Channels and message delivery",
+      "description": "native command/menu limit exceeded.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Превышен лимит команд канала",
+        "en": "Channel command limit"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "channel_encryption_unverified",
+      "category": "7. Channels and message delivery",
+      "description": "encrypted-room device/session is not verified.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Шифрование канала не подтверждено",
+        "en": "Channel encryption unverified"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "delivery_suppressed_expected",
+      "category": "7. Channels and message delivery",
+      "description": "silent/heartbeat/empty/policy suppression; event only.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Доставка штатно пропущена",
+        "en": "Delivery suppressed expected"
+      },
+      "severity": "info",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "delivery_unknown_failure",
+      "category": "7. Channels and message delivery",
+      "description": "platform returned an unclassified delivery error.",
+      "categoryId": "channel",
+      "title": {
+        "ru": "Неизвестная ошибка доставки",
+        "en": "Delivery unknown failure"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "schedule_failed",
+      "category": "8. Schedules, queues, and background work",
+      "description": "scheduled run started and failed.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Ошибка запуска по расписанию",
+        "en": "Schedule failed"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "schedule_missed",
+      "category": "8. Schedules, queues, and background work",
+      "description": "expected schedule did not run.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Пропущен запуск по расписанию",
+        "en": "Schedule missed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "schedule_overlapping",
+      "category": "8. Schedules, queues, and background work",
+      "description": "next run became due while previous run was active.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Запуски расписания пересекаются",
+        "en": "Schedule overlapping"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "schedule_blocked",
+      "category": "8. Schedules, queues, and background work",
+      "description": "policy/dependency prevented execution.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Запуск расписания заблокирован",
+        "en": "Schedule blocked"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "schedule_disabled",
+      "category": "8. Schedules, queues, and background work",
+      "description": "cron or environment explicitly disables scheduling.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Расписание отключено",
+        "en": "Schedule disabled"
+      },
+      "severity": "info",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "schedule_timezone_invalid",
+      "category": "8. Schedules, queues, and background work",
+      "description": "timezone/cadence produces unintended due times.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Некорректный часовой пояс",
+        "en": "Schedule timezone invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "schedule_payload_invalid",
+      "category": "8. Schedules, queues, and background work",
+      "description": "job payload/model/tool settings are invalid.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Некорректное задание расписания",
+        "en": "Schedule payload invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "schedule_target_invalid",
+      "category": "8. Schedules, queues, and background work",
+      "description": "delivery route is missing or invalid.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Некорректная цель расписания",
+        "en": "Schedule target invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "schedule_stuck_running",
+      "category": "8. Schedules, queues, and background work",
+      "description": "persisted in-flight marker survived interruption.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Запуск расписания завис",
+        "en": "Schedule stuck running"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "heartbeat_not_firing",
+      "category": "8. Schedules, queues, and background work",
+      "description": "heartbeat cadence stopped.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Heartbeat не запускается",
+        "en": "Heartbeat not firing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "queue_stuck",
+      "category": "8. Schedules, queues, and background work",
+      "description": "queued work is not progressing.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Очередь не продвигается",
+        "en": "Queue stuck"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "queue_backpressure",
+      "category": "8. Schedules, queues, and background work",
+      "description": "pending work grows beyond delivery capacity.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Очередь не успевает обрабатываться",
+        "en": "Queue backpressure"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "queue_dead_lettered",
+      "category": "8. Schedules, queues, and background work",
+      "description": "item was permanently rejected.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Событие перемещено в недоставленные",
+        "en": "Queue dead lettered"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "queue_corrupt",
+      "category": "8. Schedules, queues, and background work",
+      "description": "queue/spool storage failed integrity checks.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Очередь повреждена",
+        "en": "Queue corrupt"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "queue_quota_exceeded",
+      "category": "8. Schedules, queues, and background work",
+      "description": "local spool reached its byte quota.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Очередь превысила лимит",
+        "en": "Queue quota exceeded"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "queue_locked",
+      "category": "8. Schedules, queues, and background work",
+      "description": "another writer owns the queue/spool.",
+      "categoryId": "scheduler",
+      "title": {
+        "ru": "Очередь заблокирована",
+        "en": "Queue locked"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "config_parse_failed",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "configuration is not parseable.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Не удалось прочитать конфигурацию",
+        "en": "Config parse failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "config_schema_invalid",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "unknown/invalid fields violate the schema.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Конфигурация не прошла проверку",
+        "en": "Config schema invalid"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "config_reference_invalid",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "referenced agent/model/channel/plugin does not exist.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Некорректная ссылка в конфигурации",
+        "en": "Config reference invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "config_reload_failed",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "changed configuration was not applied.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Не удалось применить конфигурацию",
+        "en": "Config reload failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "secret_missing",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "required SecretRef or secret value is absent.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Отсутствует необходимый секрет",
+        "en": "Secret missing"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "secret_resolution_failed",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "secret provider/exec/file resolution failed.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Не удалось получить секрет",
+        "en": "Secret resolution failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "secret_scope_denied",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "secret exists but is not allowed for this target.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Нет прав на использование секрета",
+        "en": "Secret scope denied"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "secret_expired",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "credential is known to be expired.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Срок секрета истёк",
+        "en": "Secret expired"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "identity_not_authenticated",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "no valid actor/session identity.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Вход не выполнен",
+        "en": "Identity not authenticated"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "identity_permission_denied",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "actor lacks the required role/scope.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Недостаточно прав учётной записи",
+        "en": "Identity permission denied"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "tenant_scope_violation",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "request targets another workspace/tenant.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Нарушены границы рабочего пространства",
+        "en": "Tenant scope violation"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "device_pairing_required",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "device has not been paired.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Устройство ожидает сопряжения",
+        "en": "Device pairing required"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "device_surface_approval_required",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "new command/capability awaits approval.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Действие на устройстве ожидает разрешения",
+        "en": "Device surface approval required"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "policy_denied",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "explicit security or messaging policy blocks the action.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Действие запрещено политикой",
+        "en": "Policy denied"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "owner_not_configured",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "owner-only operations have no trusted owner identity.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Владелец не настроен",
+        "en": "Owner not configured"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "security_finding",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "doctor/security audit reports a concrete unsafe state.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Проверка обнаружила проблему безопасности",
+        "en": "Security finding"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "certificate_or_signing_invalid",
+      "category": "9. Configuration, identity, secrets, and policy",
+      "description": "signed artifact/request cannot be verified.",
+      "categoryId": "security",
+      "title": {
+        "ru": "Подпись или сертификат недействительны",
+        "en": "Certificate or signing invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "plugin_missing",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "configured plugin is not installed.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Плагин не установлен",
+        "en": "Plugin missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "plugin_load_failed",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "plugin failed import/initialization.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Плагин не загрузился",
+        "en": "Plugin load failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "plugin_config_invalid",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "plugin configuration is invalid.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Некорректная конфигурация плагина",
+        "en": "Plugin config invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "plugin_runtime_failed",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "loaded plugin raised a runtime failure.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Плагин завершил операцию с ошибкой",
+        "en": "Plugin runtime failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "plugin_dependency_missing",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "required package/peer dependency is absent.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Отсутствует зависимость плагина",
+        "en": "Plugin dependency missing"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "plugin_version_incompatible",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "plugin is incompatible with OpenClaw/runtime.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Версия плагина несовместима",
+        "en": "Plugin version incompatible"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "skill_unavailable",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "skill requirements are missing for this host.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Навык недоступен",
+        "en": "Skill unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "skill_execution_failed",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "skill helper/workflow failed.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Ошибка выполнения навыка",
+        "en": "Skill execution failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "integration_auth_failed",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "external integration rejected authentication.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Интеграция отклонила авторизацию",
+        "en": "Integration auth failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "integration_unavailable",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "external integration is unavailable.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Интеграция недоступна",
+        "en": "Integration unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "integration_contract_changed",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "response/schema no longer matches expected contract.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Формат ответа интеграции изменился",
+        "en": "Integration contract changed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "integration_rate_limited",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "integration throttled requests.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Интеграция ограничила частоту запросов",
+        "en": "Integration rate limited"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "integration_webhook_failed",
+      "category": "10. Plugins, skills, and integrations",
+      "description": "outbound webhook failed or was rejected.",
+      "categoryId": "integration",
+      "title": {
+        "ru": "Не удалось доставить webhook",
+        "en": "Integration webhook failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "node_offline",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "paired node is disconnected.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Устройство не в сети",
+        "en": "Node offline"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "node_pairing_required",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "node identity is not paired.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Устройство не сопряжено",
+        "en": "Node pairing required"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "node_surface_unapproved",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "requested node command was not approved.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Операция на устройстве не разрешена",
+        "en": "Node surface unapproved"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "node_background_unavailable",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "mobile node must be foregrounded.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Устройство должно быть на переднем плане",
+        "en": "Node background unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "node_permission_required",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "camera, microphone, screen, location, or OS permission is missing.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Требуется системное разрешение устройства",
+        "en": "Node permission required"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "computer_control_disabled",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "computer control is disabled.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Управление компьютером отключено",
+        "en": "Computer control disabled"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "accessibility_permission_required",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "OS Accessibility permission is missing.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Требуется разрешение специальных возможностей",
+        "en": "Accessibility permission required"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "location_disabled",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "location mode is disabled.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Геолокация отключена",
+        "en": "Location disabled"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "system_run_denied",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "node execution approval/allowlist denied the command.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Запуск команды на устройстве запрещён",
+        "en": "System run denied"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "capability_not_declared",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "connected node does not expose the requested capability.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Устройство не предоставляет эту возможность",
+        "en": "Capability not declared"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "browser_not_running",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "managed/external browser is unavailable.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Браузер не запущен",
+        "en": "Browser not running"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "browser_cdp_unreachable",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "Chrome DevTools endpoint cannot be reached.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Интерфейс управления браузером недоступен",
+        "en": "Browser cdp unreachable"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "browser_profile_invalid",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "selected browser profile/configuration is invalid.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Некорректный профиль браузера",
+        "en": "Browser profile invalid"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "browser_target_stale",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "page/window/element reference is stale.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Ссылка на элемент браузера устарела",
+        "en": "Browser target stale"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "browser_navigation_timeout",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "page navigation/action exceeded deadline.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Браузер не завершил переход вовремя",
+        "en": "Browser navigation timeout"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "media_permission_required",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "camera/microphone/screen permission missing.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Требуется разрешение на камеру или микрофон",
+        "en": "Media permission required"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "media_decode_failed",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "attached/generated media cannot be decoded.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Не удалось прочитать медиафайл",
+        "en": "Media decode failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "file_transfer_failed",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "upload/download was interrupted or rejected.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Передача файла прервалась",
+        "en": "File transfer failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "file_too_large",
+      "category": "11. Nodes, devices, browser, and media capabilities",
+      "description": "file exceeds configured/platform limits.",
+      "categoryId": "device",
+      "title": {
+        "ru": "Файл слишком большой",
+        "en": "File too large"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_not_enrolled",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "setup token was never exchanged successfully.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Sidewisp ещё не подключён",
+        "en": "Collector not enrolled"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_credential_rejected",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "backend rejected collector HMAC identity.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Сервер отклонил авторизацию Sidewisp",
+        "en": "Collector credential rejected"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_credential_revoked",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "installation credential was revoked.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Подключение Sidewisp отозвано",
+        "en": "Collector credential revoked"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_endpoint_unreachable",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "Sidewisp API cannot be reached.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Сервер Sidewisp недоступен",
+        "en": "Collector endpoint unreachable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_upload_retry",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "transient telemetry upload failure.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Sidewisp повторяет отправку",
+        "en": "Collector upload retry"
+      },
+      "severity": "warning",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "collector_upload_rejected",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "backend permanently rejected a batch.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Сервер отклонил данные Sidewisp",
+        "en": "Collector upload rejected"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_invalid_ack",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "acknowledgement does not match sent snapshot/batch.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Некорректное подтверждение доставки",
+        "en": "Collector invalid ack"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_backpressure",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "retries exhausted while local pending data remains.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Очередь Sidewisp не успевает отправляться",
+        "en": "Collector backpressure"
+      },
+      "severity": "error",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "collector_dead_letter",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "event cannot be delivered and was dead-lettered.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Событие Sidewisp не доставлено",
+        "en": "Collector dead letter"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_event_too_large",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "one event makes the batch exceed its bound.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Событие Sidewisp слишком большое",
+        "en": "Collector event too large"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_spool_locked",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "second writer or stale lock blocks the spool.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Хранилище очереди Sidewisp заблокировано",
+        "en": "Collector spool locked"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_spool_corrupt",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "SQLite integrity check failed.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Хранилище очереди Sidewisp повреждено",
+        "en": "Collector spool corrupt"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_spool_quota",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "spool exceeded its local byte quota.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Очередь Sidewisp достигла лимита",
+        "en": "Collector spool quota"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_schema_newer",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "spool schema is newer than installed plugin.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Версия хранилища Sidewisp новее плагина",
+        "en": "Collector schema newer"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_hook_failed",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "OpenClaw hook processing failed.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Ошибка обработчика Sidewisp",
+        "en": "Collector hook failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_event_unsupported",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "runtime event has no mapping.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Sidewisp не поддерживает это событие",
+        "en": "Collector event unsupported"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_diagnostics_unsupported",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "detailed runtime probes are not implemented.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Подробная диагностика не поддерживается",
+        "en": "Collector diagnostics unsupported"
+      },
+      "severity": "info",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_diagnostics_partial",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "one or more diagnostic sections failed.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Часть диагностики недоступна",
+        "en": "Collector diagnostics partial"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_diagnostics_stale",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "last diagnostic snapshot exceeded TTL.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Диагностика устарела",
+        "en": "Collector diagnostics stale"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_usage_failed",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "usage collection or delivery failed.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Не удалось собрать статистику использования",
+        "en": "Collector usage failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_clock_skew",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "event timestamp was corrected due to clock skew.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Sidewisp обнаружил расхождение времени",
+        "en": "Collector clock skew"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "monitoring_blind",
+      "category": "12. Sidewisp collector and observability path",
+      "description": "agent may work, but Sidewisp lacks trustworthy current data.",
+      "categoryId": "collector",
+      "title": {
+        "ru": "Недостаточно данных для наблюдения",
+        "en": "Monitoring blind"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_available",
+      "category": "13. Updates and version compatibility",
+      "description": "newer supported version exists; informational.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Доступно обновление",
+        "en": "Update available"
+      },
+      "severity": "info",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_preflight_failed",
+      "category": "13. Updates and version compatibility",
+      "description": "dirty checkout, missing upstream, insufficient disk, or target unavailable.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Не пройдена подготовка к обновлению",
+        "en": "Update preflight failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_dependency_install_failed",
+      "category": "13. Updates and version compatibility",
+      "description": "dependency installation failed.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Не установились зависимости обновления",
+        "en": "Update dependency install failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_build_failed",
+      "category": "13. Updates and version compatibility",
+      "description": "source/UI build failed.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Не удалось собрать обновление",
+        "en": "Update build failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_install_failed",
+      "category": "13. Updates and version compatibility",
+      "description": "package/global installation failed.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Не удалось установить обновление",
+        "en": "Update install failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_doctor_failed",
+      "category": "13. Updates and version compatibility",
+      "description": "post-update doctor gate failed.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Проверка после обновления не пройдена",
+        "en": "Update doctor failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_restart_unavailable",
+      "category": "13. Updates and version compatibility",
+      "description": "no supported restart path exists.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Недоступен способ перезапуска",
+        "en": "Update restart unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_restart_failed",
+      "category": "13. Updates and version compatibility",
+      "description": "restart did not restore service.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Перезапуск после обновления не удался",
+        "en": "Update restart failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_revision_mismatch",
+      "category": "13. Updates and version compatibility",
+      "description": "running revision differs from target revision.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Запущена не та версия после обновления",
+        "en": "Update revision mismatch"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_verification_timeout",
+      "category": "13. Updates and version compatibility",
+      "description": "final state could not be proven in time.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Не удалось подтвердить обновление вовремя",
+        "en": "Update verification timeout"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_rolled_back",
+      "category": "13. Updates and version compatibility",
+      "description": "updater restored the previous version.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Обновление было отменено откатом",
+        "en": "Update rolled back"
+      },
+      "severity": "warning",
+      "remediationKind": "guided"
+    },
+    {
+      "causeCode": "update_rollback_failed",
+      "category": "13. Updates and version compatibility",
+      "description": "rollback did not restore the prior healthy state.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Откат не восстановил работоспособность",
+        "en": "Update rollback failed"
+      },
+      "severity": "critical",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_interrupted",
+      "category": "13. Updates and version compatibility",
+      "description": "host/process stopped during an in-flight update.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Обновление прервано",
+        "en": "Update interrupted"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_plugin_target_unavailable",
+      "category": "13. Updates and version compatibility",
+      "description": "compatible plugin target cannot be resolved.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Подходящая версия плагина недоступна",
+        "en": "Update plugin target unavailable"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "update_version_incompatible",
+      "category": "13. Updates and version compatibility",
+      "description": "core/plugin/runtime versions are incompatible.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Обновление несовместимо",
+        "en": "Update version incompatible"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "collector_outdated",
+      "category": "13. Updates and version compatibility",
+      "description": "collector is older than the backend minimum.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Версия Sidewisp устарела",
+        "en": "Collector outdated"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "runtime_outdated",
+      "category": "13. Updates and version compatibility",
+      "description": "runtime is behind the supported/recommended version.",
+      "categoryId": "update",
+      "title": {
+        "ru": "Версия среды агента устарела",
+        "en": "Runtime outdated"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "usage_collection_stale",
+      "category": "14. Usage, cost, and account limits",
+      "description": "latest usage sample is outside freshness limits.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Статистика использования устарела",
+        "en": "Usage collection stale"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "usage_collection_partial",
+      "category": "14. Usage, cost, and account limits",
+      "description": "only part of usage data could be attributed.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Статистика использования неполная",
+        "en": "Usage collection partial"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "usage_delivery_failed",
+      "category": "14. Usage, cost, and account limits",
+      "description": "usage batch could not be ingested.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Не удалось отправить статистику",
+        "en": "Usage delivery failed"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "usage_budget_warning",
+      "category": "14. Usage, cost, and account limits",
+      "description": "configured usage threshold crossed.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Бюджет близок к лимиту",
+        "en": "Usage budget warning"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "usage_budget_exceeded",
+      "category": "14. Usage, cost, and account limits",
+      "description": "configured budget exhausted.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Бюджет превышен",
+        "en": "Usage budget exceeded"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "cost_anomaly",
+      "category": "14. Usage, cost, and account limits",
+      "description": "spend changed beyond the reviewed anomaly threshold.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Необычный рост расходов",
+        "en": "Cost anomaly"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_limit_unknown",
+      "category": "14. Usage, cost, and account limits",
+      "description": "provider quota could not be read.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Лимит провайдера неизвестен",
+        "en": "Provider limit unknown"
+      },
+      "severity": "info",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_limit_near",
+      "category": "14. Usage, cost, and account limits",
+      "description": "provider quota is close to exhaustion.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Лимит провайдера близок к исчерпанию",
+        "en": "Provider limit near"
+      },
+      "severity": "warning",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "provider_limit_exhausted",
+      "category": "14. Usage, cost, and account limits",
+      "description": "provider quota prevents further work.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Лимит провайдера исчерпан",
+        "en": "Provider limit exhausted"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "pricing_unknown",
+      "category": "14. Usage, cost, and account limits",
+      "description": "model pricing is unavailable, so cost is estimated/unknown.",
+      "categoryId": "usage",
+      "title": {
+        "ru": "Стоимость модели неизвестна",
+        "en": "Pricing unknown"
+      },
+      "severity": "info",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "unknown_failure",
+      "category": "15. Catch-all and product states",
+      "description": "verified failure with safe evidence but no classifier match.",
+      "categoryId": "unknown",
+      "title": {
+        "ru": "Неизвестная ошибка",
+        "en": "Unknown failure"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "insufficient_evidence",
+      "category": "15. Catch-all and product states",
+      "description": "signal exists but Sidewisp cannot safely assert a cause.",
+      "categoryId": "unknown",
+      "title": {
+        "ru": "Недостаточно доказательств причины",
+        "en": "Insufficient evidence"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "unsupported_capability",
+      "category": "15. Catch-all and product states",
+      "description": "requested observation/remediation is unsupported.",
+      "categoryId": "unknown",
+      "title": {
+        "ru": "Возможность не поддерживается",
+        "en": "Unsupported capability"
+      },
+      "severity": "info",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "stale_evidence",
+      "category": "15. Catch-all and product states",
+      "description": "evidence is too old to describe current state.",
+      "categoryId": "unknown",
+      "title": {
+        "ru": "Данные о проблеме устарели",
+        "en": "Stale evidence"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    },
+    {
+      "causeCode": "conflicting_evidence",
+      "category": "15. Catch-all and product states",
+      "description": "probes disagree; show monitoring state, not a false diagnosis.",
+      "categoryId": "unknown",
+      "title": {
+        "ru": "Диагностические данные противоречат друг другу",
+        "en": "Conflicting evidence"
+      },
+      "severity": "error",
+      "remediationKind": "explain"
+    }
+  ]
+}
