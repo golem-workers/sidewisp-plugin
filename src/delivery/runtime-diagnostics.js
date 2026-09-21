@@ -128,7 +128,7 @@ export function createRuntimeDiagnosticsDelivery({
     start() {
       if (!stopped) return;
       stopped = false;
-      schedule(random() * intervalMs);
+      schedule(random() * Math.min(intervalMs, 30_000));
     },
     async stop() {
       stopped = true;
