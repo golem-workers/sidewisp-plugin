@@ -35,7 +35,7 @@ export async function collectOpenClawContext({ stateDir, now = Date.now } = {}) 
   const { entry, updatedAt } = latest;
   const used = entry.totalTokens, limit = entry.contextTokens;
   if (entry.totalTokensFresh === false || !Number.isSafeInteger(used) || used < 0 || !Number.isSafeInteger(limit) || limit <= 0
-    || !Number.isSafeInteger(updatedAt) || updatedAt > now() || now()-updatedAt > 900000) return [];
+    || !Number.isSafeInteger(updatedAt) || updatedAt > now()) return [];
   const fact = (key, value, unit='count') => ({ key, value, unit, status:'ok', severity:'info', source:'session-metadata' });
   return [fact('context.used', used), fact('context.capacity', limit), fact('context.measured_at_ms', updatedAt, 'milliseconds'),
     fact('context.selection', 'latest_root_session', 'selection')];

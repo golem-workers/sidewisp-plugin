@@ -22,10 +22,10 @@ test('SQLite context selects latest root, ignores child/archive; numeric privacy
  add(123,now,null,null,false);assert.deepEqual(await collectOpenClawContext({stateDir:root,now:()=>now}),[]);
  }finally{db.close();await fs.rm(root,{recursive:true,force:true})}
 });
-test('legacy index keeps zero distinct from missing, rejects stale and future',async()=>{
+test('legacy index keeps zero distinct from missing, retains idle sessions and rejects future',async()=>{
  const root=await fs.mkdtemp(path.join(os.tmpdir(),'sw-context-'));const dir=path.join(root,'agents','main','sessions');await fs.mkdir(dir,{recursive:true});
  try{
- for(const [entry,expected] of [[{totalTokens:0,contextTokens:100,updatedAt:now},4],[{contextTokens:100,updatedAt:now},0],[{totalTokens:2,contextTokens:100,updatedAt:now-900001},0],[{totalTokens:2,contextTokens:100,updatedAt:now+1},0]]){
+ for(const [entry,expected] of [[{totalTokens:0,contextTokens:100,updatedAt:now},4],[{contextTokens:100,updatedAt:now},0],[{totalTokens:2,contextTokens:100,updatedAt:now-86400000},4],[{totalTokens:2,contextTokens:100,updatedAt:now+1},0]]){
  await fs.writeFile(path.join(dir,'sessions.json'),JSON.stringify({root:entry}));assert.equal((await collectOpenClawContext({stateDir:root,now:()=>now})).length,expected);
  }
  }finally{await fs.rm(root,{recursive:true,force:true})}
