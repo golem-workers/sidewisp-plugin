@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { readFile, stat, statfs } from 'node:fs/promises';
 import v8 from 'node:v8';
+import { collectOpenClawContext } from '../../context/openclaw.js';
 
 // Only numeric measurements and closed enums leave the host. No shell, network
 // scans, config values, exception text, job names, paths or channel identifiers.
@@ -16,6 +17,7 @@ export function createOpenClawDiagnosticProbes({
   memoryUsage = () => process.memoryUsage(), heap = () => v8.getHeapStatistics(),
   totalmem = () => os.totalmem(), freemem = () => os.freemem(), cpus = () => os.cpus(),
   eventLoopMonitor = () => monitorEventLoopDelay({resolution:20}),
+  contextUsage = () => collectOpenClawContext({ stateDir, now }),
   statfsImpl = statfs, readFileImpl = readFile, statImpl = stat, now = Date.now,
 } = {}) {
   let previousCpu = null;
@@ -41,6 +43,7 @@ export function createOpenClawDiagnosticProbes({
         if (values.SwapTotal > 0 && Number.isFinite(values.SwapFree)) facts.push(fact('host.swap_used_percent', percent(values.SwapTotal - values.SwapFree, values.SwapTotal), 'percent'));
       } catch { /* Other OSes: free RAM is a measurement, not memory pressure. */ }
       facts.push(fact('host.ram_total_bytes', totalmem(), 'bytes'), fact('host.ram_free_bytes', freemem(), 'bytes'));
+      try { facts.push(...await contextUsage()); } catch { /* Context unavailable. */ }
       return section(facts);
     },
     async configuration() {
