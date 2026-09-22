@@ -1,3 +1,5 @@
+import { collectOpenClawContext } from '../../context/openclaw.js';
+import { createContextUsageDelivery } from '../../delivery/context-usage.js';
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import crypto from "node:crypto";
 import path from "node:path";
@@ -33,7 +35,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.25";
+const VERSION = "0.2.26";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -112,6 +114,7 @@ export default definePluginEntry({
     let uploader = null;
     let runtimeDiagnostics = null;
     let usageDelivery = null;
+    let contextDelivery = null;
     let uploadTimer = null;
     let healthTimer = null;
     let spoolFailure = null;
@@ -295,6 +298,9 @@ export default definePluginEntry({
             maxRefreshMs: config.diagnosticsMaxRefreshMs,
           });
           runtimeDiagnostics.start();
+          contextDelivery=createContextUsageDelivery({collect:()=>collectOpenClawContext({stateDir}),endpoint:config.endpoint,
+            credentialProvider:{current:async()=>auth.credential()}});
+          contextDelivery.start();
           usageDelivery = createUsageDelivery({
             collect: ({ collectedAtMs }) => collectOpenClawUsage({ stateDir, collectedAtMs }),
             spool, endpoint: config.endpoint,
@@ -319,6 +325,8 @@ export default definePluginEntry({
           if (runtimeDiagnostics) await runtimeDiagnostics.stop().catch(() => {});
           runtimeDiagnostics = null;
         diagnosticProbes.dispose();
+          if (contextDelivery) await contextDelivery.stop().catch(() => {});
+          contextDelivery=null;
           if (usageDelivery) await usageDelivery.stop().catch(() => {});
           usageDelivery = null;
           if (spool) await spool.close().catch(() => {});
@@ -350,6 +358,8 @@ export default definePluginEntry({
         }
         runtimeDiagnostics = null;
         diagnosticProbes.dispose();
+        if (contextDelivery) await contextDelivery.stop().catch(() => {});
+        contextDelivery=null;
         if (usageDelivery) {
           try { await usageDelivery.stop(); }
           catch { api.logger.warn("Sidewisp usage delivery stop failed during shutdown"); }
@@ -373,6 +383,7 @@ export default definePluginEntry({
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
         runtimeDiagnostics: runtimeDiagnostics?.status() ?? { status: "not-started", at: null },
+        contextUsage: contextDelivery?.status() ?? {status:'not-started',at:null},
         usage: usageDelivery?.status() ?? { status: "not-started", at: null, observations: 0 },
         update: updates.status(),
         hooks: hookTelemetry.status(),
