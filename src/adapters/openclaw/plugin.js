@@ -1,4 +1,5 @@
 import { createDeviceAuthorizationClient } from "../../auth/device-authorization.js";
+import { synchronizeCollectorAuthorization } from "../../auth/collector-authorization.js";
 import { collectOpenClawContext } from '../../context/openclaw.js';
 import { createContextUsageDelivery } from '../../delivery/context-usage.js';
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
@@ -36,7 +37,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.30";
+const VERSION = "0.2.31";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -212,14 +213,11 @@ export default definePluginEntry({
     };
     const emitHeartbeat = async () => {
       if (spool) {
-        try {
-          const device = createDeviceAuthorizationClient({ endpoint: config.endpoint, stateDir });
-          const result = await device.poll();
-          if (result.status === 'credential_saved') await auth.load();
-        } catch (error) {
-          // A missing request is normal; pending enrollment must not affect existing work.
-          if (error?.code !== 'ENOENT') api.logger.debug?.('Sidewisp device authorization pending or unavailable');
-        }
+        await synchronizeCollectorAuthorization({
+          device: createDeviceAuthorizationClient({ endpoint: config.endpoint, stateDir }),
+          auth,
+          onPendingError: () => api.logger.debug?.('Sidewisp device authorization pending or unavailable'),
+        });
       }
       if (!spool || !auth.canSend()) return;
       const snapshot = await adapter.healthSnapshot();
