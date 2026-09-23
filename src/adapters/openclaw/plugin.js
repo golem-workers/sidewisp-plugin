@@ -1,3 +1,4 @@
+import { registerConnectTool } from './connect-tool.js';
 import { createDeviceAuthorizationClient } from "../../auth/device-authorization.js";
 import { synchronizeCollectorAuthorization } from "../../auth/collector-authorization.js";
 import { collectOpenClawContext } from '../../context/openclaw.js';
@@ -378,6 +379,12 @@ export default definePluginEntry({
         spool = null;
         await collector.stop();
       },
+    });
+
+    registerConnectTool(api, {
+      endpoint: config.endpoint, stateDir,
+      ready: async () => config.enabled && Boolean(spool && uploader)
+        && !spoolFailure && (await collector.status()).running,
     });
 
     api.registerGatewayMethod("sidewisp.status", async ({ respond }) => {
