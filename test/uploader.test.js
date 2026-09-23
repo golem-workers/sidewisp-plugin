@@ -102,3 +102,14 @@ test('idle is not recovery without a real acknowledgement; later failure clears 
  const uploader=createUploader({spool,maxBatch:1,endpoint:'https://sidewisp.test',credentialProvider:{current:async()=>credential},fetchImpl:async()=>reject?{status:403,ok:false}:{status:200,ok:true,json:async()=>({acknowledgedEventIds:['one']})}});
  await uploader.sendOnce();assert.ok(uploader.status().lastDeliveredAt);reject=true;await uploader.sendOnce();assert.equal(uploader.status().lastDeliveredAt,undefined);
 });
+
+test('reconnection quarantines old installation events without sending them under new credentials', async () => {
+  const spool = memorySpool([{eventId:'old',installationId:'sw_ins_deleted000'}, {eventId:'new',installationId:credential.installationId}]);
+  const uploader=createUploader({spool,endpoint:'https://sidewisp.test',credentialProvider:{current:async()=>credential},fetchImpl:async(_url,init)=>{
+    const events=JSON.parse(init.body).events;
+    assert.deepEqual(events.map(x=>x.eventId),['new']);
+    return {ok:true,status:200,json:async()=>({acknowledgedEventIds:['new']})};
+  }});
+  assert.equal((await uploader.sendOnce()).sent,1);
+  assert.equal(spool.pending(10).length,0);
+});
