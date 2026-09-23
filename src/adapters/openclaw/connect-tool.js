@@ -36,7 +36,7 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
           expiresAtMs: result.expiresAtMs,
           nextAction: 'Approve the request in Sidewisp. No additional agent message is needed.' });
       } catch (error) {
-        const allowed = /^(installation_already_connected|another_authorization_pending|device_authorization_http_[0-9]{3})$/;
+        const allowed = /^(collector_status_unavailable|installation_already_connected|another_authorization_pending|device_authorization_http_[0-9]{3})$/;
         return reply({ status: 'blocked', reason: allowed.test(error.message) ? error.message : 'connection_preparation_failed' }, true);
       } finally { busy = false; }
     },

@@ -1,4 +1,5 @@
 import { registerConnectTool } from './connect-tool.js';
+import { collectorStateId, createCollectorReadiness, readServingCollectorStatus } from './collector-readiness.js';
 import { createDeviceAuthorizationClient } from "../../auth/device-authorization.js";
 import { synchronizeCollectorAuthorization } from "../../auth/collector-authorization.js";
 import { collectOpenClawContext } from '../../context/openclaw.js';
@@ -38,7 +39,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.32";
+const VERSION = "0.2.33";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -381,10 +382,12 @@ export default definePluginEntry({
       },
     });
 
+    const localCollectorReady = async () => config.enabled && Boolean(spool && uploader)
+      && !spoolFailure && (await collector.status()).running;
     registerConnectTool(api, {
       endpoint: config.endpoint, stateDir,
-      ready: async () => config.enabled && Boolean(spool && uploader)
-        && !spoolFailure && (await collector.status()).running,
+      ready: createCollectorReadiness({ enabled: config.enabled, endpoint: config.endpoint, stateDir,
+        localReady: localCollectorReady, readGatewayStatus: readServingCollectorStatus }),
     });
 
     api.registerGatewayMethod("sidewisp.status", async ({ respond }) => {
@@ -395,6 +398,7 @@ export default definePluginEntry({
         configured: auth.canSend(),
         endpoint: config.endpoint,
         mode: "zero-llm",
+        connectionReadiness: { ready: await localCollectorReady(), stateId: await collectorStateId(stateDir) },
         installation: auth.status(),
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },

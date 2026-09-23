@@ -41,7 +41,15 @@ and spool are simulated. Hermes helper path remains covered.
 `test/device-authorization.test.js`: revoked-binding replacement, healthy binding
 protection, outage preservation and explicit approval.
 
-Not yet proven: installed release on a real Gateway exposing this tool, actual
-model invocation under host admission, hosted-backend tool-driven reconnect,
-platform preinstallation, installed Android acceptance. Prior CLI-driven live
-proof does not establish these new tool acceptance cases.
+Version 0.2.33 fixes cold/standalone tool instances: service readiness belongs to
+the serving Gateway, not the tool-discovery instance. A cold instance reads
+`sidewisp.status` via authenticated OpenClaw transport, checks actual readiness,
+the configured endpoint, and a SHA-256 identity of the real local state directory.
+Disabled/unavailable/mismatched collectors fail closed. No duplicate collector,
+runtime repair, restart, or installation is performed by the tool.
+
+The isolated 0.2.32 reproduction has a running Gateway collector and nevertheless
+returns collector_not_ready from the real standalone OpenClaw tool loader.
+See the release verification report for the corrected archived-plugin live cycle.
+This is not proof of installation on every host, model interpretation of the
+prompt, or acceptance from installed Android.
