@@ -18,6 +18,6 @@ node -e '
 const value = JSON.parse(process.argv[1]);
 if (value.plugin.status !== "loaded") throw new Error(`plugin status: ${value.plugin.status}`);
 if (!value.services.includes("sidewisp-collector")) throw new Error("collector service missing");
-if (value.tools.length || value.plugin.providerIds.length) throw new Error("plugin exposed an agent capability");
+if (JSON.stringify(value.tools.flatMap(tool => typeof tool === "string" ? [tool] : tool.names ?? [])) !== JSON.stringify(["sidewisp_connect"]) || value.plugin.providerIds.length) throw new Error("unexpected plugin agent capability");
 if (!value.gatewayMethods.includes("sidewisp.status") || !value.gatewayMethods.includes("sidewisp.supportBundle")) throw new Error("diagnostic methods missing");
 ' "$inspection"
