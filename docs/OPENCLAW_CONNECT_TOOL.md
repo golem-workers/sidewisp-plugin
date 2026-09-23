@@ -1,7 +1,7 @@
 # Native OpenClaw connection tool
 
-Implementation status: source-only, not part of published 0.2.31. Requires release,
-installation/activation and host tool admission. No platform image has been changed.
+Introduced in 0.2.32. Requires installation/activation and host tool admission.
+No platform image is changed by publishing this package.
 
 `sidewisp_connect({requestId, endpoint})` accepts a public invitation from the
 initiating Sidewisp account. OpenClaw must identify the caller as the owner;

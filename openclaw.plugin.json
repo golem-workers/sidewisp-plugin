@@ -52,5 +52,10 @@
     "endpoint": {
       "label": "Ingestion endpoint"
     }
+  },
+  "contracts": {
+    "tools": [
+      "sidewisp_connect"
+    ]
   }
 }
