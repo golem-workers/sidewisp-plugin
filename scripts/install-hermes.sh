@@ -65,7 +65,9 @@ WantedBy=default.target
 EOF
   chmod 600 "$unit_dir/sidewisp-hermes.service"
   systemctl --user daemon-reload
-  systemctl --user enable --now sidewisp-hermes.service
+  systemctl --user enable sidewisp-hermes.service
+  # Reload new credentials even when the collector was already running.
+  systemctl --user restart sidewisp-hermes.service
   systemctl --user is-active --quiet sidewisp-hermes.service
   echo "Sidewisp Hermes collector installed and running (systemd user service)."
 elif test "$(uname -s)" = "Darwin"; then

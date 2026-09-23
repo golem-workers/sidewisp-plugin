@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createFileCredentialStore } from './credentials.js';
+import { inspectCredential } from './credential-status.js';
 
 // CLI output contains only public request details. Device proof and credentials stay on disk.
 export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl = globalThis.fetch }) {
@@ -24,15 +25,24 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
     return row;
   };
   return {
+    async status() {
+      return { status: await inspectCredential({ endpoint: url, credential: await credentials.read(), fetchImpl }) };
+    },
     async begin({ id, runtime }) {
       if (!/^sw_pair_[A-Za-z0-9_-]{32}$/.test(id) || !['openclaw','hermes'].includes(runtime)) throw new Error('invalid_device_request');
       // Replacing a working installation is a distinct, explicit reconnect operation.
-      if ((await credentials.read())?.status === 'active') throw new Error('installation_already_connected');
+      const existing = await credentials.read();
+      if (existing && await inspectCredential({ endpoint: url, credential: existing, fetchImpl }) === 'active') throw new Error('installation_already_connected');
       await fs.mkdir(directory, { recursive: true, mode: 0o700 });
       await fs.chmod(directory, 0o700);
       let state;
       try { state = await read(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
-      if (state && (state.id !== id || state.runtime !== runtime)) throw new Error('another_authorization_pending');
+      if (state && (state.id !== id || state.runtime !== runtime)) {
+        const previous = await request('/v1/device-authorizations/poll', { id: state.id, deviceSecret: state.deviceSecret });
+        if (!['expired', 'denied', 'completed'].includes(previous.status)) throw new Error('another_authorization_pending');
+        await fs.rm(file);
+        state = null;
+      }
       if (!state) {
         state = { id, runtime, endpoint: url.origin, deviceSecret: `sw_device_${randomBytes(32).toString('base64url')}` };
         await fs.writeFile(file, JSON.stringify(state), { mode: 0o600, flag: 'wx' });
@@ -49,7 +59,8 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       if (result.status === 'approved') {
         const credential = result.credential;
         const existing = await credentials.read();
-        if (existing?.status === 'active' && existing.installationId !== credential?.installationId) throw new Error('installation_already_connected');
+        if (existing && existing.installationId !== credential?.installationId
+          && await inspectCredential({ endpoint: url, credential: existing, fetchImpl }) === 'active') throw new Error('installation_already_connected');
         await credentials.write({ installationId: credential?.installationId, secret: credential?.installationSecret, status: 'active' });
         await request('/v1/device-authorizations/poll', { ...input, acknowledge: true });
         await fs.rm(file);

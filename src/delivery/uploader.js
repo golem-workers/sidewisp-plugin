@@ -31,7 +31,12 @@ export function createUploader({
   async function sendOnce() {
     const credential = await credentialProvider.current();
     if (!credential || credential.status !== "active") return finish({ status: "disabled", sent: 0, remaining: spool.pending(1).length });
-    const pending = spool.pending(maxBatch);
+    const queued = spool.pending(maxBatch);
+    // Never replay the deleted binding's backlog under a newly approved account.
+    for (const row of queued) {
+      if (row.event.installationId && row.event.installationId !== credential.installationId) spool.deadLetter(row.eventId, 'previous-installation');
+    }
+    const pending = queued.filter(row => !row.event.installationId || row.event.installationId === credential.installationId);
     if (pending.length === 0) { attempt = 0; return finish({ status: "idle", sent: 0, remaining: 0 }); }
     const jsonBody = Buffer.from(JSON.stringify({ schema: "sidewisp.telemetry-batch.v1", events: pending.map(({ event }) => event) }));
     if (jsonBody.length > maxBodyBytes) {
