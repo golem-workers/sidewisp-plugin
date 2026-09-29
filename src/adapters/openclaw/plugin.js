@@ -1,3 +1,4 @@
+import { createScheduleRunner } from "../../schedules/runner.js";
 import { registerConnectTool } from './connect-tool.js';
 import { collectorStateId, createCollectorReadiness, readServingCollectorStatus } from './collector-readiness.js';
 import { createDeviceAuthorizationClient } from "../../auth/device-authorization.js";
@@ -39,7 +40,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.33";
+const VERSION = "0.2.34";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -117,6 +118,7 @@ export default definePluginEntry({
     let sequence = 0;
     let uploader = null;
     let runtimeDiagnostics = null;
+    let scheduleRunner = null;
     let usageDelivery = null;
     let contextDelivery = null;
     let uploadTimer = null;
@@ -309,6 +311,10 @@ export default definePluginEntry({
             maxRefreshMs: config.diagnosticsMaxRefreshMs,
           });
           runtimeDiagnostics.start();
+          scheduleRunner=createScheduleRunner({stateDir,endpoint:config.endpoint,runtime:api.runtime,
+            agentId:api.config?.agents?.list?.find(agent=>agent.default)?.id ?? api.config?.agents?.list?.[0]?.id ?? 'main',
+            credentialProvider:{current:async()=>auth.credential()}});
+          scheduleRunner.start();
           contextDelivery=createContextUsageDelivery({collect:()=>collectOpenClawContext({stateDir}),endpoint:config.endpoint,
             credentialProvider:{current:async()=>auth.credential()}});
           contextDelivery.start();
@@ -347,6 +353,8 @@ export default definePluginEntry({
         }
       },
       async stop() {
+        if(scheduleRunner) await scheduleRunner.stop().catch(()=>{});
+        scheduleRunner=null;
         if (healthTimer) clearInterval(healthTimer);
         healthTimer = null;
         if (uploadTimer) clearInterval(uploadTimer);
