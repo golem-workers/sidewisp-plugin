@@ -26,13 +26,13 @@ def env_read(paths):
                 env[k] = ' '.join(shlex.split(v))
     return env
 
-def render_policy(text, policy):
+def render_policy(text, policy, inherited=None):
     ids = policy['allowlist']
     if not all(re.fullmatch(r'sw_ins_[A-Za-z0-9-]+', i) for i in ids): raise ValueError('INVALID_IDS')
     values = {'SIDEWISP_PLUGIN_STABLE_VERSION': policy['version'], 'SIDEWISP_PLUGIN_STABLE_SPEC': policy['spec'],
       'SIDEWISP_PLUGIN_STABLE_SHA256': policy['sha256'], 'SIDEWISP_UPDATE_ROLLOUT_PERCENT': '0',
       'SIDEWISP_UPDATE_CANARY_INSTALLATIONS': ','.join(sorted(ids)), 'SIDEWISP_UPDATE_RESTART_DELAY_SECONDS': '60'}
-    old = env_text(text)
+    old = {**(inherited or {}), **env_text(text)}
     if all(old.get(k, '') == v for k, v in values.items()): return text
     # No recipients before a production canary appears: do not restart idle APIs
     # merely to change a target that nobody can receive.
@@ -60,7 +60,7 @@ def apply_policy(targets, policy, backup_dir, restart_fn=restart, ready_fn=ready
         for target in targets:
             p = Path(target['envFile'])
             if p.is_symlink() or not p.is_file(): raise ValueError('INVALID_ENV_FILE')
-            old = p.read_text(); new = render_policy(old, policy)
+            old = p.read_text(); new = render_policy(old, policy, env_read(target.get('baseEnvFiles', [])))
             if old == new: continue
             st = p.stat()
             backup = Path(backup_dir) / (p.name + '.before')

@@ -30,6 +30,11 @@ class Fleet(unittest.TestCase):
     def test_no_restart_when_no_recipients_and_already_disabled(self):
         text='SIDEWISP_PLUGIN_STABLE_VERSION=0.2.17\nSIDEWISP_UPDATE_ROLLOUT_PERCENT=0\n'
         self.assertEqual(c.render_policy(text,{**POLICY,'allowlist':[]}),text)
+    def test_inherited_global_rollout_is_overridden_when_no_recipients(self):
+        text='PORT=3101\n'
+        new=c.render_policy(text,{**POLICY,'allowlist':[]},{'SIDEWISP_UPDATE_ROLLOUT_PERCENT':'100'})
+        self.assertIn('SIDEWISP_UPDATE_ROLLOUT_PERCENT=0\n',new)
+        self.assertIn('PORT=3101\n',new)
     def test_verify_exact_archive_tag_and_migration_before_acceptance(self):
         stream=io.BytesIO()
         with tarfile.open(fileobj=stream,mode='w:gz') as tar:
