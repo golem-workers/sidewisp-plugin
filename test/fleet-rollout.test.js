@@ -58,3 +58,9 @@ test('revoked canary and timeouts halt instead of promoting', () => {
   assert.equal(plan([agent('a', { credentialActive: false }), agent('b')], p.nextState).nextState.phase, 'halted');
   assert.equal(plan([agent('a'), agent('b')], p.nextState, start + 3_600_001).nextState.phase, 'halted');
 });
+test('quarantine and missing server diagnostics block new attempts', () => {
+  const p = plan([agent('failed', { quarantined: true }), agent('old-backend', { diagnosticsSupported: false })]);
+  assert.deepEqual(p.policy.allowlist, []);
+  assert.equal(p.observations[0].reason, 'recovery_required');
+  assert.equal(p.observations[1].reason, 'backend_diagnostics_unavailable');
+});

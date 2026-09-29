@@ -1,9 +1,10 @@
-# Verified fleet rollout (decision engine; not deployed)
+# Verified fleet rollout
 
 `src/release/fleet-rollout.js` implements a deterministic, read-only release
 decision engine. `node scripts/plan-fleet-rollout.mjs input.json` prints a plan.
-This is **not yet a running release publisher or fleet controller**. It must not
-be described as automatic updating enabled in production.
+The deployment also includes a release publisher/discovery service and a
+persistent runtime controller. Deployment status must still be verified on the
+actual host; code and passing tests alone are not evidence of an enabled timer.
 
 ## Inputs and guarantees
 
@@ -27,14 +28,48 @@ be described as automatic updating enabled in production.
   stay visible with explicit reasons. A returning installation is considered on
   the next tick, provided its exact source migration is verified.
 
-## Remaining integration gates
+## Publication and runtime
 
-The deployment adapter must serialize ticks, atomically persist state before
-applying an allowlist, publish only validated immutable releases, preserve
-unrelated runtime settings, and rollback failed backend configuration switches.
-The release publisher must verify downloaded artifact hash/tag and real migration
-proofs before creating the manifest. These adapters are deliberately not enabled
-while current live rollout recovery is blocked.
+After a release archive is published and its exact source transitions have passed,
+prepare `fleet-rollout.json` with schema `sidewisp.verified-fleet.v1`, version,
+commit, sha256, environments, verifiedMigrations and migrationEvidence. Each
+proof contains cohort, targetVersion, artifactSha256, status=completed,
+sourceUpdaterTested=true and isolated=true. These fields attest actual tests;
+never fabricate evidence to qualify an old updater.
+
+Run `npm run release:fleet -- /absolute/path/fleet-rollout.json`. The publisher
+resolves the official Git tag, downloads and hashes the archive, checks its package
+version and migration attestations, and attaches the immutable manifest to the
+existing GitHub release. A conflicting existing manifest is rejected.
+
+The discovery timer checks official GitHub releases every 15 minutes and repeats
+artifact verification before accepting a manifest for each explicitly authorized
+environment. Ordinary releases without the verified manifest do not trigger a
+rollout. The controller timer runs every minute, reads installations and terminal
+snapshots from PostgreSQL, plans a canary/expansion, persists state, and updates
+only the six plugin policy environment settings. It restarts APIs only if those
+settings actually change. Failed readiness restores all modified instance files
+and restarts them on the previous settings; a durable APPLY_BLOCKED marker stops
+further changes until reviewed. Unrelated settings and credentials are preserved.
+
+Config `/etc/sidewisp-fleet/<environment>.json` defines envFiles, pgModule,
+releaseFile, stateDir, targets (envFile/unit/readyUrl), quarantined IDs, and apply.
+No credentials are stored in manifests or status reports. The controller loads
+the existing protected runtime environment. State is private and separate per
+environment/release. New releases cannot silently abandon unresolved prior ones.
+Inspect status.json and systemd service failures; there is no model polling.
+
+Production with no diagnostic table is monitored but cannot start a canary whose
+terminal result cannot be verified. Unsupported source migrations, quarantined
+installations, and offline records remain visible; enabling the services does not
+mean those installations have been updated. The existing older agent helper uses
+git spec, not the manifest archive hash, during live installation. Publisher hash
+validation is not a claim of per-host archive checksum verification.
+
+Validation: `npm run test:fleet`, full `npm test`, real host read-only controller
+plan, actual manifest discovery, systemd timer/service status, policy readback,
+API readiness, and unchanged backend revisions. Keep the old service configuration
+and policy backups for rollback.
 
 ## September 29 investigation
 

@@ -1,0 +1,10 @@
+[Unit]
+Description=Discover verified official Sidewisp releases
+After=network-online.target
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/sidewisp-fleet/current/scripts/fleet-release.py sync /etc/sidewisp-fleet/discovery.json
+TimeoutStartSec=180
+NoNewPrivileges=true
+PrivateTmp=true

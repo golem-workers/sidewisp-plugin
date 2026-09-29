@@ -17,7 +17,7 @@ export function planFleetRollout({ release, environment, agents, state = null, n
   if (new Set(agents.map(a => a.id)).size !== agents.length) throw new Error('DUPLICATE_INSTALLATION');
   const next = structuredClone(state ?? { fingerprint, phase: 'canary', attempts: {}, provenCohorts: [], halted: null });
   const fresh = a => Number.isFinite(a.lastSeen) && a.lastSeen <= now && now - a.lastSeen <= 120_000;
-  const eligible = a => a.status === 'active' && a.credentialActive === true && fresh(a)
+  const eligible = a => !a.quarantined && a.diagnosticsSupported !== false && a.status === 'active' && a.credentialActive === true && fresh(a)
     && release.verifiedMigrations.includes(cohort(a)) && isNewerVersion(release.version, a.version);
   const observations = [];
   for (const a of agents) {
@@ -37,11 +37,12 @@ export function planFleetRollout({ release, environment, agents, state = null, n
       attempt.completed = true;
       if (!next.provenCohorts.includes(attempt.cohort)) next.provenCohorts.push(attempt.cohort);
     }
-    const reason = a.status !== 'active' ? a.status
+    const reason = a.quarantined ? 'recovery_required' : a.status !== 'active' ? a.status
       : !a.credentialActive ? 'credential_unavailable'
       : !fresh(a) ? 'offline'
       : attempt?.completed ? 'completed'
       : a.version === release.version ? 'version_reported_unverified'
+      : a.diagnosticsSupported === false ? 'backend_diagnostics_unavailable'
       : !release.verifiedMigrations.includes(cohort(a)) ? 'migration_unverified'
       : attempt ? 'pending' : 'eligible';
     observations.push({ id: a.id, reason });
@@ -62,7 +63,7 @@ export function planFleetRollout({ release, environment, agents, state = null, n
     }
   }
   next.phase = next.halted ? 'halted' : next.provenCohorts.length ? 'rolling' : 'canary';
-  const allowlist = next.halted ? [] : agents.filter(a => a.status === 'active' && a.credentialActive
+  const allowlist = next.halted ? [] : agents.filter(a => !a.quarantined && a.status === 'active' && a.credentialActive
     && fresh(a) && next.attempts[a.id] && !next.attempts[a.id].completed).map(a => a.id).sort();
   return { nextState: next, policy: { version: release.version,
     spec: `git:github.com/golem-workers/sidewisp-plugin@v${release.version}`,
