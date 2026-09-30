@@ -24,13 +24,8 @@ idle deferrals. Unknown health and crashes fail closed; interrupted mutation or 
 stale lock requires inspection, not blind retries. Readiness includes serving
 version, enabled/running collector and unchanged endpoint/installation ID.
 
-0.2.35 OpenClaw collectors check official GitHub releases every 15 minutes with
-no model calls. A release must carry `fleet-rollout.json` with the existing
-verified-fleet schema, `deliveryMode: host-idle-hot-reload-v1`, the environment,
-an exact source-plugin/runtime-version cohort and real migration evidence with
-`gatewayRestarts: 0`. The normal release pipeline must test and publish this
-manifest; arbitrary releases and legacy restart-based manifests are ignored.
-Private/custom endpoints are not automatically enrolled in this release channel.
+Since 0.2.37 GitHub discovery is removed. Version 0.2.38 adds an independent
+server-directed manager: see [Managed updates](MANAGED_UPDATES.md).
 
 Bootstrap is distinct from future updates. A 0.2.34 or older running updater
 cannot be fixed by code it has not loaded yet. Existing hosts must receive the

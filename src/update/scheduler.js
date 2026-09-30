@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { isNewerVersion, validUpdateDirective } from "./directive.js";
@@ -73,6 +73,7 @@ export function createUpdateScheduler({ stateDir, logger, currentVersion, spawnI
       };
     },
     schedule(directive) {
+      if (existsSync(path.join(stateDir, "sidewisp", "manager", "config.json"))) return false;
       if (!validUpdateDirective(directive)
         || !/^[a-f0-9]{64}$/.test(directive.sha256 ?? "")
         || !isNewerVersion(directive.targetVersion, currentVersion)
