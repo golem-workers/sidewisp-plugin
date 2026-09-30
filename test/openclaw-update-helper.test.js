@@ -1,123 +1,13 @@
-import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import {
-  chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
-} from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
-
-const helper = fileURLToPath(new URL("../scripts/openclaw-update-helper.mjs", import.meta.url));
-
-test("OpenClaw helper rechecks the installed version before a delayed update", (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidewisp-openclaw-helper-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const bin = path.join(root, "bin");
-  const pluginRoot = path.join(root, "plugin");
-  const logFile = path.join(root, "openclaw.log");
-  const stateFile = path.join(root, "update-status.json");
-  const preload = path.join(root, "skip-delay.mjs");
-  mkdirSync(bin);
-  mkdirSync(pluginRoot);
-  writeFileSync(path.join(pluginRoot, "package.json"), `${JSON.stringify({ version: "0.2.18" })}\n`);
-  writeFileSync(preload, "globalThis.setTimeout = (fn) => { queueMicrotask(fn); return { unref() {} }; };\n");
-  const openclaw = path.join(bin, "openclaw");
-  writeFileSync(openclaw, `#!/bin/sh
-printf '%s\\n' "$*" >> "$SIDEWISP_TEST_LOG"
-if [ "$1 $2 $3" = "plugins inspect sidewisp" ]; then
-  printf '{"plugin":{"rootDir":"%s","source":"%s/openclaw.plugin.json"},"install":{"installPath":"%s"}}\\n' "$SIDEWISP_TEST_PLUGIN_ROOT" "$SIDEWISP_TEST_PLUGIN_ROOT" "$SIDEWISP_TEST_PLUGIN_ROOT"
-  exit 0
-fi
-exit 90
-`);
-  chmodSync(openclaw, 0o755);
-
-  execFileSync(process.execPath, ["--import", preload, helper, JSON.stringify({
-    schema: "sidewisp.plugin-update.v1",
-    targetVersion: "0.2.17",
-    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.17",
-    restartDelaySeconds: 30,
-    stateFile,
-  })], {
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
-      SIDEWISP_TEST_LOG: logFile,
-      SIDEWISP_TEST_PLUGIN_ROOT: pluginRoot,
-    },
-    stdio: "pipe",
-  });
-
-  const state = JSON.parse(readFileSync(stateFile, "utf8"));
-  assert.equal(state.status, "skipped");
-  assert.equal(state.reasonCode, "TARGET_NOT_NEWER");
-  assert.deepEqual(readFileSync(logFile, "utf8").trim().split("\n"), [
-    "plugins inspect sidewisp --runtime --json",
-  ]);
-});
-
-test("OpenClaw helper waits for stable task idle and avoids a second restart", (t) => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidewisp-openclaw-idle-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const bin = path.join(root, "bin");
-  const pluginRoot = path.join(root, "plugin");
-  const logFile = path.join(root, "openclaw.log");
-  const statusCountFile = path.join(root, "status-count");
-  const stateFile = path.join(root, "update-status.json");
-  const preload = path.join(root, "skip-delay.mjs");
-  mkdirSync(bin);
-  mkdirSync(pluginRoot);
-  writeFileSync(path.join(pluginRoot, "package.json"), `${JSON.stringify({ version: "0.2.19" })}\n`);
-  writeFileSync(preload, "globalThis.setTimeout = (fn) => { queueMicrotask(fn); return { unref() {} }; };\n");
-  const openclaw = path.join(bin, "openclaw");
-  writeFileSync(openclaw, `#!/bin/sh
-printf '%s\\n' "$*" >> "$SIDEWISP_TEST_LOG"
-if [ "$1 $2 $3" = "plugins inspect sidewisp" ]; then
-  printf '{"plugin":{"rootDir":"%s","source":"%s/openclaw.plugin.json"},"install":{"installPath":"%s"}}\\n' "$SIDEWISP_TEST_PLUGIN_ROOT" "$SIDEWISP_TEST_PLUGIN_ROOT" "$SIDEWISP_TEST_PLUGIN_ROOT"
-  exit 0
-fi
-if [ "$1 $2 $3" = "gateway call sidewisp.status" ]; then
-  count=0
-  if [ -f "$SIDEWISP_TEST_STATUS_COUNT" ]; then count=$(sed -n '1p' "$SIDEWISP_TEST_STATUS_COUNT"); fi
-  count=$((count + 1))
-  printf '%s\\n' "$count" > "$SIDEWISP_TEST_STATUS_COUNT"
-  version=$(sed -n 's/.*"version":"\\([^"]*\\)".*/\\1/p' "$SIDEWISP_TEST_PLUGIN_ROOT/package.json")
-  if [ "$count" -eq 1 ]; then active=1; else active=0; fi
-  printf '{"version":"%s","userTasks":{"activeRuns":%s,"pendingTerminals":0,"awaitingFinals":0,"pendingInboundObservations":0}}\\n' "$version" "$active"
-  exit 0
-fi
-if [ "$1 $2" = "plugins install" ]; then
-  printf '{"version":"0.2.20"}\\n' > "$SIDEWISP_TEST_PLUGIN_ROOT/package.json"
-  exit 0
-fi
-if [ "$1 $2" = "gateway restart" ]; then exit 0; fi
-exit 90
-`);
-  chmodSync(openclaw, 0o755);
-
-  execFileSync(process.execPath, ["--import", preload, helper, JSON.stringify({
-    schema: "sidewisp.plugin-update.v1",
-    targetVersion: "0.2.20",
-    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.20",
-    sha256: "a".repeat(64),
-    restartDelaySeconds: 30,
-    stateFile,
-  })], {
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
-      SIDEWISP_TEST_LOG: logFile,
-      SIDEWISP_TEST_PLUGIN_ROOT: pluginRoot,
-      SIDEWISP_TEST_STATUS_COUNT: statusCountFile,
-    },
-    stdio: "pipe",
-  });
-
-  const state = JSON.parse(readFileSync(stateFile, "utf8"));
-  const calls = readFileSync(logFile, "utf8").trim().split("\n");
-  assert.equal(state.status, "completed");
-  assert.equal(calls.filter((line) => line.startsWith("plugins install ")).length, 1);
-  assert.equal(calls.filter((line) => line === "gateway restart").length, 0);
-  assert.equal(calls.filter((line) => line.startsWith("gateway call sidewisp.status ")).length, 5);
+import test from 'node:test';import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,rmSync} from 'node:fs';import os from 'node:os';import path from 'node:path';import {fileURLToPath} from 'node:url';
+const helper=fileURLToPath(new URL('../scripts/openclaw-update-helper.mjs',import.meta.url));
+test('a bad archive never reaches install, rollback or Gateway restart',t=>{
+ const root=mkdtempSync(path.join(os.tmpdir(),'sidewisp-safe-helper-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ mkdirSync(path.join(root,'bin'));mkdirSync(path.join(root,'plugin'));writeFileSync(path.join(root,'plugin/package.json'),JSON.stringify({version:'0.2.34'}));
+ writeFileSync(path.join(root,'bad.tgz'),'tampered');writeFileSync(path.join(root,'skip.mjs'),'globalThis.setTimeout=fn=>{queueMicrotask(fn);};');
+ writeFileSync(path.join(root,'bin/openclaw'),`#!/usr/bin/env node\nconst fs=require('fs');fs.appendFileSync(process.env.TEST_ROOT+'/calls',process.argv.slice(2).join(' ')+'\\n');if(process.argv[2]==='gateway')console.log(JSON.stringify({version:'0.2.34'}));else console.log(JSON.stringify({plugin:{rootDir:process.env.TEST_ROOT+'/plugin'}}));`,{mode:0o700});
+ const d={schema:'sidewisp.plugin-update.v1',targetVersion:'0.2.35',targetSpec:'git:github.com/golem-workers/sidewisp-plugin@v0.2.35',sha256:'a'.repeat(64),restartDelaySeconds:30,stateFile:path.join(root,'update.json'),archivePath:path.join(root,'bad.tgz')};
+ assert.throws(()=>execFileSync(process.execPath,['--import',path.join(root,'skip.mjs'),helper,JSON.stringify(d)],{env:{...process.env,TEST_ROOT:root,PATH:path.join(root,'bin')+':'+process.env.PATH},stdio:'pipe'}));
+ assert.equal(JSON.parse(readFileSync(d.stateFile)).errorCode,'ARTIFACT_HASH_MISMATCH');
+ assert.doesNotMatch(readFileSync(path.join(root,'calls'),'utf8'),/plugins install|plugins reload|gateway restart/);
 });

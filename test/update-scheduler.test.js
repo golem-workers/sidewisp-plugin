@@ -92,7 +92,7 @@ test("OpenClaw scheduler escapes the Gateway cgroup through a transient user uni
   assert.equal(calls[0].command, "systemd-run");
   assert.equal(calls[0].args.includes("--user"), true);
   assert.equal(calls[0].args.includes("--collect"), true);
-  assert.equal(calls[0].args.includes("--unit=sidewisp-update-0_2_20"), true);
+  assert.match(calls[0].args.find(arg => arg.startsWith("--unit=")), /^--unit=sidewisp-update-0_2_20-[a-f0-9]{12}$/);
   assert.equal(calls[0].args.includes(process.execPath), true);
   assert.equal(path.basename(calls[0].args.at(-2)), "openclaw-update-helper.mjs");
   assert.equal(JSON.stringify(calls[0]).includes("must-not-be-forwarded"), false);
@@ -179,4 +179,16 @@ test("Hermes scheduler launches one detached helper with bounded non-secret stat
   assert.equal(payload.sha256, "a".repeat(64));
   assert.equal(Object.keys(calls[0].options.env).includes("SIDEWISP_SETUP_TOKEN"), false);
   assert.equal(child.unrefCalled, true);
+});
+
+test('idle timeout can resume, but an interrupted rollback never retries automatically', async t => {
+ const {mkdtempSync,rmSync}=await import('node:fs');
+ const stateDir=mkdtempSync(path.join(os.tmpdir(),'sw-deferred-'));t.after(()=>rmSync(stateDir,{recursive:true,force:true}));
+ mkdirSync(path.join(stateDir,'sidewisp'));const file=path.join(stateDir,'sidewisp/update-status.json');let launches=0;
+ const scheduler=createUpdateScheduler({stateDir,currentVersion:'0.1.14',now:()=>600000,logger:{info(){}},spawnImpl:()=>{launches++;return{unref(){}};}});
+ writeFileSync(file,JSON.stringify({targetVersion:directive.targetVersion,status:'deferred',updatedAt:new Date(0).toISOString()}));
+ assert.equal(scheduler.schedule(directive),true);
+ writeFileSync(file,JSON.stringify({targetVersion:directive.targetVersion,status:'rolling_back',updatedAt:new Date(0).toISOString()}));
+ const other=createUpdateScheduler({stateDir,currentVersion:'0.1.14',now:()=>600000,logger:{info(){}},spawnImpl:()=>assert.fail('rollback repeated')});
+ assert.equal(other.schedule(directive),false);assert.equal(launches,1);
 });

@@ -34,6 +34,8 @@ def validate(manifest, metadata, fetch=download, get=get_json):
         if proof.get('targetVersion') != version or proof.get('status') != 'completed' or proof.get('sourceUpdaterTested') is not True or proof.get('isolated') is not True:
             raise ValueError('UNVERIFIED_MIGRATION')
         if proof.get('artifactSha256') != manifest['sha256']: raise ValueError('EVIDENCE_ARTIFACT_MISMATCH')
+        if manifest.get('deliveryMode') == 'host-idle-hot-reload-v1' and (not cohort.startswith('openclaw/') or type(proof.get('gatewayRestarts')) is not int or proof['gatewayRestarts'] != 0):
+            raise ValueError('HOT_RELOAD_REQUIRES_ZERO_RESTARTS')
     obj = get(API+'/git/ref/tags/v'+version)['object']
     if obj['type'] == 'tag': obj = get(API+'/git/tags/'+obj['sha'])['object']
     if obj['type'] != 'commit' or obj['sha'] != manifest['commit']: raise ValueError('TAG_COMMIT_MISMATCH')

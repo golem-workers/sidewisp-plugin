@@ -1,3 +1,7 @@
+# Automatic discovery disabled
+
+The plugin no longer starts a periodic release-discovery timer. Publishing a release alone does not cause this build to install it. Explicit authorized delivery remains supported. The older controller deployment described below must remain disabled; it is not the active rollout policy. Telemetry and diagnostic intervals are unchanged.
+
 # Verified fleet rollout
 
 `src/release/fleet-rollout.js` implements a deterministic, read-only release

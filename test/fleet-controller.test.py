@@ -51,6 +51,12 @@ class Fleet(unittest.TestCase):
         self.assertEqual(r.validate(m,meta,lambda _:data,get),m)
         with self.assertRaisesRegex(ValueError,'HASH_MISMATCH'):r.validate(m,meta,lambda _:data+b'x',get)
         with self.assertRaisesRegex(ValueError,'TAG_COMMIT'):r.validate(m,meta,lambda _:data,lambda _: {'object':{'type':'commit','sha':'b'*40}})
+        m['deliveryMode']='host-idle-hot-reload-v1'
+        for restarts in [None,1,False]:
+            m['migrationEvidence'][0]['gatewayRestarts']=restarts
+            with self.assertRaisesRegex(ValueError,'ZERO_RESTARTS'):r.validate(m,meta,lambda _:data,get)
+        m['migrationEvidence'][0]['gatewayRestarts']=0
+        self.assertEqual(r.validate(m,meta,lambda _:data,get),m)
         m['migrationEvidence'][0]['sourceUpdaterTested']=False
         with self.assertRaisesRegex(ValueError,'UNVERIFIED'):r.validate(m,meta,lambda _:data,get)
 
