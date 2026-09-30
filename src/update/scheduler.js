@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -6,7 +7,7 @@ import { isNewerVersion, validUpdateDirective } from "./directive.js";
 
 const HELPER = fileURLToPath(new URL("../../scripts/openclaw-update-helper.mjs", import.meta.url));
 const ACTIVE_ATTEMPT_TTL_MS = 2 * 60_000;
-const TERMINAL_UPDATE_STATES = new Set(["completed", "failed", "rolled_back", "skipped"]);
+const TERMINAL_UPDATE_STATES = new Set(["completed", "failed", "rolled_back", "skipped", "rolling_back"]);
 const UNSAFE_STALE_STATES = new Set(["updating", "restarting", "verifying"]);
 
 const SAFE_ENV_KEYS = Object.freeze([
@@ -17,6 +18,9 @@ const SAFE_ENV_KEYS = Object.freeze([
   "LOGNAME",
   "OPENCLAW_CONFIG_PATH",
   "OPENCLAW_STATE_DIR",
+  "OPENCLAW_PROFILE",
+  "OPENCLAW_GATEWAY_PORT",
+  "OPENCLAW_SYSTEMD_UNIT",
   "PATH",
   "USER",
   "XDG_CONFIG_HOME",
@@ -30,8 +34,8 @@ function safeHelperEnvironment(environment) {
     .map((key) => [key, environment[key]]));
 }
 
-function systemdUnitName(version) {
-  return `sidewisp-update-${version.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+function systemdUnitName(version, stateDir) {
+  return `sidewisp-update-${version.replace(/[^A-Za-z0-9_-]/g, "_")}-${createHash("sha256").update(path.resolve(stateDir)).digest("hex").slice(0, 12)}`;
 }
 
 function readAttempt(stateFile) {
@@ -70,8 +74,9 @@ export function createUpdateScheduler({ stateDir, logger, currentVersion, spawnI
     },
     schedule(directive) {
       if (!validUpdateDirective(directive)
+        || !/^[a-f0-9]{64}$/.test(directive.sha256 ?? "")
         || !isNewerVersion(directive.targetVersion, currentVersion)
-        || directive.targetVersion === scheduledVersion
+        || (directive.targetVersion === scheduledVersion && readAttempt(stateFile)?.status !== "deferred")
         || blocksAttempt(stateFile, directive.targetVersion, now())) return false;
       scheduledVersion = directive.targetVersion;
       const payload = JSON.stringify({
@@ -88,7 +93,7 @@ export function createUpdateScheduler({ stateDir, logger, currentVersion, spawnI
           "--user",
           "--quiet",
           "--collect",
-          `--unit=${systemdUnitName(directive.targetVersion)}`,
+          `--unit=${systemdUnitName(directive.targetVersion, stateDir)}`,
           "--property=Type=exec",
           ...Object.entries(environment).map(([key, value]) => `--setenv=${key}=${value}`),
           process.execPath,
