@@ -2,8 +2,8 @@ import { validUpdateDirective, isNewerVersion } from './directive.js';
 const REPO = 'https://api.github.com/repos/golem-workers/sidewisp-plugin';
 // New capability code arrives only in immutable, explicitly verified releases.
 // No LLM runs, arbitrary URLs, server policy edits, or Gateway restarts.
-export function createReleaseDiscovery({currentVersion,runtimeVersion,environment,schedule,fetchImpl=fetch,intervalMs=900000}) {
- let timer=null,running=null,stopped=true;
+export function createReleaseDiscovery({currentVersion,runtimeVersion,environment,schedule,fetchImpl=fetch}) {
+ let running=null;
  async function json(url) {
   const r=await fetchImpl(url,{signal:AbortSignal.timeout(20000),headers:{Accept:'application/vnd.github+json'}});
   if(!r.ok)throw new Error('release_discovery_unavailable');
@@ -36,6 +36,6 @@ export function createReleaseDiscovery({currentVersion,runtimeVersion,environmen
   return false;
  }
  const tick=()=>running??(running=check().finally(()=>{running=null;}));
- const queue=()=>{if(stopped)return;timer=setTimeout(()=>void tick().catch(()=>{}).finally(queue),intervalMs);timer.unref?.();};
- return {start(){if(!stopped)return;stopped=false;queue();},async stop(){stopped=true;clearTimeout(timer);await running?.catch(()=>{});},check:tick};
+ // Release checks are explicit only: no startup check or periodic timer.
+ return {check:tick};
 }

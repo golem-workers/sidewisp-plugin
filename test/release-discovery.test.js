@@ -30,3 +30,14 @@ test('release ordering uses semantic version, not publication order',async()=>{
  let selected;const d=createReleaseDiscovery({currentVersion:'0.2.35',runtimeVersion:'2026.9.6',environment:'staging',schedule:v=>{selected=v.targetVersion;return true;},fetchImpl:async url=>({ok:true,json:async()=>url.includes('v0.2.100')?newerManifest:url.endsWith('fleet-rollout.json')?manifest:[release,newer]})});
  assert.equal(await d.check(),true);assert.equal(selected,'0.2.100');
 });
+
+test('discovery has no autonomous lifecycle or timer', async (t) => {
+ t.mock.timers.enable({apis:['setTimeout']});
+ let fetched=0;
+ const d=createReleaseDiscovery({currentVersion:'0.2.36',runtimeVersion:'2026.9.6',environment:'staging',schedule:()=>assert.fail('unexpected update'),fetchImpl:async()=>{fetched++;return {ok:true,json:async()=>[]};}});
+ t.mock.timers.tick(24*60*60*1000);
+ assert.equal(fetched,0);
+ assert.equal(d.start,undefined);
+ await d.check();
+ assert.equal(fetched,1);
+});

@@ -1,4 +1,3 @@
-import { createReleaseDiscovery } from "../../update/release-discovery.js";
 import { createScheduleRunner } from "../../schedules/runner.js";
 import { registerConnectTool } from './connect-tool.js';
 import { collectorStateId, createCollectorReadiness, readServingCollectorStatus } from './collector-readiness.js';
@@ -41,7 +40,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.36";
+const VERSION = "0.2.37";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -53,7 +52,6 @@ export default definePluginEntry({
     const setupToken = readSetupToken(api.pluginConfig);
     const stateDir = api.runtime.state.resolveStateDir();
     const updates = createUpdateScheduler({ stateDir, logger: api.logger, currentVersion: VERSION });
-    const releaseDiscovery = createReleaseDiscovery({currentVersion:VERSION,runtimeVersion:api.runtime.version,environment:config.endpoint==='https://staging-api.sidewisp.com'?'staging':config.endpoint==='https://api.sidewisp.com'?'production':null,schedule:d=>updates.schedule(d)});
     const auth = createEnrollmentManager({
       endpoint: config.endpoint,
       store: createFileCredentialStore({ stateDir }),
@@ -331,7 +329,6 @@ export default definePluginEntry({
           uploadTimer.unref?.();
           await collector.start();
           await emitHeartbeat();
-          releaseDiscovery.start();
           healthTimer = setInterval(() => runDetached("heartbeat", emitHeartbeat), 30_000);
           healthTimer.unref?.();
           ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
@@ -356,7 +353,6 @@ export default definePluginEntry({
         }
       },
       async stop() {
-        await releaseDiscovery.stop();
         if(scheduleRunner) await scheduleRunner.stop().catch(()=>{});
         scheduleRunner=null;
         if (healthTimer) clearInterval(healthTimer);
