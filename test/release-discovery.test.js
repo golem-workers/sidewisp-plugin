@@ -13,3 +13,20 @@ test('unproven migrations, previous restart-based rollouts, drafts and foreign m
  const d=createReleaseDiscovery({currentVersion:'0.2.35',runtimeVersion:'2026.9.6',environment:'staging',schedule:()=>assert.fail('unsafe schedule'),fetchImpl:async url=>({ok:true,json:async()=>url.endsWith('fleet-rollout.json')?m:[r]})});assert.equal(await d.check(),false);
  }
 });
+test('a broken newer manifest does not hide a valid older release',async()=>{
+ for(const broken of [null,{migrationEvidence:{}},'network']) {
+  const newer={tag_name:'v0.2.37',assets:[{name:'fleet-rollout.json',browser_download_url:base.replace('0.2.36','0.2.37')+'fleet-rollout.json'}]};
+  let selected;
+  const d=createReleaseDiscovery({currentVersion:'0.2.35',runtimeVersion:'2026.9.6',environment:'staging',schedule:v=>{selected=v.targetVersion;return true;},fetchImpl:async url=>{
+   if(url.includes('v0.2.37')) {if(broken==='network')throw Error('unavailable');return {ok:true,json:async()=>broken};}
+   return {ok:true,json:async()=>url.endsWith('fleet-rollout.json')?manifest:[release,newer]};
+  }});
+  assert.equal(await d.check(),true);assert.equal(selected,'0.2.36');
+ }
+});
+test('release ordering uses semantic version, not publication order',async()=>{
+ const newer={tag_name:'v0.2.100',assets:[{name:'fleet-rollout.json',browser_download_url:base.replace('0.2.36','0.2.100')+'fleet-rollout.json'}]};
+ const newerManifest={...manifest,version:'0.2.100',migrationEvidence:manifest.migrationEvidence.map(p=>({...p,targetVersion:'0.2.100'}))};
+ let selected;const d=createReleaseDiscovery({currentVersion:'0.2.35',runtimeVersion:'2026.9.6',environment:'staging',schedule:v=>{selected=v.targetVersion;return true;},fetchImpl:async url=>({ok:true,json:async()=>url.includes('v0.2.100')?newerManifest:url.endsWith('fleet-rollout.json')?manifest:[release,newer]})});
+ assert.equal(await d.check(),true);assert.equal(selected,'0.2.100');
+});

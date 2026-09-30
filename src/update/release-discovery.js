@@ -13,16 +13,20 @@ export function createReleaseDiscovery({currentVersion,runtimeVersion,environmen
   const releases=await json(`${REPO}/releases?per_page=20`);
   if(!Array.isArray(releases))return false;
   const cohort=`openclaw/${currentVersion}/${runtimeVersion}`;
-  for(const r of releases) {
+  const candidates = releases.filter(r=>r && /^v\d+\.\d+\.\d+$/.test(r.tag_name??''));
+  candidates.sort((a,b)=>isNewerVersion(a.tag_name.slice(1),b.tag_name.slice(1))?-1:isNewerVersion(b.tag_name.slice(1),a.tag_name.slice(1))?1:0);
+  for(const r of candidates) {
    if(r.draft || !/^v\d+\.\d+\.\d+$/.test(r.tag_name??'') || !isNewerVersion(r.tag_name.slice(1),currentVersion))continue;
    const asset=r.assets?.find(a=>a.name==='fleet-rollout.json');
    const base=`https://github.com/golem-workers/sidewisp-plugin/releases/download/${r.tag_name}/`;
    if(asset?.browser_download_url!==base+'fleet-rollout.json')continue;
-   const m=await json(asset.browser_download_url);
+   let m;
+   try {m=await json(asset.browser_download_url);} catch {continue;}
+   if(!m || typeof m!=='object' || !Array.isArray(m.environments) || !Array.isArray(m.verifiedMigrations) || !Array.isArray(m.migrationEvidence))continue;
    if(!['staging','production'].includes(environment) || !m.environments?.includes(environment) || m.schema!=='sidewisp.verified-fleet.v1' || m.version!==r.tag_name.slice(1)
      || !/^[a-f0-9]{40}$/.test(m.commit??'') || !/^[a-f0-9]{64}$/.test(m.sha256??'')
      || !m.verifiedMigrations?.includes(cohort) || m.deliveryMode!=='host-idle-hot-reload-v1')continue;
-   const proof=m.migrationEvidence?.find(p=>p.cohort===cohort && p.targetVersion===m.version && p.artifactSha256===m.sha256
+   const proof=m.migrationEvidence?.find(p=>p && p.cohort===cohort && p.targetVersion===m.version && p.artifactSha256===m.sha256
      && p.status==='completed' && p.sourceUpdaterTested===true && p.isolated===true && p.gatewayRestarts===0);
    if(!proof)continue;
    const directive={schema:'sidewisp.plugin-update.v1',targetVersion:m.version,
