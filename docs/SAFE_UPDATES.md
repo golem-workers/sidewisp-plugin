@@ -12,6 +12,8 @@ insufficient. `scripts/prepare-openclaw.mjs --enqueue` runs in a separate user
 systemd unit and the setup turn must finish. It waits for idle, verifies the exact
 archive SHA-256, applies the plugin, verifies the serving collector, then begins
 the public invitation. The existing collector handles the owner's approval.
+`--update-only` performs the same preparation for an existing installation without
+creating an invitation, changing credentials or re-enrolling.
 Only this exact transient host result is deferred. Policy denials are not retried.
 
 The updater verifies archives locally. Busy replacement reloads the already
