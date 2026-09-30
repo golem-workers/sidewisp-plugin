@@ -17,11 +17,14 @@ try { lockFd = openSync(lock, 'wx', 0o600); } catch { process.exit(3); }
 const attemptId = `${Date.now()}-${process.pid}`;
 const writeState = state => {
  const temp = `${stateFile}.${process.pid}.tmp`;
- writeFileSync(temp, JSON.stringify({...state,targetVersion:directive.targetVersion,attemptId,updatedAt:new Date().toISOString()})+'\n',{mode:0o600});
+ writeFileSync(temp, JSON.stringify({...state,targetVersion:directive.targetVersion,revision:directive.revision??null,attemptId,updatedAt:new Date().toISOString()})+'\n',{mode:0o600});
  renameSync(temp,stateFile);
 };
 const run = args => execFileSync('openclaw',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:120000});
-const status = () => JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));
+const status = () => {
+ try {return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}
+ catch(e) {if(directive.baselineFile && /unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}
+};
 const installed = () => {
  const i=JSON.parse(run(['plugins','inspect','sidewisp','--runtime','--json']));
  const root=[i.path,i.plugin?.path,i.runtime?.path,i.plugin?.rootDir,i.install?.installPath,i.plugin?.source]
@@ -36,8 +39,16 @@ let original=null;
 try {
  writeState({status:'scheduled'});
  await new Promise(resolve=>setTimeout(resolve,directive.restartDelaySeconds*1000));
- original=status();
- if(!isNewerVersion(directive.targetVersion,original.version)) {
+ const serving=status();
+ original=serving;
+ if(!original && directive.baselineFile===path.join(path.dirname(stateFile),'manager-baseline.json')) {
+  const b=JSON.parse(readFileSync(directive.baselineFile,'utf8'));
+  const credential=JSON.parse(readFileSync(path.join(path.dirname(stateFile),'installation.json'),'utf8'));
+  if(b.installationId!==credential.installationId || credential.status!=='active')throw Error('BINDING_CHANGED');
+  original={version:b.version,endpoint:b.endpoint,installation:{installationId:b.installationId}};
+ }
+ if(!original)throw Error('RECOVERY_BASELINE_REQUIRED');
+ if(serving && !isNewerVersion(directive.targetVersion,original.version)) {
   writeState({status:'skipped',reasonCode:'TARGET_NOT_NEWER'});
  } else {
   const current=installed();

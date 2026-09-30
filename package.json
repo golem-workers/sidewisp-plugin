@@ -1,6 +1,6 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.2.37",
+  "version": "0.2.38",
   "description": "Sidewisp runtime monitoring and owner-configured scheduled tasks",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -53,7 +53,9 @@
     "RELEASE_TEMPLATE.md",
     "RELEASE_NOTES.md",
     "LICENSE",
-    "scripts/prepare-openclaw.mjs"
+    "scripts/prepare-openclaw.mjs",
+    "scripts/managed-updater.mjs",
+    "scripts/install-update-manager.mjs"
   ],
   "scripts": {
     "test": "node --test",

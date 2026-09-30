@@ -5,6 +5,7 @@ import {execFileSync,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,mkdirSync,renameSync} from 'node:fs';
 import path from 'node:path';import {fileURLToPath} from 'node:url';
+import {installUpdateManager} from './install-update-manager.mjs';
 import {applyHotUpdate} from '../src/update/hot-update.js';
 import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 const args=process.argv.slice(2);const options={};
@@ -44,6 +45,7 @@ if(options.enqueue){
   }
   const ready=status();
   if(ready?.version!==version || ready.endpoint!==endpoint.origin || !ready.enabled || !ready.running || !ready.connectionReadiness?.ready)throw new Error('collector_not_ready');
+  installUpdateManager({stateDir,endpoint:endpoint.origin});
   if(options.updateOnly){writeState({status:'completed',bindingPreserved:true});process.exit(0);}
   const client=createDeviceAuthorizationClient({endpoint:endpoint.origin,stateDir});
   const result=await client.begin({id:options['request-id'],runtime:'openclaw'});
