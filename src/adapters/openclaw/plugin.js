@@ -1,3 +1,4 @@
+import { createHeartbeatSupervisor, permanentHeartbeatFailure } from '../../core/heartbeat-supervisor.js';
 import { createScheduleRunner } from "../../schedules/runner.js";
 import { registerConnectTool } from './connect-tool.js';
 import { collectorStateId, createCollectorReadiness, readServingCollectorStatus } from './collector-readiness.js';
@@ -215,7 +216,8 @@ export default definePluginEntry({
         return false;
       }
     };
-    const emitHeartbeat = async () => {
+    const emitHeartbeat = async (signal) => {
+      if (signal?.aborted) return;
       if (spool) {
         await synchronizeCollectorAuthorization({
           device: createDeviceAuthorizationClient({ endpoint: config.endpoint, stateDir }),
@@ -223,8 +225,9 @@ export default definePluginEntry({
           onPendingError: () => api.logger.debug?.('Sidewisp device authorization pending or unavailable'),
         });
       }
-      if (!spool || !auth.canSend()) return;
+      if (signal?.aborted || !spool || !auth.canSend()) return;
       const snapshot = await adapter.healthSnapshot();
+      if (signal?.aborted) return;
       const envelope = makeEnvelope({}, "health", `health|${Date.now()}|${crypto.randomUUID()}`);
       await persistEvent(sanitizeTelemetryEvent({
         ...envelope,
@@ -328,16 +331,18 @@ export default definePluginEntry({
           uploadTimer = setInterval(() => runDetached("upload", () => uploader.drain({ maxAttempts: 1 })), 5_000);
           uploadTimer.unref?.();
           await collector.start();
-          await emitHeartbeat();
-          healthTimer = setInterval(() => runDetached("heartbeat", emitHeartbeat), 30_000);
-          healthTimer.unref?.();
+          healthTimer = createHeartbeatSupervisor({ run: emitHeartbeat,
+            permanent: error => error instanceof SpoolError || permanentHeartbeatFailure(error),
+            onError: error => { if (error instanceof SpoolError) recordSpoolFailure(error); api.logger.warn('Sidewisp heartbeat unavailable; recovery state exposed'); },
+          });
+          healthTimer.start();
           ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
         } catch (error) {
           // Every failed start owns cleanup, not only SQLite failures.
           if (error instanceof SpoolError) recordSpoolFailure(error);
           if (scheduleRunner) await scheduleRunner.stop().catch(() => {});
           scheduleRunner = null;
-          if (healthTimer) clearInterval(healthTimer);
+          if (healthTimer) await healthTimer.stop();
           healthTimer = null;
           if (uploadTimer) clearInterval(uploadTimer);
           uploadTimer = null;
@@ -359,7 +364,7 @@ export default definePluginEntry({
       async stop() {
         if(scheduleRunner) await scheduleRunner.stop().catch(()=>{});
         scheduleRunner=null;
-        if (healthTimer) clearInterval(healthTimer);
+        if (healthTimer) await healthTimer.stop();
         healthTimer = null;
         if (uploadTimer) clearInterval(uploadTimer);
         uploadTimer = null;
@@ -395,7 +400,7 @@ export default definePluginEntry({
     });
 
     const localCollectorReady = async () => config.enabled && Boolean(spool && uploader && healthTimer)
-      && !spoolFailure && collector.isRunning();
+      && !spoolFailure && collector.isRunning() && healthTimer.ready();
     registerConnectTool(api, {
       endpoint: config.endpoint, stateDir,
       ready: createCollectorReadiness({ enabled: config.enabled, endpoint: config.endpoint, stateDir,
@@ -412,6 +417,7 @@ export default definePluginEntry({
         mode: "zero-llm",
         connectionReadiness: { ready: await localCollectorReady(), stateId: await collectorStateId(stateDir) },
         installation: auth.status(),
+        heartbeatSupervisor: healthTimer?.status() ?? { state: 'stopped' },
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
         runtimeDiagnostics: runtimeDiagnostics?.status() ?? { status: "not-started", at: null },
