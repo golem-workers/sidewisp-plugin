@@ -394,8 +394,8 @@ export default definePluginEntry({
       },
     });
 
-    const localCollectorReady = async () => config.enabled && Boolean(spool && uploader)
-      && !spoolFailure && (await collector.status()).running;
+    const localCollectorReady = async () => config.enabled && Boolean(spool && uploader && healthTimer)
+      && !spoolFailure && collector.isRunning();
     registerConnectTool(api, {
       endpoint: config.endpoint, stateDir,
       ready: createCollectorReadiness({ enabled: config.enabled, endpoint: config.endpoint, stateDir,
