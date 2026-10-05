@@ -6,10 +6,11 @@ import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,mkdirSync,renameSync} from 'node:fs';
 import path from 'node:path';import {fileURLToPath} from 'node:url';
 import {installUpdateManager} from './install-update-manager.mjs';
-import {applyHotUpdate} from '../src/update/hot-update.js';
+import {isRetainedWork} from '../src/update/hot-update.js';
+import {prepareConnection} from '../src/auth/prepare-connection.js';
 import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 const args=process.argv.slice(2);const options={};
-for(let i=0;i<args.length;i++){if(args[i]==='--enqueue')options.enqueue=true;else if(args[i]==='--update-only')options.updateOnly=true;else if(/^--(archive|sha256|endpoint|request-id|state-dir)$/.test(args[i]))options[args[i].slice(2)]=args[++i];else throw new Error('invalid_prepare_argument');}
+for(let i=0;i<args.length;i++){if(args[i]==='--enqueue')options.enqueue=true;else if(args[i]==='--update-only')options.updateOnly=true;else if(/^--(archive|sha256|endpoint|request-id|state-dir|expires-at-ms)$/.test(args[i]))options[args[i].slice(2)]=args[++i];else throw new Error('invalid_prepare_argument');}
 const version=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
 const stateDir=options['state-dir'];const endpoint=new URL(options.endpoint);
 if(!path.isAbsolute(stateDir??'') || !path.isAbsolute(options.archive??'') || !/^[a-f0-9]{64}$/.test(options.sha256??'')
@@ -29,28 +30,28 @@ if(options.enqueue){
 }else{
  try{
   const status=()=>{try{return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}catch(e){if(/unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}};
-  const original=status();
-  if(options.updateOnly && !original)throw new Error('existing_plugin_required');
-  if(original && original.endpoint!==endpoint.origin)throw new Error('existing_endpoint_mismatch');
-  if(original && original.version!==version){
-   runHelper();
-   const state=JSON.parse(readFileSync(path.join(stateDir,'sidewisp/update-status.json'),'utf8'));
-   if(!['completed','skipped'].includes(state.status))throw new Error('update_not_applied');
-  }else if(!original){
-   await applyHotUpdate({targetVersion:version,status,writeState,
-    install:()=>run(['plugins','install',options.archive,'--force','--accept-capabilities']),
-    reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json'])});
-   run(['config','set','plugins.entries.sidewisp.config.endpoint',endpoint.origin]);
-   run(['plugins','reload','sidewisp','--accept-capabilities','--json']);
-  }
-  const ready=status();
-  if(ready?.version!==version || ready.endpoint!==endpoint.origin || !ready.enabled || !ready.running || !ready.connectionReadiness?.ready)throw new Error('collector_not_ready');
-  installUpdateManager({stateDir,endpoint:endpoint.origin});
-  if(options.updateOnly){writeState({status:'completed',bindingPreserved:true});process.exit(0);}
   const client=createDeviceAuthorizationClient({endpoint:endpoint.origin,stateDir});
-  const result=await client.begin({id:options['request-id'],runtime:'openclaw'});
-  writeState({status:'approval_pending',requestId:result.id,expiresAtMs:result.expiresAtMs});
- }catch(e){writeState({status:'blocked',reason:/^[a-z_]+$/.test(e.message)?e.message:'preparation_failed'});process.exitCode=1;}
+  await prepareConnection({targetVersion:version,endpoint:endpoint.origin,updateOnly:options.updateOnly,
+   expiresAtMs:options['expires-at-ms'] === undefined ? undefined : Number(options['expires-at-ms']),
+   inspect:status,persist:s=>writeState({status:s.stage,...s}),
+   // Do not wait for collector readiness before configuring a fresh install.
+   // Host retained-work refusal stops this attempt; it never permits bypass.
+   install:async()=>run(['plugins','install',options.archive,'--force','--accept-capabilities']),
+   activate:async()=>{
+    run(['config','set','plugins.entries.sidewisp.config.endpoint',endpoint.origin]);
+    run(['plugins','reload','sidewisp','--accept-capabilities','--json']);
+   },
+   upgrade:async()=>{
+    runHelper();
+    const state=JSON.parse(readFileSync(path.join(stateDir,'sidewisp/update-status.json'),'utf8'));
+    if(!['completed','skipped'].includes(state.status))throw new Error('update_not_applied');
+   },
+   ensureManager:async()=>installUpdateManager({stateDir,endpoint:endpoint.origin}),
+   begin:async()=>{
+    return client.begin({id:options['request-id'],runtime:'openclaw'});
+   },
+  });
+ }catch(e){writeState({status:'blocked',reason:isRetainedWork(e)?'host_retained_work':/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed'});process.exitCode=1;}
 }
 function runHelper(){
  const d={schema:'sidewisp.plugin-update.v1',targetVersion:version,targetSpec:`git:github.com/golem-workers/sidewisp-plugin@v${version}`,

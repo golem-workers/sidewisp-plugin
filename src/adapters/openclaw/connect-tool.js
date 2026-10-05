@@ -15,12 +15,14 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
       type: 'object', additionalProperties: false,
       properties: {
         requestId: { type: 'string', pattern: '^sw_pair_[A-Za-z0-9_-]{32}$' },
+        minimumVersion: { type: 'string', pattern: '^[0-9]+[.][0-9]+[.][0-9]+$', description: 'Minimum serving collector version checked internally.' },
         endpoint: { type: 'string', description: 'Exact Sidewisp origin from the invitation; must match host configuration.' },
       },
       required: ['requestId', 'endpoint'],
     },
     async execute(_callId, input) {
-      if (!input || Object.keys(input).some(key => !['requestId', 'endpoint'].includes(key))
+      if (!input || Object.keys(input).some(key => !['requestId', 'endpoint', 'minimumVersion'].includes(key))
+        || (input.minimumVersion !== undefined && !/^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/.test(input.minimumVersion))
         || !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(input.requestId ?? '')
         || input.endpoint !== new URL(endpoint).origin) {
         return reply({ status: 'blocked', reason: 'invalid_invitation_or_endpoint' }, true);
@@ -28,7 +30,7 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
       if (busy) return reply({ status: 'blocked', reason: 'connection_request_in_progress' }, true);
       busy = true;
       try {
-        if (!await ready()) return reply({ status: 'blocked', reason: 'collector_not_ready' }, true);
+        if (!await ready(input.minimumVersion)) return reply({ status: 'blocked', reason: 'collector_not_ready' }, true);
         const result = await device.begin({ id: input.requestId, runtime: 'openclaw' });
         // Do not return fallback verification URL/code even in a private session:
         // the authenticated app already owns and displays this request.

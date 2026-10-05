@@ -15,7 +15,7 @@ export function installUpdateManager({stateDir,endpoint,run=execFileSync,environ
  const configFile=path.join(dir,'config.json');
  const config={schema:'sidewisp.update-manager.v1',stateDir,endpoint};
  if(existsSync(configFile)){const old=JSON.parse(readFileSync(configFile,'utf8'));if(old.stateDir!==stateDir||old.endpoint!==endpoint)throw Error('MANAGER_BINDING_MISMATCH');}
- writeFileSync(configFile,JSON.stringify(config)+'\n',{mode:0o600});
+ if(!existsSync(configFile))writeFileSync(configFile,JSON.stringify(config)+'\n',{mode:0o600});
  // The runtime never imports live plugin code; installation/upgrade is explicit.
  const link=path.join(dir,'current');if(!existsSync(link)){symlinkSync(release,link+'.tmp');renameSync(link+'.tmp',link);}
  const quote=s=>'"'+s.replace(/%/g,'%%').replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"';
@@ -23,7 +23,14 @@ export function installUpdateManager({stateDir,endpoint,run=execFileSync,environ
  const unitDir=path.join(environment.XDG_CONFIG_HOME??path.join(environment.HOME,'.config'),'systemd','user');mkdirSync(unitDir,{recursive:true});
  const keys=['HOME','PATH','USER','LOGNAME','LANG','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS','OPENCLAW_STATE_DIR','OPENCLAW_CONFIG_PATH','OPENCLAW_PROFILE','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT'];
  const text='[Unit]\nDescription=Sidewisp independent update manager\nAfter=network-online.target\n[Service]\nType=simple\nExecStart='+[process.execPath,path.join(link,'scripts/managed-updater.mjs'),configFile].map(quote).join(' ')+'\nRestart=on-failure\nRestartSec=30\nUMask=0077\nTimeoutStopSec=900\n'+keys.filter(k=>typeof environment[k]==='string').map(k=>'Environment='+quote(k+'='+environment[k])).join('\n')+'\n[Install]\nWantedBy=default.target\n';
- writeFileSync(path.join(unitDir,unit),text,{mode:0o600});
+ // Existing units may contain owner policy and environment customizations.
+ // Never replace them as a side effect of enrollment.
+ const unitFile=path.join(unitDir,unit);
+ if(existsSync(unitFile)){
+  const existing=readFileSync(unitFile,'utf8');
+  const expectedStart=text.split('\n').find(line=>line.startsWith('ExecStart='));
+  if(existing.split('\n').filter(line=>line.startsWith('ExecStart=')).join('\n')!==expectedStart)throw Error('MANAGER_UNIT_REVIEW_REQUIRED');
+ }else writeFileSync(unitFile,text,{mode:0o600});
  run('systemctl',['--user','daemon-reload'],{stdio:'pipe'});run('systemctl',['--user','enable','--now',unit],{stdio:'pipe'});
  return {status:'enabled',unit,configFile};
 }

@@ -41,7 +41,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.39";
+const VERSION = "0.2.40";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -404,7 +404,7 @@ export default definePluginEntry({
     registerConnectTool(api, {
       endpoint: config.endpoint, stateDir,
       ready: createCollectorReadiness({ enabled: config.enabled, endpoint: config.endpoint, stateDir,
-        localReady: localCollectorReady, readGatewayStatus: readServingCollectorStatus }),
+        localVersion: VERSION, localReady: localCollectorReady, readGatewayStatus: readServingCollectorStatus }),
     });
 
     api.registerGatewayMethod("sidewisp.status", async ({ respond }) => {

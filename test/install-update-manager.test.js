@@ -1,0 +1,9 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {installUpdateManager} from '../scripts/install-update-manager.mjs';
+function fixture(t){const root=mkdtempSync(path.join(os.tmpdir(),'manager-test-'));t.after(()=>rmSync(root,{recursive:true,force:true}));const calls=[];const options={stateDir:root,endpoint:'https://example.test',platform:'linux',environment:{HOME:root,PATH:'/usr/bin',OPENCLAW_STATE_DIR:root,OPENCLAW_CONFIG_PATH:path.join(root,'openclaw.json')},run:(...args)=>calls.push(args)};return {root,calls,options};}
+test('repeated preparation preserves owner unit and config additions',t=>{const f=fixture(t);const result=installUpdateManager(f.options);const unit=path.join(f.root,'.config/systemd/user',result.unit);const customized=readFileSync(unit,'utf8')+'\n# owner policy\n[Service]\nMemoryMax=512M\n';writeFileSync(unit,customized);const config=JSON.parse(readFileSync(result.configFile));config.ownerSetting=true;writeFileSync(result.configFile,JSON.stringify(config));installUpdateManager(f.options);assert.equal(readFileSync(unit,'utf8'),customized);assert.equal(JSON.parse(readFileSync(result.configFile)).ownerSetting,true);});
+test('changed manager entry point fails closed without replacing unit',t=>{const f=fixture(t);const result=installUpdateManager(f.options);const unit=path.join(f.root,'.config/systemd/user',result.unit);const customized=readFileSync(unit,'utf8').replace(/^ExecStart=.*$/m,'ExecStart=/owner/custom-manager');writeFileSync(unit,customized);f.calls.length=0;assert.throws(()=>installUpdateManager(f.options),/MANAGER_UNIT_REVIEW_REQUIRED/);assert.equal(readFileSync(unit,'utf8'),customized);assert.equal(f.calls.length,0);});
