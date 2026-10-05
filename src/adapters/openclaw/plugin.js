@@ -333,8 +333,10 @@ export default definePluginEntry({
           healthTimer.unref?.();
           ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
         } catch (error) {
-          if (!(error instanceof SpoolError)) throw error;
-          recordSpoolFailure(error);
+          // Every failed start owns cleanup, not only SQLite failures.
+          if (error instanceof SpoolError) recordSpoolFailure(error);
+          if (scheduleRunner) await scheduleRunner.stop().catch(() => {});
+          scheduleRunner = null;
           if (healthTimer) clearInterval(healthTimer);
           healthTimer = null;
           if (uploadTimer) clearInterval(uploadTimer);
@@ -349,6 +351,8 @@ export default definePluginEntry({
           if (spool) await spool.close().catch(() => {});
           spool = null;
           uploader = null;
+          await collector.stop().catch(() => {});
+          if (!(error instanceof SpoolError)) throw error;
           ctx.logger.error(`Sidewisp collector disabled after spool failure (${error.code}); gateway continues`);
         }
       },
