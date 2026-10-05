@@ -16,3 +16,21 @@ for(const failure of ['start','heartbeat'])test('partial start '+failure+' must 
  const h=harness(failure);await assert.rejects(h.service.start({logger:{info(){},error(){}}}),new RegExp('transient-'+failure));
  assert.deepEqual([...h.running],[],'orphaned side deliveries');assert.equal(h.timers.size,0,'orphaned upload timer');
 });
+
+for(const failure of ['start','heartbeat'])test('clean restart after '+failure+' creates exactly one timer pair',async()=>{
+ const h=harness(failure);
+ await assert.rejects(h.service.start({logger:{info(){},error(){}}}),new RegExp('transient-'+failure));
+ assert.equal(h.scope.spool,null);assert.equal(h.scope.uploader,null);
+ h.scope.collector.start=async()=>{};h.scope.emitHeartbeat=async()=>{};
+ await h.service.start({logger:{info(){},error(){}}});
+ assert.equal(h.timers.size,2);
+ assert.deepEqual([...h.running].sort(),['context','diagnostics','schedules','usage']);
+ await h.service.stop();assert.equal(h.timers.size,0);assert.deepEqual([...h.running],[]);
+ await h.service.stop();assert.equal(h.timers.size,0);
+});
+test('authorization failure is propagated unchanged after cleanup, never healthy',async()=>{
+ const h=harness(null),denied=Object.assign(Error('credential-rejected'),{status:401});
+ h.scope.emitHeartbeat=async()=>{throw denied};
+ await assert.rejects(h.service.start({logger:{info(){},error(){}}}),e=>e===denied);
+ assert.equal(h.timers.size,0);assert.deepEqual([...h.running],[]);
+});
