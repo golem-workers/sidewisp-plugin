@@ -55,3 +55,8 @@ test('a retained host generation still defers when live host lanes are empty',as
  await applyHotUpdate({targetVersion:'0.2.35',status:async()=>loaded,idle:async()=>isHostIdle(hostIdle),install:async()=>{installs++;throw busy();},reload:async()=>{if(++reloads===1)throw busy();loaded=healthy;},writeState:()=>{},sleep:async()=>{}});
  assert.equal(installs,1);assert.equal(reloads,2);
 });
+
+test('real OpenClaw snapshot with no dynamic lanes reports explicit null and is idle',()=>{
+ assert.equal(isHostIdle({...hostIdle,dynamic:null}),true);
+ assert.equal(isHostIdle({...hostIdle,dynamic:undefined}),false);
+});

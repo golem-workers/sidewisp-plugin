@@ -16,8 +16,8 @@ export function isHostIdle(snapshot) {
   const count = value => Number.isSafeInteger(value) && value >= 0;
   if (!Number.isSafeInteger(snapshot?.ts) || snapshot.ts <= 0
     || !Array.isArray(snapshot.lanes) || snapshot.lanes.length === 0
-    || !count(snapshot.dynamic?.activeCount) || !count(snapshot.dynamic?.queuedCount)) return false;
-  return snapshot.dynamic.activeCount === 0 && snapshot.dynamic.queuedCount === 0
+    || !(snapshot.dynamic === null || (count(snapshot.dynamic?.activeCount) && count(snapshot.dynamic?.queuedCount)))) return false;
+  return (snapshot.dynamic === null || (snapshot.dynamic.activeCount === 0 && snapshot.dynamic.queuedCount === 0))
     && snapshot.lanes.every(lane => count(lane.activeCount) && count(lane.queuedCount)
       && lane.activeCount === 0 && lane.queuedCount === 0
       && lane.draining !== true && lane.blockedBy == null);

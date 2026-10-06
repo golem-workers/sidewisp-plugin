@@ -31,7 +31,7 @@ channel and need one authorized host bootstrap. Hermes, Codex, Claude Code and
 non-systemd hosts are not represented as supported. The old server fleet timers
 remain disabled; the removed 15-minute GitHub timer is not restored.
 
-## Host-idle authority (0.2.41 tester)
+## Host-idle authority (0.2.42 tester)
 
 The external helper obtains `diagnostics.lanes` from the serving OpenClaw Gateway. All host lane and dynamic active/queued counts must be valid zeroes; missing/refused diagnostics fails closed. Collector user-task cursors can retain historical interrupted synthetic requester wakes and are telemetry, not installation authority. The installer and reload still enforce actual retained plugin-generation work; the current setup turn is never subtracted, and no task is stopped or Gateway restarted.
 
