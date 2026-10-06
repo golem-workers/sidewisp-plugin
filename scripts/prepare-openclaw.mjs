@@ -46,7 +46,7 @@ if(options.enqueue){
     const state=JSON.parse(readFileSync(path.join(stateDir,'sidewisp/update-status.json'),'utf8'));
     if(!['completed','skipped'].includes(state.status))throw new Error('update_not_applied');
    },
-   ensureManager:async()=>installUpdateManager({stateDir,endpoint:endpoint.origin}),
+   ensureManager:async()=>installUpdateManager({stateDir,endpoint:endpoint.origin,upgrade:true}),
    begin:async()=>{
     return client.begin({id:options['request-id'],runtime:'openclaw'});
    },

@@ -9,8 +9,21 @@ export function isTaskIdle(status) {
   return Boolean(tasks && ['activeRuns', 'pendingTerminals', 'awaitingFinals', 'pendingInboundObservations']
     .every(key => tasks[key] === 0));
 }
+// This snapshot is read by the external helper from the serving host RPC.
+// Collector work cursors are telemetry and can contain historical interrupted
+// synthetic runs; they are not the host's replacement/admission authority.
+export function isHostIdle(snapshot) {
+  const count = value => Number.isSafeInteger(value) && value >= 0;
+  if (!Number.isSafeInteger(snapshot?.ts) || snapshot.ts <= 0
+    || !Array.isArray(snapshot.lanes) || snapshot.lanes.length === 0
+    || !count(snapshot.dynamic?.activeCount) || !count(snapshot.dynamic?.queuedCount)) return false;
+  return snapshot.dynamic.activeCount === 0 && snapshot.dynamic.queuedCount === 0
+    && snapshot.lanes.every(lane => count(lane.activeCount) && count(lane.queuedCount)
+      && lane.activeCount === 0 && lane.queuedCount === 0
+      && lane.draining !== true && lane.blockedBy == null);
+}
 export async function applyHotUpdate({ targetVersion, install, reload, status, writeState,
-  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxAttempts = 120, alreadyStaged = false, verify = () => {} }) {
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxAttempts = 120, alreadyStaged = false, verify = () => {}, idle = current => !current || isTaskIdle(current) }) {
   let staged = alreadyStaged;
   let applied = false;
   let unhealthyObservations = 0;
@@ -27,7 +40,7 @@ export async function applyHotUpdate({ targetVersion, install, reload, status, w
       writeState({ status: 'completed' });
       return;
     }
-    if (current && !isTaskIdle(current)) {
+    if (!await idle(current)) {
       writeState({ status: 'waiting_for_idle', reasonCode: 'ACTIVE_WORK' });
       await sleep(5000);
       continue;

@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeF
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { isNewerVersion, validUpdateDirective } from '../src/update/directive.js';
-import { applyHotUpdate } from '../src/update/hot-update.js';
+import { applyHotUpdate, isHostIdle } from '../src/update/hot-update.js';
 
 const directive = JSON.parse(process.argv[2] ?? 'null');
 if (!directive?.stateFile || !path.isAbsolute(directive.stateFile) || !validUpdateDirective(directive)
@@ -25,6 +25,7 @@ const status = () => {
  try {return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}
  catch(e) {if(directive.baselineFile && /unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}
 };
+const idle = () => isHostIdle(JSON.parse(run(['gateway','call','diagnostics.lanes','--params','{}','--json'])));
 const installed = () => {
  const i=JSON.parse(run(['plugins','inspect','sidewisp','--runtime','--json']));
  const root=[i.path,i.plugin?.path,i.runtime?.path,i.plugin?.rootDir,i.install?.installPath,i.plugin?.source]
@@ -78,7 +79,7 @@ try {
    cpSync(current.root,backup,{recursive:true,errorOnExist:true});
    writeFileSync(recoveryFile,JSON.stringify({sourceVersion:original.version,backup}),{mode:0o600});
   }
-  await applyHotUpdate({targetVersion:directive.targetVersion,status,writeState,alreadyStaged:current.version===directive.targetVersion,
+  await applyHotUpdate({targetVersion:directive.targetVersion,status,idle,writeState,alreadyStaged:current.version===directive.targetVersion,
    verify:after=>{if(after.endpoint!==original.endpoint || after.installation?.installationId!==original.installation?.installationId)throw new Error('BINDING_CHANGED');},
    install:()=>run(['plugins','install',archive,'--force','--accept-capabilities']),
    reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json'])});
@@ -100,7 +101,7 @@ try {
  if(applied && backup && original) {
   try {
    writeState({status:'rolling_back',errorCode:'TARGET_VERIFICATION_FAILED'});
-   await applyHotUpdate({targetVersion:original.version,status,writeState:s=>writeState({...s,status:s.status==='completed'?'rolled_back':s.status}),
+   await applyHotUpdate({targetVersion:original.version,status,idle,writeState:s=>writeState({...s,status:s.status==='completed'?'rolled_back':s.status}),
     install:()=>run(['plugins','install',backup,'--force','--accept-capabilities']),
     reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json'])});
   } catch {writeState({status:'failed',errorCode:'ROLLBACK_REQUIRES_RECOVERY'});}
