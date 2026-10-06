@@ -46,13 +46,14 @@ test('rejected old binding can reconnect only after approval; outages and health
     await fs.mkdir(path.dirname(file)); await fs.writeFile(file, JSON.stringify(old));
     let status = 'active'; let approved = false; let beginCalls = 0;
     const id = 'sw_pair_'+'z'.repeat(32);
-    const fetchImpl = async (url) => {
+    const fetchImpl = async (url, options) => {
       if (url.pathname.endsWith('/credential-status')) {
         if (status === 'offline') throw new Error('network_down');
         if (status === 'server-error') return {status:503,json:async()=>({error:'unavailable'})};
         return { status: status === 'active' ? 200 : 401, json: async () => ({schema:'sidewisp.credential-status.v1',status,installationId:old.installationId}) };
       }
       if (url.pathname.endsWith('/begin')) { beginCalls++; return {ok:true,json:async()=>({id,userCode:'ABCDE12345'})}; }
+      if (JSON.parse(options.body).acknowledge) return {ok:true,json:async()=>({status:'completed'})};
       return {ok:true,json:async()=> approved ? {status:'approved',credential:{installationId:'sw_ins_new12345678',installationSecret:'sw_secret_'+'n'.repeat(43)}} : {status:'pending'}};
     };
     try {

@@ -37,7 +37,13 @@ export function createUploader({
       if (row.event.installationId && row.event.installationId !== credential.installationId) spool.deadLetter(row.eventId, 'previous-installation');
     }
     const pending = queued.filter(row => !row.event.installationId || row.event.installationId === credential.installationId);
-    if (pending.length === 0) { attempt = 0; return finish({ status: "idle", sent: 0, remaining: 0 }); }
+    if (pending.length === 0) {
+      attempt = 0;
+      const remaining = spool.pending(1).length;
+      // A full stale batch may hide the new binding's first heartbeat behind
+      // it. Continue bounded draining rather than claiming an empty queue.
+      return finish({ status: remaining ? "dead-lettered" : "idle", sent: 0, remaining });
+    }
     const jsonBody = Buffer.from(JSON.stringify({ schema: "sidewisp.telemetry-batch.v1", events: pending.map(({ event }) => event) }));
     if (jsonBody.length > maxBodyBytes) {
       spool.deadLetter(pending[0].eventId, "batch-event-too-large");

@@ -62,7 +62,23 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
         if (existing && existing.installationId !== credential?.installationId
           && await inspectCredential({ endpoint: url, credential: existing, fetchImpl }) === 'active') throw new Error('installation_already_connected');
         await credentials.write({ installationId: credential?.installationId, secret: credential?.installationSecret, status: 'active' });
-        await request('/v1/device-authorizations/poll', { ...input, acknowledge: true });
+        const acknowledged = await request('/v1/device-authorizations/poll', { ...input, acknowledge: true });
+        // Deletion can win after credential retrieval and before ACK. Never
+        // advertise that revoked binding as a completed local authorization.
+        if (acknowledged.status === 'denied') {
+          const saved = await credentials.read();
+          if (saved?.installationId === credential.installationId) await credentials.write({ ...saved, status: 'revoked' });
+          await fs.rm(file, { force: true });
+          return { status: 'denied' };
+        }
+        if (!['completed', 'expired'].includes(acknowledged.status)) throw new Error('invalid_device_ack');
+        // Deadline can elapse after the atomic save. Credentials are already
+        // issued, so consult their signed status instead of retrying approval.
+        if (acknowledged.status === 'expired'
+          && await inspectCredential({ endpoint: url, credential: await credentials.read(), fetchImpl }) !== 'active') {
+          await fs.rm(file, { force: true });
+          return { status: 'expired' };
+        }
         await fs.rm(file);
         return { status: 'credential_saved', installationId: credential.installationId };
       }
