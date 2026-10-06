@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {setTimeout as delay} from 'node:timers/promises';
+import {createHeartbeatSupervisor,permanentHeartbeatFailure} from '../src/core/heartbeat-supervisor.js';
+test('transient first heartbeat retries autonomously and becomes ready',async()=>{let n=0;const s=createHeartbeatSupervisor({run:async()=>{if(++n===1)throw Error('transient')},retryMs:5,intervalMs:1000});s.start();await delay(25);assert.equal(n,2);assert.equal(s.ready(),true);await s.stop()});
+test('permission failures never retry',async()=>{for(const e of [Object.assign(Error('denied'),{status:403}),Error('credential-rejected')]){let n=0;const s=createHeartbeatSupervisor({run:async()=>{n++;throw e},permanent:permanentHeartbeatFailure,retryMs:5});s.start();await delay(20);assert.equal(n,1);assert.equal(s.status().state,'blocked');assert.equal(s.ready(),false);await s.stop()}});
+test('transient retry count is bounded',async()=>{let n=0;const s=createHeartbeatSupervisor({run:async()=>{n++;throw Error('temporary')},retryMs:5});s.start();await delay(40);assert.equal(n,3);assert.equal(s.status().state,'failed');await s.stop()});
+test('stop cancels retry and prevents resurrection',async()=>{let n=0;const s=createHeartbeatSupervisor({run:async()=>{n++;throw Error('temporary')},retryMs:20});s.start();await delay(5);await s.stop();await delay(30);assert.equal(n,1);assert.equal(s.status().state,'stopped')});
+test('hung operation marks timeout without overlapping; late resolution cannot resurrect stopped supervisor',async()=>{let resolve,n=0,signal;const s=createHeartbeatSupervisor({run:sig=>{signal=sig;n++;return new Promise(r=>resolve=r)},timeoutMs:5,retryMs:5});s.start();s.start();await delay(20);assert.equal(n,1);assert.equal(s.status().state,'timed-out');assert.equal(s.ready(),false);const stopped=s.stop();assert.equal(signal.aborted,true);resolve();await stopped;await delay(15);assert.equal(n,1);assert.equal(s.status().state,'stopped')});
+
+test('healthy periodic check keeps readiness until failure or deadline',async()=>{let n=0,resolve;const s=createHeartbeatSupervisor({run:async()=>{if(++n>1)await new Promise(r=>resolve=r)},intervalMs:5,timeoutMs:100});s.start();await delay(20);assert.equal(s.status().state,'checking');assert.equal(s.ready(),true);resolve();await s.stop()});

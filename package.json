@@ -1,7 +1,7 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.2.17",
-  "description": "Universal zero-LLM telemetry plugin for monitoring AI agent runtimes with Sidewisp",
+  "version": "0.2.42",
+  "description": "Sidewisp runtime monitoring and owner-configured scheduled tasks",
   "license": "AGPL-3.0-only",
   "type": "module",
   "keywords": [
@@ -24,6 +24,7 @@
     "scripts/verify-hermes-upstream.mjs",
     "scripts/verify-hermes-live.mjs",
     "scripts/enroll-hermes.mjs",
+    "scripts/device-enroll.mjs",
     "scripts/install-hermes.sh",
     "scripts/uninstall-hermes.sh",
     "scripts/hermes-canary-daemon.mjs",
@@ -51,11 +52,14 @@
     "LICENSING.md",
     "RELEASE_TEMPLATE.md",
     "RELEASE_NOTES.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts/prepare-openclaw.mjs",
+    "scripts/managed-updater.mjs",
+    "scripts/install-update-manager.mjs"
   ],
   "scripts": {
     "test": "node --test",
-    "check": "node --check index.js && node --check src/auth/credentials.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --check src/core/health.js && node --check src/core/normalize.js && node --check src/core/sanitize.js && node --check src/core/support.js && node --check src/adapters/openclaw/recovery.js && node --check src/adapters/codex/hooks.js && node --check src/adapters/claude-code/hooks.js && node --check src/adapters/command-hook/bridge.js && node --check src/adapters/command-hook/install.js && node --check src/delivery/spool.js && node --check src/delivery/uploader.js && node --check src/delivery/runtime-diagnostics.js && node --check src/update/directive.js && node --check src/update/hermes-scheduler.js && node --check scripts/hermes-update-helper.mjs && node --check scripts/runtime-hook.mjs && node --check scripts/runtime-hook-drain.mjs && node --test",
+    "check": "node --check index.js && node --check src/auth/credentials.js && node --check src/core/runtime-adapter.js && node --check src/core/collector.js && node --check src/core/health.js && node --check src/core/normalize.js && node --check src/core/sanitize.js && node --check src/core/support.js && node --check src/adapters/openclaw/recovery.js && node --check src/adapters/codex/hooks.js && node --check src/adapters/claude-code/hooks.js && node --check src/adapters/command-hook/bridge.js && node --check src/adapters/command-hook/install.js && node --check src/delivery/spool.js && node --check src/delivery/uploader.js && node --check src/delivery/runtime-diagnostics.js && node --check src/delivery/usage.js && node --check src/usage/common.js && node --check src/usage/openclaw.js && node --check src/usage/hermes.js && node --check src/update/directive.js && node --check src/update/hermes-scheduler.js && node --check scripts/hermes-update-helper.mjs && node --check scripts/runtime-hook.mjs && node --check scripts/runtime-hook-drain.mjs && node --test",
     "pack:check": "npm pack --dry-run",
     "e2e:openclaw": "./scripts/verify-release.sh",
     "e2e:hermes": "node scripts/verify-hermes-upstream.mjs",
@@ -65,18 +69,20 @@
     "canary:hermes": "node scripts/hermes-canary-daemon.mjs",
     "e2e:backend": "node scripts/verify-backend-contract.mjs",
     "e2e:live": "node scripts/verify-live-backend.mjs",
-    "canary:check": "node scripts/evaluate-canary.mjs test/fixtures/canary-report.json"
+    "canary:check": "node scripts/evaluate-canary.mjs test/fixtures/canary-report.json",
+    "test:fleet": "node --test test/fleet-rollout.test.js && python3 test/fleet-controller.test.py",
+    "release:fleet": "python3 scripts/fleet-release.py publish"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.7.1"
+    "openclaw": ">=2026.9.1"
   },
   "openclaw": {
     "extensions": [
       "./index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.7.1",
-      "minGatewayVersion": "2026.7.1"
+      "pluginApi": ">=2026.9.1",
+      "minGatewayVersion": "2026.9.1"
     }
   },
   "repository": {

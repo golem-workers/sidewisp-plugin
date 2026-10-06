@@ -1,3 +1,4 @@
+import { classifyRuntimeCause, knownCause } from "./causes.js";
 import { sanitizeTelemetryEvent } from "./sanitize.js";
 
 export const RUNTIME_MAPPING_VERSION = "sidewisp.runtime-map.v1";
@@ -69,6 +70,8 @@ export function normalizeRuntimeEvent(runtimeKind, input, envelope) {
     const fact = variableFact(semantic, input) ?? FIXED[semantic];
     if (!fact) return { event: null, diagnostic: localDiagnostic("unmapped-runtime-event", runtimeKind) };
     const [type, outcome, factDetails = {}] = fact;
+    const recovery = outcome === "success" && ["recovered", "observing"].includes(input.signalState) && knownCause(input.causeCode);
+    const causeCode = recovery || (["failure","degraded"].includes(outcome) && !input.expected ? classifyRuntimeCause(input) : null);
     const event = sanitizeTelemetryEvent({
       ...envelope,
       runtime: { ...envelope.runtime, kind: runtimeKind },
@@ -77,6 +80,7 @@ export function normalizeRuntimeEvent(runtimeKind, input, envelope) {
       correlation: input.correlation ?? {},
       details: {
         ...factDetails,
+        ...(causeCode ? {causeCode, signalState:recovery ? input.signalState : 'failure'} : {}),
         code: input.code,
         component: input.component,
         operation: input.operation,

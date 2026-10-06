@@ -1,3 +1,4 @@
+import { knownCause } from "./causes.js";
 const DETAIL_KEYS = new Set(["code", "reason", "status", "component", "operation", "capability", "attempt", "count", "durationMs", "exitCode", "httpStatus", "recoverable", "expected"]);
 const CORRELATION_KEYS = new Set(["sessionId", "turnId", "toolCallId", "messageId", "parentEventId"]);
 const SAFE_TEXT = /^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,255}$/;
@@ -60,7 +61,11 @@ export function sanitizeTelemetryEvent(input) {
       type: safeString(input.type, "type"),
       outcome: safeString(input.outcome, "outcome"),
       correlation: pick(input.correlation, CORRELATION_KEYS),
-      details: pick(input.details, DETAIL_KEYS),
+      details: {
+        ...pick(input.details, DETAIL_KEYS),
+        ...(knownCause(input.details?.causeCode) ? {causeCode: input.details.causeCode} : {}),
+        ...(['failure','recovered','observing'].includes(input.details?.signalState) ? {signalState:input.details.signalState} : {}),
+      },
     };
   } catch (error) {
     if (error instanceof SanitizationError) throw error;
