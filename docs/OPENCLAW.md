@@ -173,3 +173,19 @@ openclaw status
 ```
 
 Compare Node.js and OpenClaw versions with [COMPATIBILITY.md](../COMPATIBILITY.md).
+
+## Preparation result (0.2.44+)
+
+The SHA-256-verified `scripts/prepare-openclaw.mjs` writes one public JSON result
+to stdout after completing preparation:
+
+- `approval_pending`: installation/activation and readiness passed; return to
+  Sidewisp for the initiating account's explicit approval. Do not run another
+  connection command. The collector retrieves and acknowledges credentials
+  automatically. This state does not yet mean connected.
+- `completed`: an update-only operation completed without account enrollment.
+- `blocked` with a safe `reason`: preparation failed; exit status is nonzero.
+
+The result contains no device proof, verification code, credential, exception
+text, or transcript. `--enqueue` still reports `preparation_queued` immediately;
+its retained checkpoint, not that queued result, establishes completion.

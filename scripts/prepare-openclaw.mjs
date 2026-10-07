@@ -31,7 +31,7 @@ if(options.enqueue){
  try{
   const status=()=>{try{return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}catch(e){if(/unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}};
   const client=createDeviceAuthorizationClient({endpoint:endpoint.origin,stateDir});
-  await prepareConnection({targetVersion:version,endpoint:endpoint.origin,updateOnly:options.updateOnly,
+  const result=await prepareConnection({targetVersion:version,endpoint:endpoint.origin,updateOnly:options.updateOnly,
    expiresAtMs:options['expires-at-ms'] === undefined ? undefined : Number(options['expires-at-ms']),
    inspect:status,persist:s=>writeState({status:s.stage,...s}),
    // Do not wait for collector readiness before configuring a fresh install.
@@ -51,7 +51,8 @@ if(options.enqueue){
     return client.begin({id:options['request-id'],runtime:'openclaw'});
    },
   });
- }catch(e){writeState({status:'blocked',reason:isRetainedWork(e)?'host_retained_work':/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed'});process.exitCode=1;}
+  console.log(JSON.stringify(result));
+ }catch(e){const result={status:'blocked',reason:isRetainedWork(e)?'host_retained_work':/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed'};writeState(result);console.log(JSON.stringify(result));process.exitCode=1;}
 }
 function runHelper(){
  const d={schema:'sidewisp.plugin-update.v1',targetVersion:version,targetSpec:`git:github.com/golem-workers/sidewisp-plugin@v${version}`,
