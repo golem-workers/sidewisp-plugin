@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { signBatch } from '../delivery/uploader.js';
+import { scheduleFailureSummary } from './diagnostics.js';
 
 // A single durable result outbox; never launch another task until its result is acknowledged.
 export function createScheduleRunner({stateDir,endpoint,credentialProvider,runtime,agentId='main',fetchImpl=fetch,now=Date.now,intervalMs=15000}) {
@@ -44,6 +45,7 @@ export function createScheduleRunner({stateDir,endpoint,credentialProvider,runti
       await save(entry);
     }
     const result={runId:entry.job.runId,scheduleId:entry.job.scheduleId,state:'failed',errorCode:'execution_interrupted',executionRef:null,resultSummary:null};
+    let stage='launch',outcome;
     try {
       if(recovered && !entry.runtimeRunId) {
         // Crash in launch/ack window: do not guess whether a side effect happened.
@@ -63,28 +65,31 @@ export function createScheduleRunner({stateDir,endpoint,credentialProvider,runti
           await save(entry);
         }
         result.executionRef=entry.runtimeRunId;
-        let outcome;
+        stage='wait';
         while(!stopped && now()-entry.startedAt<entry.job.timeoutMs) {
           outcome=await runtime.subagent.waitForRun({runId:entry.runtimeRunId,timeoutMs:Math.min(30000,entry.job.timeoutMs-(now()-entry.startedAt))});
-          if(outcome.status==='ok' || outcome.status==='error')break;
+          // Retry only an SDK-marked wait transport failure, on the same run.
+          // Terminal error text and admission failures never authorize retry.
+          if(outcome.status==='ok' || (outcome.status==='error' && outcome.retryableTransportError!==true))break;
           await new Promise(resolve=>setTimeout(resolve,1000));
         }
         if(stopped)return;
         if(outcome?.status==='ok') {
-          result.state='succeeded';result.errorCode=null;
+          stage='response';
           result.resultSummary=typeof outcome.terminalReply?.text==='string' ? outcome.terminalReply.text.slice(0,16000) : null;
           if(result.resultSummary===null && runtime.subagent.getSessionMessages) {
             const history=await runtime.subagent.getSessionMessages({sessionKey:entry.sessionKey,limit:10});
             const final=history.messages?.filter(m=>m.role==='assistant').at(-1);
-            result.resultSummary=(typeof final?.content==='string'?final.content:(final?.content??[]).filter(c=>c.type==='text').map(c=>c.text).join('\n')).slice(0,16000);
+            result.resultSummary=(typeof final?.content==='string'?final.content:(Array.isArray(final?.content)?final.content:[]).filter(c=>c.type==='text').map(c=>c.text).join('\n')).slice(0,16000);
           }
-        } else if(outcome?.status==='error') { result.errorCode='execution_failed'; }
+          result.state='succeeded';result.errorCode=null;
+        } else if(outcome?.status==='error' && outcome.retryableTransportError!==true) { result.errorCode='execution_failed';result.resultSummary=scheduleFailureSummary(stage,null,outcome); }
         else {
           result.errorCode='execution_timeout';
           await runtime.gateway?.request('chat.abort',{sessionKey:entry.sessionKey,runId:entry.runtimeRunId}).catch(()=>{});
         }
       }
-    } catch { result.errorCode='execution_failed'; }
+    } catch(error) { result.state='failed';result.errorCode='execution_failed';result.resultSummary=scheduleFailureSummary(stage,error,outcome); }
     entry.result=result;await save(entry);return settle(entry,credential);
   }
   function tick() { if(running)return running;running=execute().finally(()=>{running=null;});return running; }
