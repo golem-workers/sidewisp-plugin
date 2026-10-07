@@ -1,3 +1,16 @@
+# Sidewisp Plugin v0.2.46 (tester prerelease)
+
+- Preserve native Telegram preview/progress delivery by removing the global
+  `reply_payload_sending` telemetry hook. The public per-dispatch SDK observer
+  passes every payload unchanged and never claims the agent response.
+- Observe complete commentary items and successful explicit `message` source
+  progress sends as content-free `turn.progress` facts under the existing work ID.
+- Keep finals, waits, resumes, cancellations and errors distinct; failed, partial,
+  dry-run or other-target message sends never become progress or completion.
+- Retain v0.2.45 enrollment/cold-activation and credential continuity fixes.
+- Seventh mobile push status needs the corresponding backend and Android APK;
+  existing status wire identities and saved phone preferences are preserved.
+
 # Sidewisp Plugin v0.2.0
 
 Public open-source release of the Sidewisp collector plugin.

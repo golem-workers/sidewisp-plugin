@@ -3,9 +3,10 @@ import { localDiagnostic, normalizeRuntimeEvent } from "../../core/normalize.js"
 
 export const OPENCLAW_HOOK_SOURCES = Object.freeze({
   before_dispatch: "src/plugins/hook-types.ts:before_dispatch",
-  reply_payload_sending: "src/plugins/hook-types.ts:reply_payload_sending",
+  reply_dispatch: "src/plugins/hook-types.ts:reply_dispatch",
   message_received: "src/plugins/hook-message.types.ts:70",
   message_sent: "src/plugins/hook-message.types.ts:111",
+  after_tool_call: "src/plugins/hook-types.ts:after_tool_call",
   gateway_start: "src/plugins/hook-types.ts:898",
   gateway_stop: "src/plugins/hook-types.ts:902",
 });
@@ -528,6 +529,13 @@ export function createOpenClawUserTaskLifecycle({
       }
       return accepted(complete(key, state, retarget(event, state), nowMs));
     }
+    if (event?.type === "turn.progress") {
+      const [, state] = taskForRun(correlation.sessionId, correlation.turnId);
+      if (!state || state.terminal || !state.started) return coalesced();
+      state.updatedAt = nowMs;
+      if (state.pendingTerminal && !state.pendingConfirmed) clearPending(state, true);
+      return accepted(retarget(event, state));
+    }
     const started = event?.type === "turn.started";
     const terminal = TURN_TERMINALS.has(event?.type);
     if (!started && !terminal) {
@@ -536,6 +544,7 @@ export function createOpenClawUserTaskLifecycle({
         if (state) {
           state.updatedAt = nowMs;
           if (state.pendingTerminal && !state.pendingConfirmed && !state.terminal) clearPending(state, true);
+          if (!state.terminal) return accepted(retarget(event, state));
         }
       }
       return accepted(event);
@@ -873,6 +882,12 @@ export function openClawAgentEventInput(event = {}) {
       ?? data.approvalId
       ?? data.approvalSlug,
   };
+  // A completed commentary item is a semantic progress boundary, not a token,
+  // tool summary, reasoning fragment, or final answer. Export metadata only.
+  if (event.stream === "item" && data.kind === "preamble"
+      && data.phase === "end" && safeCursorId(data.itemId)) {
+    return { kind: "turn_progress", component: "commentary", correlation };
+  }
   if (event.stream === "lifecycle") {
     if (data.phase === "start") return { kind: "turn_start", correlation };
     if (["end", "error"].includes(data.phase)) {
@@ -1046,11 +1061,27 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       component: "before_dispatch",
       correlation: correlateDispatch(event, ctx),
     }), true),
-    reply_payload_sending: observe("reply_payload_sending", (event, ctx) => (
-      (event.kind ?? ctx.kind) === "final"
-        ? { kind: "turn_end", outcome: "success", component: "final_reply", correlation: correlation(event, ctx) }
-        : null
-    ), true),
+    // appendBeforeDeliver is the public per-dispatch observer boundary. Unlike
+    // reply_payload_sending/message_sending, it does not disable Telegram drafts.
+    // Never inspect, rewrite, cancel, or retain the payload, or claim dispatch.
+    reply_dispatch(event = {}, ctx = {}) {
+      const observeFinal = observe("reply_dispatch", (_event, _ctx) => ({
+        kind: "turn_end", outcome: "success", component: "final_reply",
+        correlation: correlation(event, ctx),
+      }), true);
+      if (typeof ctx.dispatcher?.appendBeforeDeliver !== "function") {
+        diagnose(localDiagnostic("reply-observer-unavailable", "openclaw"));
+        return;
+      }
+      try {
+        ctx.dispatcher.appendBeforeDeliver((payload, info = {}) => {
+          if (info.kind === "final") void observeFinal(event, ctx);
+          return payload;
+        }, { timeoutMs: 25 });
+      } catch {
+        diagnose(localDiagnostic("reply-observer-unavailable", "openclaw"));
+      }
+    },
     message_received: observe("message_received", (event, ctx) => ({
       kind: "message_received",
       component: "message_observation",
@@ -1061,6 +1092,21 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       outcome: event.success === false ? "failure" : "success",
       correlation: correlation(event, ctx),
     })),
+    after_tool_call: observe("after_tool_call", (event, ctx) => {
+      // Modern OpenClaw may route source commentary/finals through message.
+      // Consume only explicit delivery/finality flags, never message text,
+      // attachments, targets, tool arguments, or serialized tool output.
+      if (event.toolName !== "message" || event.error != null
+          || event.params?.action !== "send" || event.params?.dryRun === true
+          || event.result?.isError === true) return null;
+      const receipt = event.result?.details;
+      if (receipt?.ok !== true || receipt.sourceReplyRoute !== "current-source"
+          || receipt.partial === true || receipt.dryRun === true
+          || receipt.nonDelivery === true || receipt.noOp === true) return null;
+      return event.params.final === false
+        ? { kind: "turn_progress", component: "source_message", correlation: correlation(event, ctx) }
+        : { kind: "turn_end", outcome: "success", component: "final_reply", correlation: correlation(event, ctx) };
+    }, true),
     gateway_start: observe("gateway_start", () => ({ kind: "gateway_up", correlation: {} })),
     gateway_stop: observe("gateway_stop", () => ({ kind: "gateway_down", correlation: {} })),
   };
