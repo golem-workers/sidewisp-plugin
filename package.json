@@ -1,6 +1,6 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.2.42",
+  "version": "0.2.43",
   "description": "Sidewisp runtime monitoring and owner-configured scheduled tasks",
   "license": "AGPL-3.0-only",
   "type": "module",
