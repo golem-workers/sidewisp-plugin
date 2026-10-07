@@ -26,3 +26,18 @@ test('truthy nonboolean readiness does not authorize',async()=>{const f=fixture(
 test('fresh install retries only host retained work then continues',async()=>{const f=fixture(null);let attempts=0;f.options.install=async()=>{if(++attempts<3)throw Error('still has active retained work; retry after the work finishes.');};await prepareConnection(f.options);assert.equal(attempts,3);assert.ok(f.calls.includes('begin'));});
 test('idle wait stops when invitation expires',async()=>{const f=fixture(null);let time=1;f.options.now=()=>time;f.options.expiresAtMs=2;f.options.install=async()=>{throw Error('still has active retained work; retry after the work finishes.');};f.options.sleep=async()=>{time=2;};await assert.rejects(prepareConnection(f.options),/fresh_invitation_required/);assert.ok(!f.calls.includes('begin'));});
 test('retained work retry budget is bounded',async()=>{const f=fixture(null);let attempts=0;f.options.maxIdleAttempts=2;f.options.install=async()=>{attempts++;throw Error('still has active retained work; retry after the work finishes.');};await assert.rejects(prepareConnection(f.options),/retained work/);assert.equal(attempts,2);assert.ok(!f.calls.includes('begin'));});
+
+test('cold activation completes before approval and never repeats install or reload',async()=>{
+ const f=fixture(null);let ready=false,activations=0;
+ f.options.inspect=async()=>ready?good:{...good,connectionReadiness:{ready:false,activationRequired:true}};
+ f.options.coldActivate=async()=>{activations++;ready=true;};
+ await prepareConnection(f.options);assert.equal(activations,1);assert.deepEqual(f.calls,['begin']);
+});
+test('busy cold activation waits but genuine denial stops authorization',async()=>{
+ for(const denied of [false,true]){
+  const f=fixture();let ready=false,n=0;
+  f.options.inspect=async()=>ready?good:{...good,connectionReadiness:{ready:false,activationRequired:true}};
+  f.options.coldActivate=async()=>{n++;if(denied)throw Error('policy_denied');if(n===1)throw Error('host_activation_busy');ready=true;};
+  if(denied){await assert.rejects(prepareConnection(f.options),/policy_denied/);assert.ok(!f.calls.includes('begin'));assert.equal(n,1);}else{await prepareConnection(f.options);assert.equal(n,2);}
+ }
+});

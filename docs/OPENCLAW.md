@@ -189,3 +189,28 @@ to stdout after completing preparation:
 The result contains no device proof, verification code, credential, exception
 text, or transcript. `--enqueue` still reports `preparation_queued` immediately;
 its retained checkpoint, not that queued result, establishes completion.
+
+## Published SDK cold activation (0.2.45+)
+
+OpenClaw 2026.9.8 starts a hot-reloaded background service under the install/reload
+RPC connection. Once that client disconnects, `agent.wait` can be cancelled even
+though the model completes. A healthy heartbeat alone does not prove task readiness.
+The adapter therefore advertises `activationRequired` and does not poll scheduled
+work until bootstrap-owned service startup on this exact affected SDK version.
+The public `startupTrace.measure` service context distinguishes bootstrap from hot
+replacement in this SDK; `gateway_start` is replayed on replacement and is not proof.
+Other SDK versions retain their normal activation behavior.
+
+The verified preparation/update helper handles this before account approval:
+checks the native service belongs to the exact active config/state profile,
+obtains the host's atomic idle suspension, then uses the canonical Gateway restart.
+Busy host work waits; policy/authentication/transport refusal stops. No force flag,
+session exclusions, service installation, credential removal or alternate policy
+route is used. Restart failure resumes only the helper's own suspension lease.
+Endpoint, original installation binding and readiness are verified again before
+requesting approval. A non-managed/custom runtime requiring this activation is
+reported as `managed_active_profile_required`; the helper does not invent a supervisor.
+
+The connect tool advertises `preparationVersion=0.2.45`. A successfully authenticated
+`preparation_required/cold_activation_required` result is not a refusal: use the
+same authorized preparation route. Actual errors/refusals never permit fallback.

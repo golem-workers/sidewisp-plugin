@@ -7,6 +7,7 @@ import {readFileSync,writeFileSync,mkdirSync,renameSync} from 'node:fs';
 import path from 'node:path';import {fileURLToPath} from 'node:url';
 import {installUpdateManager} from './install-update-manager.mjs';
 import {isRetainedWork} from '../src/update/hot-update.js';
+import {coldActivateOpenClaw} from './cold-activate-openclaw.mjs';
 import {prepareConnection} from '../src/auth/prepare-connection.js';
 import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 const args=process.argv.slice(2);const options={};
@@ -41,6 +42,7 @@ if(options.enqueue){
     run(['config','set','plugins.entries.sidewisp.config.endpoint',endpoint.origin]);
     run(['plugins','reload','sidewisp','--accept-capabilities','--json']);
    },
+   coldActivate:()=>coldActivateOpenClaw({run,stateDir,configPath:process.env.OPENCLAW_CONFIG_PATH}),
    upgrade:async()=>{
     runHelper();
     const state=JSON.parse(readFileSync(path.join(stateDir,'sidewisp/update-status.json'),'utf8'));

@@ -16,6 +16,7 @@ export function createCollectorReadiness({ enabled, endpoint, stateDir, localRea
     let status;
     try { status = await readGatewayStatus(); }
     catch { throw new Error('collector_status_unavailable'); }
+    if (status?.plugin === 'sidewisp' && status.endpoint === endpoint && status.connectionReadiness?.stateId === await collectorStateId(stateDir) && status.connectionReadiness?.activationRequired === true) throw new Error('collector_activation_required');
     return (!minimumVersion || versionAtLeast(status?.version, minimumVersion))
       && status?.plugin === 'sidewisp'
       && status.endpoint === endpoint
