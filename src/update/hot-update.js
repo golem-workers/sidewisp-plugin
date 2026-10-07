@@ -23,13 +23,22 @@ export function isHostIdle(snapshot) {
       && lane.draining !== true && lane.blockedBy == null);
 }
 export async function applyHotUpdate({ targetVersion, install, reload, status, writeState,
-  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxAttempts = 120, alreadyStaged = false, verify = () => {}, idle = current => !current || isTaskIdle(current) }) {
+  sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxAttempts = 120, alreadyStaged = false, verify = () => {}, idle = current => !current || isTaskIdle(current), coldActivate }) {
   let staged = alreadyStaged;
   let applied = false;
   let unhealthyObservations = 0;
+  let coldActivated = false;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const current = await status(); // Authentication/transport failures are not idle.
     if (current?.version === targetVersion) {
+      if (current.connectionReadiness?.activationRequired === true && coldActivate && !coldActivated) {
+        if (!await idle(current)) { writeState({status:'waiting_for_idle',reasonCode:'ACTIVE_WORK'}); await sleep(5000); continue; }
+        try { await coldActivate(); coldActivated=true; } catch(error) {
+          if(error?.message!=='host_activation_busy')throw error;
+          writeState({status:'waiting_for_idle',reasonCode:'HOST_RETAINED_WORK'});
+        }
+        await sleep(1000);continue;
+      }
       if (current.enabled !== true || current.running !== true || current.connectionReadiness?.ready !== true) {
         if (++unhealthyObservations >= 12) throw new Error('TARGET_COLLECTOR_UNHEALTHY');
         writeState({status:'verifying',reasonCode:'WAITING_FOR_COLLECTOR'});

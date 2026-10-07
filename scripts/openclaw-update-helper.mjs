@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {coldActivateOpenClaw} from './cold-activate-openclaw.mjs';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -82,7 +83,8 @@ try {
   await applyHotUpdate({targetVersion:directive.targetVersion,status,idle,writeState,alreadyStaged:current.version===directive.targetVersion,
    verify:after=>{if(after.endpoint!==original.endpoint || after.installation?.installationId!==original.installation?.installationId)throw new Error('BINDING_CHANGED');},
    install:()=>run(['plugins','install',archive,'--force','--accept-capabilities']),
-   reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json'])});
+   reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json']),
+   coldActivate:()=>coldActivateOpenClaw({run,stateDir:process.env.OPENCLAW_STATE_DIR,configPath:process.env.OPENCLAW_CONFIG_PATH})});
   const terminal=JSON.parse(readFileSync(stateFile,'utf8'));
   if(terminal.status==='completed') {
    const after=status();

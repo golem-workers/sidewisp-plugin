@@ -1,5 +1,6 @@
 import { createHeartbeatSupervisor, permanentHeartbeatFailure } from '../../core/heartbeat-supervisor.js';
 import { createScheduleRunner } from "../../schedules/runner.js";
+import { createActivationReadiness } from './activation-readiness.js';
 import { registerConnectTool } from './connect-tool.js';
 import { collectorStateId, createCollectorReadiness, readServingCollectorStatus } from './collector-readiness.js';
 import { createDeviceAuthorizationClient } from "../../auth/device-authorization.js";
@@ -41,7 +42,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.43";
+const VERSION = "0.2.46";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -51,6 +52,7 @@ export default definePluginEntry({
   register(api) {
     const config = resolveConfig(api.pluginConfig);
     const setupToken = readSetupToken(api.pluginConfig);
+    const activation = createActivationReadiness(api.runtime.version);
     const stateDir = api.runtime.state.resolveStateDir();
     const updates = createUpdateScheduler({ stateDir, logger: api.logger, currentVersion: VERSION });
     const auth = createEnrollmentManager({
@@ -251,7 +253,7 @@ export default definePluginEntry({
     api.agent.events.registerAgentEventSubscription({
       id: "sidewisp-runtime-events",
       description: "Content-free Sidewisp lifecycle and tool failure telemetry",
-      streams: ["lifecycle", "tool", "approval"],
+      streams: ["lifecycle", "tool", "approval", "item"],
       async handle(event) {
         agentEventTelemetry.observed += 1;
         agentEventTelemetry.lastObservedAt = new Date().toISOString();
@@ -279,6 +281,7 @@ export default definePluginEntry({
     api.registerService({
       id: "sidewisp-collector",
       async start(ctx) {
+        activation.serviceStarted(ctx);
         if (!config.enabled) return;
         try {
           await auth.load();
@@ -316,7 +319,7 @@ export default definePluginEntry({
           runtimeDiagnostics.start();
           scheduleRunner=createScheduleRunner({stateDir,endpoint:config.endpoint,runtime:api.runtime,
             agentId:api.config?.agents?.list?.find(agent=>agent.default)?.id ?? api.config?.agents?.list?.[0]?.id ?? 'main',
-            credentialProvider:{current:async()=>auth.credential()}});
+            credentialProvider:{current:async()=>auth.credential()},canExecute:()=>!activation.required()});
           scheduleRunner.start();
           contextDelivery=createContextUsageDelivery({collect:()=>collectOpenClawContext({stateDir}),endpoint:config.endpoint,
             credentialProvider:{current:async()=>auth.credential()}});
@@ -399,7 +402,7 @@ export default definePluginEntry({
       },
     });
 
-    const localCollectorReady = async () => config.enabled && Boolean(spool && uploader && healthTimer)
+    const localCollectorReady = async () => config.enabled && !activation.required() && Boolean(spool && uploader && healthTimer)
       && !spoolFailure && collector.isRunning() && healthTimer.ready();
     registerConnectTool(api, {
       endpoint: config.endpoint, stateDir,
@@ -415,7 +418,7 @@ export default definePluginEntry({
         configured: auth.canSend(),
         endpoint: config.endpoint,
         mode: "zero-llm",
-        connectionReadiness: { ready: await localCollectorReady(), stateId: await collectorStateId(stateDir) },
+        connectionReadiness: { ready: await localCollectorReady(), activationRequired: activation.required(), stateId: await collectorStateId(stateDir) },
         installation: auth.status(),
         heartbeatSupervisor: healthTimer?.status() ?? { state: 'stopped' },
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },

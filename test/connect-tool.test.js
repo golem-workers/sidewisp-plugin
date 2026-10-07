@@ -34,3 +34,9 @@ test('serialized begin hides codes, links, proofs and transport errors',async()=
   assert.equal(error.details.reason,'connection_preparation_failed');assert.doesNotMatch(JSON.stringify(error),/secret value/);
  }finally{await fs.rm(stateDir,{recursive:true,force:true});}
 });
+
+test('cold-start requirement is preparation, not an approval or refusal fallback',async()=>{
+ let calls=0;const tool=createConnectTool({endpoint,stateDir:'/tmp/unused',ready:async()=>{throw Error('collector_activation_required');},fetchImpl:async()=>{calls++;}});
+ assert.equal(tool.parameters.properties.preparationVersion.enum[0],'0.2.45');
+ const r=await tool.execute('test',{requestId,endpoint,preparationVersion:'0.2.45'});assert.equal(r.details.status,'preparation_required');assert.equal(r.isError,false);assert.equal(calls,0);
+});
