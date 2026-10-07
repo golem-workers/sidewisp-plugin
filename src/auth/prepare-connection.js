@@ -1,6 +1,6 @@
 import { isRetainedWork } from '../update/hot-update.js';
 // Host-authorized operations are injected by the CLI; no policy fallback here.
-export async function prepareConnection({ targetVersion, endpoint, updateOnly = false, inspect, install, upgrade, activate, begin, persist, ensureManager = async () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxReadinessAttempts = 60, maxIdleAttempts = 120, expiresAtMs, now = Date.now }) {
+export async function prepareConnection({ targetVersion, endpoint, updateOnly = false, inspect, install, upgrade, activate, coldActivate, begin, persist, ensureManager = async () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxReadinessAttempts = 60, maxIdleAttempts = 120, expiresAtMs, now = Date.now }) {
   if (!Number.isInteger(maxReadinessAttempts) || maxReadinessAttempts < 1) throw new Error('invalid_readiness_attempts');
   const mark = async (stage, extra = {}) => persist({ stage, ...extra });
   const checkExpiry = () => {
@@ -11,7 +11,7 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
     for (let attempt = 0; attempt < maxIdleAttempts; attempt++) {
       checkExpiry();
       try { return await operation(); } catch (error) {
-        if (!isRetainedWork(error) || attempt + 1 === maxIdleAttempts) throw error;
+        if (!(isRetainedWork(error) || error?.message === 'host_activation_busy') || attempt + 1 === maxIdleAttempts) throw error;
         await mark('waiting_for_host_idle', { attempt: attempt + 1 });
         await sleep(1000);
       }
@@ -35,11 +35,20 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
     }
     await mark('verifying');
     let ready;
+    let coldActivated = false;
     for (let attempt = 0; attempt < maxReadinessAttempts; attempt++) {
       checkExpiry();
       ready = await inspect(); // Refusal/transport errors never authorize mutation.
       if (ready && ready.endpoint !== endpoint) throw new Error('existing_endpoint_mismatch');
       if (original?.installation?.installationId !== undefined && ready?.installation?.installationId !== original.installation.installationId) throw new Error('existing_binding_changed');
+      if (ready?.version === targetVersion && ready.connectionReadiness?.activationRequired === true && !coldActivated) {
+        await mark('activating');
+        if (typeof coldActivate !== 'function') throw new Error('cold_activation_required');
+        await whenIdle(coldActivate);
+        coldActivated = true;
+        ready = await inspect();
+        if (ready?.endpoint !== endpoint || (original?.installation?.installationId !== undefined && ready?.installation?.installationId !== original.installation.installationId)) throw new Error('existing_binding_changed');
+      }
       if (matches(ready)) break;
       if (attempt + 1 === maxReadinessAttempts) throw new Error('collector_not_ready');
       await mark('waiting_for_readiness', { attempt: attempt + 1 });

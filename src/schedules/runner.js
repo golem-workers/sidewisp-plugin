@@ -5,7 +5,7 @@ import { signBatch } from '../delivery/uploader.js';
 import { scheduleFailureSummary } from './diagnostics.js';
 
 // A single durable result outbox; never launch another task until its result is acknowledged.
-export function createScheduleRunner({stateDir,endpoint,credentialProvider,runtime,agentId='main',fetchImpl=fetch,now=Date.now,intervalMs=15000}) {
+export function createScheduleRunner({stateDir,endpoint,credentialProvider,runtime,agentId='main',fetchImpl=fetch,now=Date.now,intervalMs=15000,canExecute=()=>true}) {
   const file=path.join(stateDir,'sidewisp','schedule-execution.json');
   let stopped=true,timer=null,running=null;
   const save=async value=>{await mkdir(path.dirname(file),{recursive:true,mode:0o700});await writeFile(`${file}.tmp`,JSON.stringify(value),{mode:0o600});await rename(`${file}.tmp`,file);};
@@ -26,6 +26,7 @@ export function createScheduleRunner({stateDir,endpoint,credentialProvider,runti
     await unlink(file);
   }
   async function execute() {
+    if (!canExecute()) return; // Keep the service-owned timer, but admit no work before activation.
     const credential=await credentialProvider.current();
     if(credential?.status!=='active')return;
     let entry=await load();

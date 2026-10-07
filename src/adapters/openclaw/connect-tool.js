@@ -14,6 +14,7 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
+        preparationVersion: { type: 'string', enum: ['0.2.45'], description: 'Cold-activation-aware serving collector preparation contract.' },
         requestId: { type: 'string', pattern: '^sw_pair_[A-Za-z0-9_-]{32}$' },
         minimumVersion: { type: 'string', pattern: '^[0-9]+[.][0-9]+[.][0-9]+$', description: 'Minimum serving collector version checked internally.' },
         endpoint: { type: 'string', description: 'Exact Sidewisp origin from the invitation; must match host configuration.' },
@@ -21,7 +22,8 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
       required: ['requestId', 'endpoint'],
     },
     async execute(_callId, input) {
-      if (!input || Object.keys(input).some(key => !['requestId', 'endpoint', 'minimumVersion'].includes(key))
+      if (!input || Object.keys(input).some(key => !['requestId', 'endpoint', 'minimumVersion', 'preparationVersion'].includes(key))
+        || (input.preparationVersion !== undefined && input.preparationVersion !== '0.2.45')
         || (input.minimumVersion !== undefined && !/^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/.test(input.minimumVersion))
         || !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(input.requestId ?? '')
         || input.endpoint !== new URL(endpoint).origin) {
@@ -38,6 +40,7 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
           expiresAtMs: result.expiresAtMs,
           nextAction: 'Approve the request in Sidewisp. No additional agent message is needed.' });
       } catch (error) {
+        if (error.message === 'collector_activation_required') return reply({status:'preparation_required',reason:'cold_activation_required',nextAction:'Use the verified preparation helper through the authorized host route before requesting approval.'});
         const allowed = /^(collector_status_unavailable|installation_already_connected|another_authorization_pending|device_authorization_http_[0-9]{3})$/;
         return reply({ status: 'blocked', reason: allowed.test(error.message) ? error.message : 'connection_preparation_failed' }, true);
       } finally { busy = false; }
