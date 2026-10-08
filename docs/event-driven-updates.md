@@ -45,3 +45,6 @@ task. A healthy older connection alone is not proof that the new manager is
 installed. Hosts without user-systemd or a supported native bootstrap need their
 own verified preparation path. Preserve custom unit/config settings and do not
 remove a helper lock to force manager upgrades.
+
+Use archive 0.2.51 or later: 0.2.50 is superseded before rollout because its
+credential watcher could generate metadata events recursively.

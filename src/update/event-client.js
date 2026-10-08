@@ -1,3 +1,5 @@
+import {watch,readFileSync} from 'node:fs';
+import path from 'node:path';
 import {randomBytes} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {signBatch} from '../delivery/uploader.js';
@@ -42,4 +44,15 @@ export async function maintainUpdateEvents({connect,onError=()=>{},signal,sleep=
   const wait=Math.min(30000,1000*2**Math.min(failures++,5));
   try{await sleep(wait,undefined,{signal});}catch(error){if(!signal.aborted)throw error;}
  }
+}
+
+// Credential-store reads enforce chmod. A watcher must read without mutating
+// metadata, otherwise its own read produces an unbounded fs.watch loop.
+export function watchManagerFiles({directory,onCredential,onAttempt,onError}) {
+ const read=file=>{try{return JSON.parse(readFileSync(path.join(directory,file),'utf8'));}catch{return null;}};
+ const watcher=watch(directory,{persistent:false},(_event,file)=>{
+  if(String(file)==='installation.json')onCredential(read('installation.json'));
+  if(String(file)==='update-status.json')onAttempt(read('update-status.json'));
+ });
+ watcher.on('error',onError);return watcher;
 }

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Private code copy OUTSIDE the replaceable plugin and Gateway service.
-import {readFileSync,writeFileSync,renameSync,existsSync,watch} from 'node:fs';
+import {readFileSync,writeFileSync,renameSync,existsSync} from 'node:fs';
 import {execFile,spawn} from 'node:child_process';
 import {promisify} from 'node:util';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createFileCredentialStore} from '../src/auth/credentials.js';
 import {updateHeartbeat,shouldApply} from '../src/update/manager.js';
-import {consumeUpdateEvents,maintainUpdateEvents} from '../src/update/event-client.js';
+import {consumeUpdateEvents,maintainUpdateEvents,watchManagerFiles} from '../src/update/event-client.js';
 const exec=promisify(execFile),configPath=process.argv[2];
 if(!path.isAbsolute(configPath??''))throw Error('MANAGER_CONFIG_REQUIRED');
 const config=JSON.parse(readFileSync(configPath,'utf8'));
@@ -49,12 +49,12 @@ function run(){dirty=true;if(running)return running;return running=(async()=>{wh
 await run();
 // Transport/result heartbeats remain independent of release notification.
 const timer=setInterval(()=>{if(!stopping)void run();},60000);
-const watcher=watch(directory,{persistent:false},(_event,file)=>{
- if(String(file)==='installation.json'){void store.read().then(c=>{if(credentialKey(c)!==streamCredential){pendingDirective=null;stream?.abort();}}).catch(unavailable);}
- // Do not immediately re-launch a deferred helper. It has exhausted its idle window.
- if(String(file)==='update-status.json'&&read(stateFile)?.status!=='deferred')void run();
+const watcher=watchManagerFiles({directory,
+ onCredential:c=>{if(credentialKey(c)!==streamCredential){pendingDirective=null;stream?.abort();}},
+ // Do not immediately re-launch a helper that exhausted its idle window.
+ onAttempt:attempt=>{if(attempt?.status!=='deferred')void run();},
+ onError:error=>{unavailable(error);stream?.abort();},
 });
-watcher.on('error',error=>{unavailable(error);stream?.abort();});
 process.on('SIGTERM',()=>{stopping=true;lifetime.abort();stream?.abort();clearInterval(timer);watcher.close();if(!child)process.exit(0);});
 await maintainUpdateEvents({signal:lifetime.signal,onError:unavailable,connect:async connected=>{
  const credential=await store.read();if(credential?.status!=='active')throw Error('CREDENTIAL_UNAVAILABLE');
