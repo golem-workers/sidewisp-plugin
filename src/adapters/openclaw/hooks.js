@@ -497,7 +497,8 @@ export function createOpenClawUserTaskLifecycle({
       state.staged = false;
       return accepted(event);
     }
-    if (component === "final_reply" && event?.type === "turn.completed") {
+    if ((component === "final_reply" && event?.type === "turn.completed")
+        || (component === "runtime_reconciliation" && TURN_TERMINALS.has(event?.type))) {
       const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
       if (!correlation.turnId) {
         if (pendingInbound && correlation.messageId === pendingInbound.messageId) {
@@ -506,7 +507,16 @@ export function createOpenClawUserTaskLifecycle({
         }
         return coalesced();
       }
-      const [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
+      let [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
+      if (!state && component === "runtime_reconciliation") {
+        const stableKey = taskKey(correlation.sessionId, correlation.turnId);
+        if (stableKey && records.get(stableKey)?.kind === "task") {
+          key = stableKey; state = records.get(stableKey);
+        } else {
+          const run = records.get(runKey(correlation.sessionId, correlation.turnId));
+          if (run && !run.terminal) return accepted(complete(runKey(correlation.sessionId, correlation.turnId), run, event, nowMs));
+        }
+      }
       if (!state) {
         if (!key) {
           rememberRetiredRuns(correlation.sessionId, [correlation.turnId]);

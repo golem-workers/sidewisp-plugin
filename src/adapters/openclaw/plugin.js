@@ -1,3 +1,4 @@
+import { createOpenClawWorkReconciliation } from "./work-reconciliation.js";
 import { createHeartbeatSupervisor, permanentHeartbeatFailure } from '../../core/heartbeat-supervisor.js';
 import { createScheduleRunner } from "../../schedules/runner.js";
 import { createActivationReadiness } from './activation-readiness.js';
@@ -42,7 +43,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.46";
+const VERSION = "0.2.47";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -218,6 +219,16 @@ export default definePluginEntry({
         return false;
       }
     };
+    const workReconciliation = createOpenClawWorkReconciliation({
+      request: typeof api.runtime.gateway?.request === "function"
+        ? (...args) => api.runtime.gateway.request(...args) : undefined,
+      activeWork: () => userTaskLifecycle.activeWork(),
+      revision: () => agentEventTelemetry.observed + Object.values(hookTelemetry.status().observed).reduce((sum, count) => sum + count, 0),
+      async emit(input) {
+        const normalized = normalizeRuntimeEvent("openclaw", input, makeEnvelope(input, "hook"));
+        return normalized.event ? persistEvent(normalized.event) : false;
+      },
+    });
     const emitHeartbeat = async (signal) => {
       if (signal?.aborted) return;
       if (spool) {
@@ -228,6 +239,8 @@ export default definePluginEntry({
         });
       }
       if (signal?.aborted || !spool || !auth.canSend()) return;
+      await workReconciliation.reconcile();
+      if (signal?.aborted) return;
       const snapshot = await adapter.healthSnapshot();
       if (signal?.aborted) return;
       const envelope = makeEnvelope({}, "health", `health|${Date.now()}|${crypto.randomUUID()}`);
@@ -430,6 +443,7 @@ export default definePluginEntry({
         hooks: hookTelemetry.status(),
         agentEvents: { ...agentEventTelemetry },
         userTasks: userTaskLifecycle.status(),
+        workReconciliation: workReconciliation.status(),
         failures: { spool: spoolFailure, spoolCount: spoolFailureCount },
         ...(await collector.status()),
       });
