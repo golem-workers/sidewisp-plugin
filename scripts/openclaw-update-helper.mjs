@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {safeUpdateFailure} from '../src/update/failure.js';
 import {coldActivateOpenClaw} from './cold-activate-openclaw.mjs';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, openSync, closeSync } from 'node:fs';
@@ -96,17 +97,18 @@ try {
   }
  }
 } catch(error) {
+ const failureCode=safeUpdateFailure(error);
  // A denied install must never cause a Gateway restart, file overwrite or a
  // second install. Roll back only an actually applied but unhealthy generation.
  let applied=false;
  try {applied=status().version===directive.targetVersion;} catch {}
  if(applied && backup && original) {
   try {
-   writeState({status:'rolling_back',errorCode:'TARGET_VERIFICATION_FAILED'});
-   await applyHotUpdate({targetVersion:original.version,status,idle,writeState:s=>writeState({...s,status:s.status==='completed'?'rolled_back':s.status}),
+   writeState({status:'rolling_back',errorCode:failureCode});
+   await applyHotUpdate({targetVersion:original.version,status,idle,writeState:s=>writeState({...s,errorCode:failureCode,status:s.status==='completed'?'rolled_back':s.status}),
     install:()=>run(['plugins','install',backup,'--force','--accept-capabilities']),
     reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json'])});
   } catch {writeState({status:'failed',errorCode:'ROLLBACK_REQUIRES_RECOVERY'});}
- } else writeState({status:'failed',errorCode:/^[A-Z_]+$/.test(error.message)?error.message:'INSTALL_OR_RELOAD_REFUSED'});
+ } else writeState({status:'failed',errorCode:failureCode});
  process.exitCode=1;
 } finally {closeSync(lockFd);rmSync(lock,{force:true});}

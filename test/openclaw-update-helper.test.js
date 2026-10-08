@@ -11,3 +11,30 @@ test('a bad archive never reaches install, rollback or Gateway restart',t=>{
  assert.equal(JSON.parse(readFileSync(d.stateFile)).errorCode,'ARTIFACT_HASH_MISMATCH');
  assert.doesNotMatch(readFileSync(path.join(root,'calls'),'utf8'),/plugins install|plugins reload|gateway restart/);
 });
+
+import {createHash} from 'node:crypto';
+import {safeUpdateFailure} from '../src/update/failure.js';
+test('private or unknown errors cannot be promoted into public diagnosis',()=>{
+ assert.equal(safeUpdateFailure(Error('TARGET_COLLECTOR_UNHEALTHY')),'TARGET_COLLECTOR_UNHEALTHY');
+ for(const message of ['SECRET_TOKEN_VALUE','provider response /private/path','credentials=private'])assert.equal(safeUpdateFailure(Error(message)),'INSTALL_OR_RELOAD_REFUSED');
+});
+test('actual unhealthy-target failure survives successful rollback; binding and credentials stay intact',t=>{
+ const root=mkdtempSync(path.join(os.tmpdir(),'sidewisp-rollback-proof-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ mkdirSync(path.join(root,'bin'));mkdirSync(path.join(root,'plugin'));writeFileSync(path.join(root,'plugin/package.json'),JSON.stringify({version:'0.2.34'}));
+ const credential='{"installationId":"sw_ins_fixture123","secret":"private-fixture"}';writeFileSync(path.join(root,'installation.json'),credential);
+ const bytes=Buffer.from('verified local target fixture');writeFileSync(path.join(root,'target.tgz'),bytes);writeFileSync(path.join(root,'skip.mjs'),'globalThis.setTimeout=fn=>{queueMicrotask(fn);};');
+ writeFileSync(path.join(root,'live.json'),JSON.stringify({version:'0.2.34'}));
+ writeFileSync(path.join(root,'bin/openclaw'),`#!/usr/bin/env node
+const fs=require('fs'),r=process.env.TEST_ROOT,args=process.argv.slice(2),file=r+'/live.json';fs.appendFileSync(r+'/calls',args.join(' ')+'\\n');const live=JSON.parse(fs.readFileSync(file));
+if(args[0]==='plugins'&&args[1]==='inspect')console.log(JSON.stringify({plugin:{rootDir:r+'/plugin'}}));
+else if(args[0]==='plugins'&&args[1]==='install'){const version=args[2].endsWith('.tgz')?'0.2.35':'0.2.34';fs.writeFileSync(file,JSON.stringify({version}));fs.writeFileSync(r+'/plugin/package.json',JSON.stringify({version}));console.log('{}');}
+else if(args[2]==='diagnostics.lanes')console.log(JSON.stringify({ts:123,lanes:[{activeCount:0,queuedCount:0}],dynamic:null}));
+else if(args[2]==='sidewisp.status')console.log(JSON.stringify({...live,endpoint:'https://example.test',installation:{installationId:'sw_ins_fixture123'},enabled:true,running:live.version==='0.2.34',connectionReadiness:{ready:live.version==='0.2.34'}}));
+else if(args[0]==='plugins'&&args[1]==='reload')console.log('{}');else process.exit(2);
+`,{mode:0o700});
+ const d={schema:'sidewisp.plugin-update.v1',targetVersion:'0.2.35',targetSpec:'git:github.com/golem-workers/sidewisp-plugin@v0.2.35',sha256:createHash('sha256').update(bytes).digest('hex'),restartDelaySeconds:30,stateFile:path.join(root,'update.json'),archivePath:path.join(root,'target.tgz')};
+ assert.throws(()=>execFileSync(process.execPath,['--import',path.join(root,'skip.mjs'),helper,JSON.stringify(d)],{env:{...process.env,TEST_ROOT:root,PATH:path.join(root,'bin')+':'+process.env.PATH},stdio:'pipe'}));
+ const state=JSON.parse(readFileSync(d.stateFile));assert.equal(state.status,'rolled_back');assert.equal(state.errorCode,'TARGET_COLLECTOR_UNHEALTHY');assert.equal(state.targetVersion,d.targetVersion);
+ assert.equal(JSON.parse(readFileSync(path.join(root,'live.json'))).version,'0.2.34');assert.equal(readFileSync(path.join(root,'installation.json'),'utf8'),credential);
+ const calls=readFileSync(path.join(root,'calls'),'utf8');assert.equal(calls.match(/plugins install/g)?.length,2);assert.doesNotMatch(calls,/gateway restart/);
+});
