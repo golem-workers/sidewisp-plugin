@@ -1,3 +1,12 @@
+# Sidewisp Plugin v0.2.53
+
+## Forward-only activation reconciliation
+
+- A supported Gateway restart readiness timeout is reconciled against the exact managed profile and a changed running service PID for up to two minutes.
+- Never issue a second restart or treat an unchanged/mismatched process as activated. Genuine policy failures remain terminal.
+- Activation observation does not mean update completion: the independent updater still requires target collector readiness and unchanged endpoint/installation binding.
+- No app, push payload, enrollment, credential, queue or backend API changes.
+
 # Sidewisp Plugin v0.2.49
 
 ## Managed updater failure evidence

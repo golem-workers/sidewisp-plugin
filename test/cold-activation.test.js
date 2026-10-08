@@ -39,3 +39,17 @@ test('stopped recovery prepares exact target before starting and never operates 
  const running=managed(f);const other=managed(f);other.config.daemon.path=os.tmpdir();
  for(const snapshot of [running,other]){let prepared=false;let starts=0;try{await startStoppedOpenClaw({...f,prepare:()=>prepared=true,run:a=>{if(a[1]==='start')starts++;return JSON.stringify(snapshot);}});}catch{}assert.equal(prepared,false);assert.equal(starts,0);}
 }));
+
+
+test('restart readiness timeout observes delayed matched new PID without another restart or resume',()=>fixture(async f=>{
+ const calls=[];let probes=0;
+ await coldActivateOpenClaw({...f,sleep:async()=>{},run:a=>{calls.push(a[1]);if(a[1]==='status'){const s=managed(f);if(++probes===2)s.service.runtime={status:'stopped',pid:0};if(probes>=3)s.service.runtime.pid=456;return JSON.stringify(s);}if(a[1]==='suspend')return JSON.stringify({status:'ready',suspensionId:'ours'});if(a[1]==='restart')throw Object.assign(Error('exit1'),{stdout:'Timed out waiting for gateway health'});throw Error('unexpected');}});
+ assert.deepEqual(calls,['status','suspend','restart','status','status']);
+}));
+test('timeout with unchanged PID never claims activation and releases only its lease',()=>fixture(async f=>{
+ const calls=[];await assert.rejects(coldActivateOpenClaw({...f,sleep:async()=>{},restartProbeAttempts:2,run:a=>{calls.push(a);if(a[1]==='status')return JSON.stringify(managed(f));if(a[1]==='suspend')return JSON.stringify({status:'ready',suspensionId:'ours'});if(a[1]==='restart')throw Error('timed out');return '{}';}}),/timed out/);
+ assert.equal(calls.filter(a=>a[1]==='restart').length,1);assert.equal(calls.at(-1)[1],'resume');assert.equal(calls.at(-1)[2],'ours');
+}));
+test('timeout never accepts replacement process in a different profile',()=>fixture(async f=>{
+ let probes=0;const calls=[];await assert.rejects(coldActivateOpenClaw({...f,sleep:async()=>{},run:a=>{calls.push(a[1]);if(a[1]==='status'){const s=managed(f);if(++probes>1){s.service.runtime.pid=456;s.service.command.environment.OPENCLAW_STATE_DIR=os.tmpdir();}return JSON.stringify(s);}if(a[1]==='suspend')return JSON.stringify({status:'ready',suspensionId:'ours'});if(a[1]==='restart')throw Error('timed out');return '{}';}}),/timed out/);assert.deepEqual(calls,['status','suspend','restart','status','resume']);
+}));

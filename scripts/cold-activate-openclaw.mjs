@@ -6,7 +6,7 @@ const samePath=(a,b)=>{
   try {return realpathSync(a)===realpathSync(b);}catch {return false;}
 };
 // No service installation, force flag, session exclusion or policy fallback.
-export async function coldActivateOpenClaw({run,stateDir,configPath}) {
+export async function coldActivateOpenClaw({run,stateDir,configPath,sleep=ms=>new Promise(r=>setTimeout(r,ms)),restartProbeAttempts=24}) {
   const status=JSON.parse(run(['gateway','status','--no-probe','--json']));
   const service=status.service,env=service?.command?.environment;
   if(service?.loaded!==true || service.runtime?.status!=='running'
@@ -27,6 +27,22 @@ export async function coldActivateOpenClaw({run,stateDir,configPath}) {
   if(fence?.status!=='ready' || typeof fence.suspensionId!=='string')throw new Error('host_activation_not_prepared');
   try { run(['gateway','restart','--json']); }
   catch(error) {
+    // Restart CLI readiness can time out while systemd is still bringing up the
+    // new process. Observe that exact service; never send a second restart.
+    const timeout=/timed?\s*out|timeout|ETIMEDOUT/i.test([error.message,error.stdout,error.stderr,error.code].join(' '));
+    if(timeout) {
+      for(let n=0;n<restartProbeAttempts;n++) {
+        await sleep(5000);
+        let next;try {next=JSON.parse(run(['gateway','status','--no-probe','--json']));}catch {continue;}
+        const ns=next.service,ne=ns?.command?.environment;
+        if(ns?.loaded!==true || ns.targetRole==='diagnostic-only' || next.config?.mismatch===true
+          || !samePath(next.config?.daemon?.path,configPath)
+          || (ne?.OPENCLAW_CONFIG_PATH && !samePath(ne.OPENCLAW_CONFIG_PATH,configPath))
+          || !samePath(ne?.OPENCLAW_STATE_DIR ?? path.dirname(next.config?.daemon?.path ?? ''),stateDir)) break;
+        if(ns.runtime?.status==='running' && Number.isSafeInteger(ns.runtime.pid)
+          && ns.runtime.pid>0 && ns.runtime.pid!==service.runtime.pid) return;
+      }
+    }
     // Release only our own reversible lease. Never retry/restart another target.
     try {run(['gateway','resume',fence.suspensionId,'--json']);}catch {}
     throw error;
