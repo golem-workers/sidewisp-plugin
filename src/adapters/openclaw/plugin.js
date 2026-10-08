@@ -1,3 +1,4 @@
+import { createLocalWorkSnapshotRequest } from "./local-work-snapshot.js";
 import { createOpenClawWorkReconciliation } from "./work-reconciliation.js";
 import { createHeartbeatSupervisor, permanentHeartbeatFailure } from '../../core/heartbeat-supervisor.js';
 import { createScheduleRunner } from "../../schedules/runner.js";
@@ -43,7 +44,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.47";
+const VERSION = "0.2.48";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -220,8 +221,7 @@ export default definePluginEntry({
       }
     };
     const workReconciliation = createOpenClawWorkReconciliation({
-      request: typeof api.runtime.gateway?.request === "function"
-        ? (...args) => api.runtime.gateway.request(...args) : undefined,
+      request: createLocalWorkSnapshotRequest({ stateDir, activeWork: () => userTaskLifecycle.activeWork() }),
       activeWork: () => userTaskLifecycle.activeWork(),
       revision: () => agentEventTelemetry.observed + Object.values(hookTelemetry.status().observed).reduce((sum, count) => sum + count, 0),
       async emit(input) {

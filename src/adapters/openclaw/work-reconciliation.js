@@ -35,6 +35,9 @@ export function createOpenClawWorkReconciliation({ request, activeWork, emit, re
       const runIds = work.kind === "task"
         ? [work.outerRunId, ...(work.internalRunIds ?? [])].filter(Boolean) : [work.turnId];
       const exact = runIds.includes(session.lastRunId);
+      // A newer admitted task can race persistence of its running entry. Never
+      // close that task using the previous task's terminal metadata.
+      if (work.kind === "task" && !exact) continue;
       // Another run's success cannot prove this work succeeded. Close obsolete
       // restored work as interrupted, never as a fabricated successful result.
       const outcome = !exact || session.status === "aborted" ? "cancelled"
