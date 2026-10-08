@@ -1,3 +1,5 @@
+import { collectOpenClawCron, watchOpenClawCron } from '../../cron/openclaw.js';
+import { createCronDelivery } from '../../delivery/cron.js';
 import { createLocalWorkSnapshotRequest } from "./local-work-snapshot.js";
 import { createOpenClawWorkReconciliation } from "./work-reconciliation.js";
 import { createHeartbeatSupervisor, permanentHeartbeatFailure } from '../../core/heartbeat-supervisor.js';
@@ -126,6 +128,7 @@ export default definePluginEntry({
     let scheduleRunner = null;
     let usageDelivery = null;
     let contextDelivery = null;
+    let cronDelivery = null;
     let uploadTimer = null;
     let healthTimer = null;
     let spoolFailure = null;
@@ -337,6 +340,8 @@ export default definePluginEntry({
           contextDelivery=createContextUsageDelivery({collect:()=>collectOpenClawContext({stateDir}),endpoint:config.endpoint,
             credentialProvider:{current:async()=>auth.credential()}});
           contextDelivery.start();
+          cronDelivery = createCronDelivery({ collect: () => collectOpenClawCron({ stateDir }), subscribe: onChange => watchOpenClawCron({ stateDir, onChange }), endpoint: config.endpoint, credentialProvider: { current: async () => auth.credential() } });
+          cronDelivery.start();
           usageDelivery = createUsageDelivery({
             collect: ({ collectedAtMs }) => collectOpenClawUsage({ stateDir, collectedAtMs }),
             spool, endpoint: config.endpoint,
@@ -365,6 +370,8 @@ export default definePluginEntry({
           if (runtimeDiagnostics) await runtimeDiagnostics.stop().catch(() => {});
           runtimeDiagnostics = null;
         diagnosticProbes.dispose();
+          if (cronDelivery) await cronDelivery.stop().catch(() => {});
+          cronDelivery = null;
           if (contextDelivery) await contextDelivery.stop().catch(() => {});
           contextDelivery=null;
           if (usageDelivery) await usageDelivery.stop().catch(() => {});
@@ -402,7 +409,9 @@ export default definePluginEntry({
         }
         runtimeDiagnostics = null;
         diagnosticProbes.dispose();
-        if (contextDelivery) await contextDelivery.stop().catch(() => {});
+        if (cronDelivery) await cronDelivery.stop().catch(() => {});
+          cronDelivery = null;
+          if (contextDelivery) await contextDelivery.stop().catch(() => {});
         contextDelivery=null;
         if (usageDelivery) {
           try { await usageDelivery.stop(); }
@@ -437,6 +446,7 @@ export default definePluginEntry({
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
         runtimeDiagnostics: runtimeDiagnostics?.status() ?? { status: "not-started", at: null },
+        cronMonitoring: cronDelivery?.status() ?? { status: 'not-started', at: null },
         contextUsage: contextDelivery?.status() ?? {status:'not-started',at:null},
         usage: usageDelivery?.status() ?? { status: "not-started", at: null, observations: 0 },
         update: updates.status(),
