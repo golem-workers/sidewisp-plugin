@@ -18,6 +18,7 @@ are a separate managed service. They are not included in this repository. See
 ## What the plugin does
 
 - Observes deterministic runtime lifecycle, health, and failure metadata.
+- Reports read-only native OpenClaw cron inventory (names, cadence and run metadata only) through a filesystem watcher and 30-second fallback, without creating cron jobs or calling a model.
 - Reads numeric token usage from OpenClaw transcript storage and Hermes session storage, preserving per-model and per-run attribution without sending conversation content.
 - Coalesces absolute usage observations for idempotent signed delivery; retries, cancelled runs, cache tokens, reasoning tokens, and provider quota snapshots remain explicitly classified when the runtime exposes them.
 - Removes prompts, responses, files, credentials, tool payloads, and personal
