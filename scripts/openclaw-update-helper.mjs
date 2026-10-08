@@ -107,8 +107,10 @@ try {
    writeState({status:'rolling_back',errorCode:failureCode});
    await applyHotUpdate({targetVersion:original.version,status,idle,writeState:s=>writeState({...s,errorCode:failureCode,status:s.status==='completed'?'rolled_back':s.status}),
     install:()=>run(['plugins','install',backup,'--force','--accept-capabilities']),
-    reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json'])});
-  } catch {writeState({status:'failed',errorCode:'ROLLBACK_REQUIRES_RECOVERY'});}
+    reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json']),
+    verify:after=>{if(after.endpoint!==original.endpoint || after.installation?.installationId!==original.installation?.installationId)throw new Error('BINDING_CHANGED');},
+    coldActivate:()=>coldActivateOpenClaw({run,stateDir:process.env.OPENCLAW_STATE_DIR,configPath:process.env.OPENCLAW_CONFIG_PATH})});
+  } catch {writeState({status:'failed',errorCode:failureCode,recoveryErrorCode:'ROLLBACK_REQUIRES_RECOVERY'});}
  } else writeState({status:'failed',errorCode:failureCode});
  process.exitCode=1;
 } finally {closeSync(lockFd);rmSync(lock,{force:true});}
