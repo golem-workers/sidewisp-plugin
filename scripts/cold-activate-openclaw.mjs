@@ -32,3 +32,18 @@ export async function coldActivateOpenClaw({run,stateDir,configPath}) {
     throw error;
   }
 }
+
+// A stopped, explicitly matched service can be repaired without plugin RPC.
+// A running-but-unreachable host cannot be declared idle or forcibly restarted.
+export async function startStoppedOpenClaw({run,stateDir,configPath,prepare}) {
+ const snapshot=JSON.parse(run(['gateway','status','--no-probe','--json']));
+ const service=snapshot.service,env=service?.command?.environment;
+ if(service?.runtime?.status==='running')return false;
+ if(service?.loaded!==true||service.runtime?.status!=='stopped'
+  || (service.runtime.pid!=null&&service.runtime.pid!==0)
+  || service.targetRole==='diagnostic-only'||snapshot.config?.mismatch===true
+  || !samePath(snapshot.config?.daemon?.path,configPath)
+  || (env?.OPENCLAW_CONFIG_PATH&&!samePath(env.OPENCLAW_CONFIG_PATH,configPath))
+  || !samePath(env?.OPENCLAW_STATE_DIR??path.dirname(snapshot.config.daemon.path),stateDir))throw Error('managed_active_profile_required');
+ await prepare();run(['gateway','start','--json']);return true;
+}
