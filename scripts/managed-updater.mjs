@@ -27,23 +27,28 @@ async function tick(){
  let current=null;
  try{const r=await exec('openclaw',['gateway','call','sidewisp.status','--params','{}','--json'],{timeout:20000,maxBuffer:1024*1024});current=JSON.parse(r.stdout);
  if(current.endpoint!==config.endpoint||current.installation?.installationId!==credential.installationId)throw Error('BINDING_MISMATCH');
- if(current.enabled&&current.running&&current.connectionReadiness?.ready)save(path.join(directory,'manager-baseline.json'),{version:current.version,endpoint:current.endpoint,installationId:credential.installationId});
+ if(current.enabled&&current.running&&current.connectionReadiness?.ready)save(path.join(directory,'manager-baseline.json'),{version:current.version,endpoint:current.endpoint,installationId:credential.installationId,stateId:current.connectionReadiness.stateId});
  }catch(e){if(e.message==='BINDING_MISMATCH')throw e;}
  const attempt=read(stateFile),previous=read(managerFile);
  const report={managerVersion:version,currentVersion:current?.enabled&&current?.running&&current?.connectionReadiness?.ready?current.version:null,status:attempt?.status??(current?'idle':'unavailable'),targetVersion:attempt?.targetVersion??null,revision:attempt?.revision??previous?.revision??null,reasonCode:attempt?.reasonCode??attempt?.errorCode??null};
  lastReport=report;
  // This heartbeat reports liveness/results only. Never apply its update field.
- await updateHeartbeat({endpoint:config.endpoint,credential,report});
- save(managerFile,{...report,mode:'event_driven',controlStatus:'connected',checkedAt:new Date().toISOString(),requiredVersion:pendingDirective?.targetVersion??null});
- const directive=pendingDirective;
- if(stopping||credentialKey(credential)!==streamCredential||!directive||!shouldApply({directive,currentVersion:current?.version,attempt,active:!!child}))return;
- if(existsSync(stateFile+'.lock'))return; // Interrupted mutation needs inspection.
- save(stateFile,{status:'scheduled',targetVersion:directive.targetVersion,revision:directive.revision,updatedAt:new Date().toISOString()});
- if(credentialKey(await store.read())!==streamCredential)return;
+ let controlStatus='connected',controlError=null;try {await updateHeartbeat({endpoint:config.endpoint,credential,report});}catch(error){controlStatus='unavailable';controlError=error;unavailable(error);}
+ save(managerFile,{...report,mode:'event_driven',controlStatus,checkedAt:new Date().toISOString(),requiredVersion:pendingDirective?.targetVersion??null});
+ if(controlError?.message==='CREDENTIAL_REJECTED')return;
+ const journal=read(path.join(directory,'current-update.json'));
+ const recovering=journal?.schema==='sidewisp.current-update.v1'&&journal.mutated===true&&!['completed','failed'].includes(journal.status)
+  &&journal.baseline?.installationId===credential.installationId&&journal.baseline?.endpoint===config.endpoint;
+ // Already-authorized mutation resumes even if SSE/control plane is unavailable.
+ const directive=pendingDirective??(recovering?journal.directive:null);
+ if(stopping||(!recovering&&credentialKey(credential)!==streamCredential)||!directive||!shouldApply({directive,currentVersion:current?.version,currentReady:!!(current?.enabled&&current?.running&&current?.connectionReadiness?.ready),attempt,active:!!child}))return;
+ if(existsSync(stateFile+'.lock'))return; // Legacy interrupted transactions require explicit recovery.
+ // The helper owns the durable attempt; never erase its crash checkpoint here.
+ const latestCredential=await store.read();if(credentialKey(latestCredential)!==credentialKey(credential))return;
  const payload={...directive,stateFile,baselineFile:path.join(directory,'manager-baseline.json')};
  child=spawn(process.execPath,[fileURLToPath(new URL('./openclaw-update-helper.mjs',import.meta.url)),JSON.stringify(payload)],{stdio:'ignore',env:process.env});
  let finished=false;
- const finish=()=>{if(finished)return;finished=true;child=null;const last=read(stateFile);if(last?.status==='scheduled')save(stateFile,{...last,status:'failed',errorCode:'HELPER_EXITED',updatedAt:new Date().toISOString()});if(stopping)process.exit(0);else if(last?.status!=='deferred')void run();};child.once('exit',finish);child.once('error',finish);
+ const finish=code=>{if(finished)return;finished=true;child=null;if(code===3){if(stopping)process.exit(0);return;}const last=read(stateFile);if(!last||last?.status==='scheduled')save(stateFile,{...last,status:'failed',errorCode:'HELPER_EXITED',updatedAt:new Date().toISOString()});if(stopping)process.exit(0);else if(!last||['completed','failed'].includes(last.status))void run();};child.once('exit',finish);child.once('error',finish);
 }
 function run(){dirty=true;if(running)return running;return running=(async()=>{while(dirty&&!stopping){dirty=false;try{await tick();}catch(e){unavailable(e);}}})().finally(()=>{running=null;});}
 await run();

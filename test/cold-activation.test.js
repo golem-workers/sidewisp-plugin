@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,writeFileSync,rmSync} from 'node:fs';
 import os from 'node:os';import path from 'node:path';
 import {createActivationReadiness} from '../src/adapters/openclaw/activation-readiness.js';
-import {coldActivateOpenClaw} from '../scripts/cold-activate-openclaw.mjs';
+import {coldActivateOpenClaw,startStoppedOpenClaw} from '../scripts/cold-activate-openclaw.mjs';
 test('affected SDK requires bootstrap-owned service context, not a replayed lifecycle hook; other SDK is untouched',()=>{
  const old=createActivationReadiness('2026.9.8');assert.equal(old.required(),true);old.serviceStarted({});assert.equal(old.required(),true);old.serviceStarted({startupTrace:{measure(){}}});assert.equal(old.required(),false);
  assert.equal(createActivationReadiness('2026.10.1').required(),false);
@@ -31,4 +31,11 @@ test('restart failure releases only the acquired lease and is not retried',()=>f
 
 test('missing profile env and missing config paths report safe profile refusal',()=>fixture(async f=>{
  for(const broken of [{...f,configPath:undefined},{...f,stateDir:undefined},{...f,configPath:'/no-such-sidewisp-fixture-config'}]){await assert.rejects(coldActivateOpenClaw({...broken,run:()=>JSON.stringify(managed(f))}),/managed_active_profile_required/);}
+}));
+
+test('stopped recovery prepares exact target before starting and never operates on another profile',()=>fixture(async f=>{
+ const calls=[];const stopped=managed(f);stopped.service.runtime={status:'stopped',pid:0};
+ await startStoppedOpenClaw({...f,prepare:()=>calls.push('prepare'),run:a=>{calls.push(a[1]);return JSON.stringify(stopped);}});assert.deepEqual(calls,['status','prepare','start']);
+ const running=managed(f);const other=managed(f);other.config.daemon.path=os.tmpdir();
+ for(const snapshot of [running,other]){let prepared=false;let starts=0;try{await startStoppedOpenClaw({...f,prepare:()=>prepared=true,run:a=>{if(a[1]==='start')starts++;return JSON.stringify(snapshot);}});}catch{}assert.equal(prepared,false);assert.equal(starts,0);}
 }));
