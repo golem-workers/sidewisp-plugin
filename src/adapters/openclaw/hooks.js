@@ -1134,9 +1134,20 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       if (receipt?.ok !== true || receipt.sourceReplyRoute !== "current-source"
           || receipt.partial === true || receipt.dryRun === true
           || receipt.nonDelivery === true || receipt.noOp === true) return null;
-      const messagePreview = readMessagePreview(() => event.params.message,
-        event.params.final === false ? "turn.progress" : "turn.completed");
-      return event.params.final === false
+      // A successful attachment-only send is not the assistant's final reply.
+      // Preserve legacy implicit text finals and explicit final=true, but leave
+      // textless sends open for the automatic reply observer. Decide from text
+      // presence, NOT sanitizer acceptance: sensitive finals still complete
+      // without a preview. Read no attachment/caption/target or result content.
+      let hasText = false;
+      const messagePreview = readMessagePreview(() => {
+        const text = event.params.message;
+        hasText = typeof text === "string" && /\S/u.test(text.slice(0, 16_384));
+        return text;
+      }, event.params.final === false ? "turn.progress" : "turn.completed");
+      const isProgress = event.params.final === false
+        || (event.params.final !== true && !hasText);
+      return isProgress
         ? { kind: "turn_progress", component: "source_message", messagePreview, correlation: correlation(event, ctx) }
         : { kind: "turn_end", outcome: "success", component: "final_reply", messagePreview, correlation: correlation(event, ctx) };
     }, true),

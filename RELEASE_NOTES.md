@@ -1,3 +1,9 @@
+## 0.2.61 — attachment send followed by ordinary automatic final
+
+- A confirmed source `message(send)` without assistant text no longer closes work implicitly. It records progress until the ordinary automatic final arrives; explicit `final=true` and legacy implicit text finals retain their semantics.
+- Completion still uses exact inbound/work correlation and existing terminal deduplication. No event replay, transcript reconstruction, or delivery-derived completion.
+- Message-preview privacy policy is unchanged: sensitive text still completes without a preview; attachments, captions, targets and tool results are not inspected.
+
 ## 0.2.60 — exact ordinary automatic-final correlation
 
 - Resolve final reply observers using their captured host inbound message identity when ordinary dispatch has no runId. Never infer completion from message delivery or the latest session task.
