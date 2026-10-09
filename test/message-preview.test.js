@@ -110,7 +110,8 @@ test("unreadable optional preview does not change runtime normalization", () => 
 
 test("ordinary words, names, paths and links survive without weakening value detection", () => {
   for (const text of ["Секреты защищены; слово секрет не является значением.",
-    "memory-dreaming-promotion", "sidewisp-pr127-eas-monitor", "Проверен /v1/activity",
+    "memory-dreaming-promotion", "MemoryDreamingPromotion2026",
+    "/usr/local/SidewispProjectDirectory2026", "src/adapters/OpenClawHooks2026", "sidewisp-pr127-eas-monitor", "Проверен /v1/activity",
     "/private/customer.txt", "C:\\private\\customer.txt", "https://example.test/docs",
     "API key protection and token usage are enabled", "Basic checks passed",
     "Aa1".repeat(8), "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "private information stays protected",
@@ -119,7 +120,7 @@ test("ordinary words, names, paths and links survive without weakening value det
   }
   for (const text of ["api_key=abc", '"password": "abc"', "секрет: abc", "Токен=abc",
     "https://example.test/?token=abc", "https://name:abc@example.test/docs",
-    "Bearer abc", "AKIA1234567890ABCDEF", "gho_1234567890", "sk-proj-abc123",
+    "Bearer abc", "bX7qP9nR2sT4/uV6wY8zA0cD3eF5gH1jK", "AKIA1234567890ABCDEF", "gho_1234567890", "sk-proj-abc123",
     "bX7qP9nR2sT4uV6wY8zA0cD3eF5gH1jK", "api\u200b_key=abc", "ＡＰＩ＿ＫＥＹ=abc",
     "Готово ".repeat(40) + "password=after-cutoff"]) {
     assert.equal(sanitizeMessagePreview(text, "turn.completed"), undefined, text);
