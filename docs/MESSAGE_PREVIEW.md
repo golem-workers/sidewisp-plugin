@@ -16,8 +16,8 @@ rewrites, cancels, claims or stores the original payload. Reading/cleaning optio
 text cannot prevent the existing lifecycle observation.
 
 Whitespace is collapsed, invisible formatting removed, and the full bounded
-scalar scanned BEFORE truncation. Credential markers, common opaque secrets,
-contact numbers, email addresses, links, file paths and fenced code cause the
+scalar scanned BEFORE truncation. Credential values, authorization headers,
+embedded URL credentials, contact data, opaque keys and fenced code cause the
 whole preview to be omitted, not partially redacted. Empty, non-string,
 unreadable or oversized (>16 KiB) inputs are omitted too. Maximum output is 160
 UTF-16 code units (also <=160 Unicode characters), including a truncation ellipsis;
@@ -53,3 +53,7 @@ incident evidence. A failed scalar read, ambiguous sensitivity marker, malformed
 Unicode or excessive size omits preview while retaining the original event.
 Tests cover invisible-marker obfuscation, compatibility normalization, a secret
 after the cutoff, invalid legacy database rows and cross-tenant reads.
+
+Credential detection is value-based: ordinary mentions of secrets, cron names, paths, and plain links are allowed. Credential assignments, authorization headers, embedded URL credentials, known key formats, opaque mixed-case keys, contact data and code remain omitted. Scanning still covers the entire bounded answer before truncation.
+
+On OpenClaw 2026.9.8, the abort-aware dispatcher must forward the public `appendBeforeDeliver` observer; the separately released runtime hotfix restores that forwarding without adding hooks or changing delivery/status semantics.
