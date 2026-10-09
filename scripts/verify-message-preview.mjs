@@ -53,7 +53,7 @@ try {
   spool = await openSpool({ file: join(root, "plugin-spool.sqlite") });
   let sequence = 0;
   const envelopeFactory = () => ({ eventId: `sw_evt_previewcontract${String(++sequence).padStart(8, "0")}`, installationId: created.installationId, sequence,
-    occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), runtime: { version: "2026.9.1" }, source: { kind: "hook", adapterVersion: "0.2.56" } });
+    occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), runtime: { version: "2026.9.1" }, source: { kind: "hook", adapterVersion: "0.2.57" } });
   const lifecycle = createOpenClawUserTaskLifecycle();
   const persist = input => {
     const result = lifecycle.processDetailed(input);
