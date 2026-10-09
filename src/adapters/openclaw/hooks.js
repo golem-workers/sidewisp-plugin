@@ -501,14 +501,22 @@ export function createOpenClawUserTaskLifecycle({
     if ((component === "final_reply" && event?.type === "turn.completed")
         || (component === "runtime_reconciliation" && TURN_TERMINALS.has(event?.type))) {
       const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
-      if (!correlation.turnId) {
+      // Ordinary reply dispatch need not carry runId. Only its captured,
+      // exact inbound identity may resolve that final; never use latest session
+      // state or a message.delivered observation to infer completion.
+      const exactFinalKey = component === "final_reply" && !correlation.turnId
+        ? taskKey(correlation.sessionId, correlation.messageId) : null;
+      const exactFinalState = exactFinalKey ? records.get(exactFinalKey) : null;
+      if (!correlation.turnId && exactFinalState?.kind !== "task") {
         if (pendingInbound && correlation.messageId === pendingInbound.messageId) {
           retirePendingInbound(correlation.sessionId, pendingInbound, nowMs);
           pendingInboundBySession.delete(correlation.sessionId);
         }
         return coalesced();
       }
-      let [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
+      let [key, state] = exactFinalState?.kind === "task"
+        ? [exactFinalKey, exactFinalState]
+        : taskForRun(correlation.sessionId, correlation.turnId);
       if (!state && component === "runtime_reconciliation") {
         const stableKey = taskKey(correlation.sessionId, correlation.turnId);
         if (stableKey && records.get(stableKey)?.kind === "task") {
@@ -1077,10 +1085,16 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     // Only derive a bounded safe preview of final text; never rewrite, cancel,
     // retain the payload, inspect attachments, or claim dispatch.
     reply_dispatch(event = {}, ctx = {}) {
+      // The actual host hook stores inbound identity in event.ctx, unlike
+      // before_dispatch. Snapshot only correlation at registration time.
+      const finalCorrelation = correlation(event, ctx);
+      finalCorrelation.sessionId ??= event.ctx?.SessionKey;
+      finalCorrelation.messageId ??= event.ctx?.MessageSidFull ?? event.ctx?.MessageSid
+        ?? event.ctx?.MessageSidFirst ?? event.ctx?.MessageSidLast;
       const observeFinal = observe("reply_dispatch", (observation, _ctx) => ({
         kind: "turn_end", outcome: "success", component: "final_reply",
         messagePreview: observation.messagePreview,
-        correlation: correlation(event, ctx),
+        correlation: finalCorrelation,
       }), true);
       if (typeof ctx.dispatcher?.appendBeforeDeliver !== "function") {
         diagnose(localDiagnostic("reply-observer-unavailable", "openclaw"));

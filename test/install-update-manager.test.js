@@ -12,7 +12,7 @@ function oldManager(f,result){const current=path.join(f.root,'sidewisp/manager/c
 test('explicit manager upgrade switches only private code and preserves owner config/unit',t=>{
  const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result);
  const unit=readFileSync(prior.unit,'utf8')+'\n# owner override\n';writeFileSync(prior.unit,unit);const config=readFileSync(result.configFile,'utf8');f.calls.length=0;
- const after=installUpdateManager({...f.options,upgrade:true});assert.equal(after.managerVersion,'0.2.59');assert.notEqual(realpathSync(prior.current),prior.old);
+ const after=installUpdateManager({...f.options,upgrade:true});assert.equal(after.managerVersion,'0.2.60');assert.notEqual(realpathSync(prior.current),prior.old);
  assert.equal(readFileSync(prior.unit,'utf8'),unit);assert.equal(readFileSync(result.configFile,'utf8'),config);
  assert.deepEqual(f.calls.filter(c=>c[0]==='systemctl').map(c=>c[1]),[['--user','stop',result.unit],['--user','daemon-reload'],['--user','enable','--now',result.unit]]);
 });
