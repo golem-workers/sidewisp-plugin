@@ -8,6 +8,11 @@ function hasOpaqueCredential(text) {
   // No length-only blacklist: cron names, paths, commits and event IDs are not keys.
   for (const match of text.matchAll(/(?<![\w/.-])[A-Za-z0-9_+\/=-]{24,}(?![\w/.-])/g)) {
     const value = match[0];
+    // Readable identifiers and path components are not opaque credential values.
+    // Known key formats and explicit assignments were already checked above.
+    if (/^[A-Z]?[a-z]{2,}(?:[A-Z][a-z]{2,})+\d{0,4}$/.test(value)) continue;
+    if (value.includes("/") && value.replace(/^\//, "").split("/").every(
+      part => /^[A-Za-z_][A-Za-z_-]*(?:[0-9]{1,4})?$/.test(part))) continue;
     if (!/[a-z]/.test(value) || !/[A-Z]/.test(value) || !/\d/.test(value)) continue;
     const counts = new Map();
     for (const char of value) counts.set(char, (counts.get(char) ?? 0) + 1);

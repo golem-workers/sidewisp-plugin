@@ -1,3 +1,8 @@
+## 0.2.59 — complete ordinary-name/path qualification
+
+- Qualify readable CamelCase identifiers and path components before the opaque-key heuristic; retain known-key, assignment and random-key protection.
+- Supersedes targeted 0.2.58 before working-agent activation.
+
 ## 0.2.58 — ordinary reply previews
 
 - Preserve ordinary words, cron names, paths and links in message previews while omitting credential values, known token formats and opaque keys.
