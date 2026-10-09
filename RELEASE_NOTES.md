@@ -1,3 +1,9 @@
+## 0.2.60 — exact ordinary automatic-final correlation
+
+- Resolve final reply observers using their captured host inbound message identity when ordinary dispatch has no runId. Never infer completion from message delivery or the latest session task.
+- Preserve work statuses, terminal deduplication, safe preview filtering, binding, cron and notification contracts.
+- Companion scoped OpenClaw hotfix forwards the existing Telegram session key to plugin message-delivery observers; it does not create lifecycle events.
+
 ## 0.2.59 — complete ordinary-name/path qualification
 
 - Qualify readable CamelCase identifiers and path components before the opaque-key heuristic; retain known-key, assignment and random-key protection.
