@@ -56,7 +56,8 @@
     "scripts/prepare-openclaw.mjs",
     "scripts/managed-updater.mjs",
     "scripts/install-update-manager.mjs",
-    "scripts/cold-activate-openclaw.mjs"
+    "scripts/cold-activate-openclaw.mjs",
+    "scripts/verify-message-preview.mjs"
   ],
   "scripts": {
     "test": "node --test",
@@ -72,7 +73,8 @@
     "e2e:live": "node scripts/verify-live-backend.mjs",
     "canary:check": "node scripts/evaluate-canary.mjs test/fixtures/canary-report.json",
     "test:fleet": "node --test test/fleet-rollout.test.js && python3 test/fleet-controller.test.py",
-    "release:fleet": "python3 scripts/fleet-release.py publish"
+    "release:fleet": "python3 scripts/fleet-release.py publish",
+    "e2e:message-preview": "node scripts/verify-message-preview.mjs"
   },
   "peerDependencies": {
     "openclaw": ">=2026.9.1"
