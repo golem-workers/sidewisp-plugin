@@ -23,33 +23,64 @@ export function normalizeCronJob(job) {
     createdAtMs: time(job.createdAtMs), nextRunAtMs: time(job.state?.nextRunAtMs), lastRunAtMs: time(job.state?.lastRunAtMs),
     lastStatus: ['ok', 'error', 'skipped'].includes(job.state?.lastRunStatus ?? job.state?.lastStatus) ? job.state.lastRunStatus ?? job.state.lastStatus : 'unknown' };
 }
-export async function collectOpenClawCron({ stateDir, readFileImpl = readFile, statImpl = stat }) {
+// SQLite is authoritative when present. Never fall back to stale JSON on an error.
+// Read a single partition, including runtime state, without initializing or repairing it.
+export async function collectOpenClawCron({ stateDir, storePath = path.join(stateDir, 'cron', 'jobs.json'), readFileImpl = readFile, statImpl = stat, sqliteStatImpl = stat }) {
+  let db;
   try {
-    const target = path.join(stateDir, 'cron', 'jobs.json');
-    if ((await statImpl(target)).size > MAX_BYTES) return { status: 'unavailable', jobs: [] };
-    const raw = await readFileImpl(target, 'utf8');
-    if (Buffer.byteLength(raw) > MAX_BYTES) return { status: 'unavailable', jobs: [] };
-    const data = JSON.parse(raw);
-    if (!Array.isArray(data.jobs) || data.jobs.length > 1000) return { status: 'unavailable', jobs: [] };
-    const jobs = data.jobs.map(normalizeCronJob).sort((a, b) => a.id.localeCompare(b.id));
+    const target = path.join(stateDir, 'state', 'openclaw.sqlite');
+    let sqliteExists = false;
+    try { await sqliteStatImpl(target); sqliteExists = true; }
+    catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    let nativeJobs;
+    if (sqliteExists) {
+      const { DatabaseSync } = await import('node:sqlite');
+      db = new DatabaseSync(target, { readOnly: true });
+      db.exec('PRAGMA query_only = ON; PRAGMA busy_timeout = 1000;');
+      const rows = db.prepare('SELECT job_id, enabled, job_json, state_json FROM cron_jobs WHERE store_key = ? ORDER BY job_id LIMIT 1001').all(path.resolve(storePath));
+      let bytes = 0;
+      nativeJobs = rows.map(row => {
+        bytes += Buffer.byteLength(row.job_json) + Buffer.byteLength(row.state_json);
+        if (bytes > MAX_BYTES) throw new Error('oversized_cron_inventory');
+        const job = JSON.parse(row.job_json), state = JSON.parse(row.state_json);
+        if (!job || typeof job !== 'object' || !state || typeof state !== 'object' || Array.isArray(state)) throw new Error('invalid_cron_row');
+        return { ...job, id: row.job_id, enabled: row.enabled !== 0, state };
+      });
+    } else {
+      if ((await statImpl(storePath)).size > MAX_BYTES) return { status: 'unavailable', jobs: [] };
+      const raw = await readFileImpl(storePath, 'utf8');
+      if (Buffer.byteLength(raw) > MAX_BYTES) return { status: 'unavailable', jobs: [] };
+      nativeJobs = JSON.parse(raw).jobs;
+    }
+    if (!Array.isArray(nativeJobs) || nativeJobs.length > 1000) return { status: 'unavailable', jobs: [] };
+    const jobs = nativeJobs.map(normalizeCronJob).sort((a, b) => a.id.localeCompare(b.id));
     if (new Set(jobs.map(job => job.id)).size !== jobs.length) return { status: 'unavailable', jobs: [] };
     return { status: 'ok', jobs };
   } catch (error) {
     return { status: error?.code === 'ENOENT' ? 'unsupported' : 'unavailable', jobs: [] };
-  }
+  } finally { db?.close(); }
 }
 
-// Watch the containing directory so atomic jobs.json replacements stay observable.
-// Filesystem watching is supplementary; unsupported/missing stores retain timer fallback.
-export function watchOpenClawCron({ stateDir, onChange, watchImpl = watch, setTimer = setTimeout, clearTimer = clearTimeout }) {
-  let timer = null, watcher = null;
-  try {
-    watcher = watchImpl(path.join(stateDir, 'cron'), { persistent: false }, (_event, filename) => {
-      if (filename && String(filename) !== 'jobs.json') return;
-      if (timer) clearTimer(timer);
-      timer = setTimer(() => { timer = null; onChange(); }, 50); timer?.unref?.();
-    });
-    watcher.on('error', () => { watcher?.close(); watcher = null; });
-  } catch { /* Timer fallback also handles a cron store created after startup. */ }
-  return () => { if (timer) clearTimer(timer); timer = null; watcher?.close(); watcher = null; };
+// Watch directories, not inodes: SQLite WAL commits and atomic JSON replacements
+// both matter. Timer fallback in delivery covers stores created after startup.
+export function watchOpenClawCron({ stateDir, storePath = path.join(stateDir, 'cron', 'jobs.json'), onChange, watchImpl = watch, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let timer = null, closed = false, lastSnapshot = null;
+  const refresh = async () => {
+    const snapshot = JSON.stringify(await collectOpenClawCron({ stateDir, storePath }));
+    if (closed) return;
+    if (snapshot !== lastSnapshot) { lastSnapshot = snapshot; onChange(); }
+  };
+  const watchers = [];
+  for (const [directory, names] of [[path.join(stateDir, 'state'), ['openclaw.sqlite', 'openclaw.sqlite-wal', 'openclaw.sqlite-shm']], [path.dirname(storePath), [path.basename(storePath)]]]) {
+    try {
+      const watcher = watchImpl(directory, { persistent: false }, (_event, filename) => {
+        if (filename && !names.includes(String(filename))) return;
+        if (timer) clearTimer(timer);
+        timer = setTimer(() => { timer = null; void refresh().catch(() => {}); }, 250); timer?.unref?.();
+      });
+      watcher.on('error', () => watcher.close());
+      watchers.push(watcher);
+    } catch { /* Periodic collection remains available. */ }
+  }
+  return () => { closed = true; if (timer) clearTimer(timer); timer = null; for (const watcher of watchers) watcher.close(); };
 }

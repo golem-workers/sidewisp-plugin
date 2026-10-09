@@ -46,7 +46,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.55";
+const VERSION = "0.2.56";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -340,7 +340,7 @@ export default definePluginEntry({
           contextDelivery=createContextUsageDelivery({collect:()=>collectOpenClawContext({stateDir}),endpoint:config.endpoint,
             credentialProvider:{current:async()=>auth.credential()}});
           contextDelivery.start();
-          cronDelivery = createCronDelivery({ collect: () => collectOpenClawCron({ stateDir }), subscribe: onChange => watchOpenClawCron({ stateDir, onChange }), endpoint: config.endpoint, credentialProvider: { current: async () => auth.credential() } });
+          cronDelivery = createCronDelivery({ collect: () => collectOpenClawCron({ stateDir, storePath: api.config?.cron?.store }), subscribe: onChange => watchOpenClawCron({ stateDir, storePath: api.config?.cron?.store, onChange }), endpoint: config.endpoint, credentialProvider: { current: async () => auth.credential() } });
           cronDelivery.start();
           usageDelivery = createUsageDelivery({
             collect: ({ collectedAtMs }) => collectOpenClawUsage({ stateDir, collectedAtMs }),

@@ -1,6 +1,6 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.2.55",
+  "version": "0.2.56",
   "description": "Sidewisp runtime health and native cron monitoring",
   "license": "AGPL-3.0-only",
   "type": "module",
