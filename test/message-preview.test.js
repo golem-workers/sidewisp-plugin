@@ -20,12 +20,12 @@ test("message preview is optional, single-line, bounded and Unicode-safe", () =>
   assert.equal(readMessagePreview(() => { throw new Error("private read"); }, "turn.completed"), undefined);
 });
 
-test("preview fails closed on credentials, personal/contact data, links, paths and code", () => {
+test("preview fails closed on credentials, credential values, personal/contact data and code", () => {
   for (const value of [
-    "Bearer abcdef", "API_KEY=abc", "authorization: Basic abc", "пароль: abc", "секрет abc",
-    "Токен abc", "private information", "person@example.test", "+7 (999) 123-45-67",
+    "Bearer abcdef", "API_KEY=abc", "authorization: Basic abc", "пароль: abc", "секрет: abc",
+    "Токен: abc", "person@example.test", "+7 (999) 123-45-67",
     "4111 1111 1111 1111", "https://example.test/?key=abc", "https://name:pass@example.test",
-    "/private/customer.txt", "C:\\private\\customer.txt", "```hidden code```",
+    "```hidden code```",
     "sk-123456", "ghp_abc", "xoxb_abc", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
     "api\u200b_key=abc", "ＡＰＩ＿ＫＥＹ=abc", "bad\u0000text", "а\ud800",
     "Готово ".repeat(40) + "password=hidden-after-cutoff",
@@ -105,4 +105,23 @@ test("unreadable optional preview does not change runtime normalization", () => 
   assert.equal(result.event.type, "turn.completed");
   assert.equal("messagePreview" in result.event, false);
   assert.equal(result.diagnostic, null);
+});
+
+
+test("ordinary words, names, paths and links survive without weakening value detection", () => {
+  for (const text of ["Секреты защищены; слово секрет не является значением.",
+    "memory-dreaming-promotion", "sidewisp-pr127-eas-monitor", "Проверен /v1/activity",
+    "/private/customer.txt", "C:\\private\\customer.txt", "https://example.test/docs",
+    "API key protection and token usage are enabled", "Basic checks passed",
+    "Aa1".repeat(8), "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890", "private information stays protected",
+    "e28c9050d1e387b2fa307715fdce7ed0340623e1", "Работа завершена, статусы и cron сохранены."]) {
+    assert.equal(sanitizeMessagePreview(text, "turn.completed"), text, text);
+  }
+  for (const text of ["api_key=abc", '"password": "abc"', "секрет: abc", "Токен=abc",
+    "https://example.test/?token=abc", "https://name:abc@example.test/docs",
+    "Bearer abc", "AKIA1234567890ABCDEF", "gho_1234567890", "sk-proj-abc123",
+    "bX7qP9nR2sT4uV6wY8zA0cD3eF5gH1jK", "api\u200b_key=abc", "ＡＰＩ＿ＫＥＹ=abc",
+    "Готово ".repeat(40) + "password=after-cutoff"]) {
+    assert.equal(sanitizeMessagePreview(text, "turn.completed"), undefined, text);
+  }
 });
