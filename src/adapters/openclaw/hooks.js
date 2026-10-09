@@ -1,3 +1,4 @@
+import { readMessagePreview } from "../../core/message-preview.js";
 import { classifyRuntimeCause } from "../../core/causes.js";
 import { localDiagnostic, normalizeRuntimeEvent } from "../../core/normalize.js";
 
@@ -1073,10 +1074,12 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     }), true),
     // appendBeforeDeliver is the public per-dispatch observer boundary. Unlike
     // reply_payload_sending/message_sending, it does not disable Telegram drafts.
-    // Never inspect, rewrite, cancel, or retain the payload, or claim dispatch.
+    // Only derive a bounded safe preview of final text; never rewrite, cancel,
+    // retain the payload, inspect attachments, or claim dispatch.
     reply_dispatch(event = {}, ctx = {}) {
-      const observeFinal = observe("reply_dispatch", (_event, _ctx) => ({
+      const observeFinal = observe("reply_dispatch", (observation, _ctx) => ({
         kind: "turn_end", outcome: "success", component: "final_reply",
+        messagePreview: observation.messagePreview,
         correlation: correlation(event, ctx),
       }), true);
       if (typeof ctx.dispatcher?.appendBeforeDeliver !== "function") {
@@ -1085,7 +1088,9 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       }
       try {
         ctx.dispatcher.appendBeforeDeliver((payload, info = {}) => {
-          if (info.kind === "final") void observeFinal(event, ctx);
+          if (info.kind === "final") void observeFinal({
+            messagePreview: readMessagePreview(() => payload?.text, "turn.completed"),
+          }, ctx);
           return payload;
         }, { timeoutMs: 25 });
       } catch {
@@ -1100,12 +1105,14 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     message_sent: observe("message_sent", (event, ctx) => ({
       kind: "delivery_end",
       outcome: event.success === false ? "failure" : "success",
+      messagePreview: event.success === false ? undefined
+        : readMessagePreview(() => event.content, "message.delivered"),
       correlation: correlation(event, ctx),
     })),
     after_tool_call: observe("after_tool_call", (event, ctx) => {
       // Modern OpenClaw may route source commentary/finals through message.
-      // Consume only explicit delivery/finality flags, never message text,
-      // attachments, targets, tool arguments, or serialized tool output.
+      // Require explicit delivery/finality flags before reading only the sent text.
+      // Never inspect attachments, targets, other tool arguments, or output.
       if (event.toolName !== "message" || event.error != null
           || event.params?.action !== "send" || event.params?.dryRun === true
           || event.result?.isError === true) return null;
@@ -1113,9 +1120,11 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       if (receipt?.ok !== true || receipt.sourceReplyRoute !== "current-source"
           || receipt.partial === true || receipt.dryRun === true
           || receipt.nonDelivery === true || receipt.noOp === true) return null;
+      const messagePreview = readMessagePreview(() => event.params.message,
+        event.params.final === false ? "turn.progress" : "turn.completed");
       return event.params.final === false
-        ? { kind: "turn_progress", component: "source_message", correlation: correlation(event, ctx) }
-        : { kind: "turn_end", outcome: "success", component: "final_reply", correlation: correlation(event, ctx) };
+        ? { kind: "turn_progress", component: "source_message", messagePreview, correlation: correlation(event, ctx) }
+        : { kind: "turn_end", outcome: "success", component: "final_reply", messagePreview, correlation: correlation(event, ctx) };
     }, true),
     gateway_start: observe("gateway_start", () => ({ kind: "gateway_up", correlation: {} })),
     gateway_stop: observe("gateway_stop", () => ({ kind: "gateway_down", correlation: {} })),

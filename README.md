@@ -21,7 +21,9 @@ are a separate managed service. They are not included in this repository. See
 - Reports read-only native OpenClaw cron inventory (names, cadence and run metadata only) through a filesystem watcher and 30-second fallback, without creating cron jobs or calling a model.
 - Reads numeric token usage from OpenClaw transcript storage and Hermes session storage, preserving per-model and per-run attribution without sending conversation content.
 - Coalesces absolute usage observations for idempotent signed delivery; retries, cancelled runs, cache tokens, reasoning tokens, and provider quota snapshots remain explicitly classified when the runtime exposes them.
-- Removes prompts, responses, files, credentials, tool payloads, and personal
+- Exposes only an optional privacy-filtered outgoing `messagePreview` (one line,
+  at most 160 characters); unsafe excerpts are omitted. See [contract](docs/MESSAGE_PREVIEW.md).
+- Removes prompts, full responses, files, credentials, tool payloads, and personal
   data before an event can enter the spool.
 - Stores pending events in a bounded, owner-only SQLite spool.
 - Uploads signed batches over outbound HTTPS after one-time enrollment.

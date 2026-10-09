@@ -1,3 +1,4 @@
+import { readMessagePreview } from "./message-preview.js";
 import { knownCause } from "./causes.js";
 const DETAIL_KEYS = new Set(["code", "reason", "status", "component", "operation", "capability", "attempt", "count", "durationMs", "exitCode", "httpStatus", "recoverable", "expected"]);
 const CORRELATION_KEYS = new Set(["sessionId", "turnId", "toolCallId", "messageId", "parentEventId"]);
@@ -49,7 +50,9 @@ export function sanitizeTelemetryEvent(input) {
     if (!SOURCE_KINDS.has(source.kind)) throw new SanitizationError("invalid-source-kind");
     if (!EVENT_TYPES.has(input.type)) throw new SanitizationError("invalid-event-type");
     if (!OUTCOMES.has(input.outcome)) throw new SanitizationError("invalid-outcome");
+    const messagePreview = readMessagePreview(() => input.messagePreview, input.type);
     return {
+      ...(messagePreview ? { messagePreview } : {}),
       schema: "sidewisp.telemetry.v1",
       eventId: safeString(input.eventId, "event-id"),
       installationId: safeString(input.installationId, "installation-id"),

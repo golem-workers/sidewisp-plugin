@@ -1,3 +1,7 @@
+## 0.2.57 — optional safe message preview
+
+Agent activity can include a single-line messagePreview of at most 160 characters. Missing or sensitive messages omit the field. Work statuses, notifications, native cron and connection semantics are unchanged. Requires the compatible API release before activation.
+
 ## 0.2.56 — native SQLite cron inventory
 
 - Read the authoritative OpenClaw shared SQLite cron partition read-only, including WAL and runtime state.
