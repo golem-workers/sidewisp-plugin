@@ -8,11 +8,11 @@ function fixture(t){const root=mkdtempSync(path.join(os.tmpdir(),'manager-test-'
 test('repeated preparation preserves owner unit and config additions',t=>{const f=fixture(t);const result=installUpdateManager(f.options);const unit=path.join(f.root,'.config/systemd/user',result.unit);const customized=readFileSync(unit,'utf8')+'\n# owner policy\n[Service]\nMemoryMax=512M\n';writeFileSync(unit,customized);const config=JSON.parse(readFileSync(result.configFile));config.ownerSetting=true;writeFileSync(result.configFile,JSON.stringify(config));installUpdateManager(f.options);assert.equal(readFileSync(unit,'utf8'),customized);assert.equal(JSON.parse(readFileSync(result.configFile)).ownerSetting,true);});
 test('changed manager entry point fails closed without replacing unit',t=>{const f=fixture(t);const result=installUpdateManager(f.options);const unit=path.join(f.root,'.config/systemd/user',result.unit);const customized=readFileSync(unit,'utf8').replace(/^ExecStart=.*$/m,'ExecStart=/owner/custom-manager');writeFileSync(unit,customized);f.calls.length=0;assert.throws(()=>installUpdateManager(f.options),/MANAGER_UNIT_REVIEW_REQUIRED/);assert.equal(readFileSync(unit,'utf8'),customized);assert.equal(f.calls.length,0);});
 
-function oldManager(f,result){const current=path.join(f.root,'sidewisp/manager/current');const old=path.join(f.root,'sidewisp/manager/releases/0.2.38');mkdirSync(old,{recursive:true});writeFileSync(path.join(old,'package.json'),JSON.stringify({version:'0.2.38'}));unlinkSync(current);symlinkSync(old,current);return {current,old,unit:path.join(f.root,'.config/systemd/user',result.unit)};}
+function oldManager(f,result,version='0.2.38'){const current=path.join(f.root,'sidewisp/manager/current');const old=path.join(f.root,'sidewisp/manager/releases',version);mkdirSync(old,{recursive:true});writeFileSync(path.join(old,'package.json'),JSON.stringify({version}));unlinkSync(current);symlinkSync(old,current);return {current,old,unit:path.join(f.root,'.config/systemd/user',result.unit)};}
 test('explicit manager upgrade switches only private code and preserves owner config/unit',t=>{
  const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result);
  const unit=readFileSync(prior.unit,'utf8')+'\n# owner override\n';writeFileSync(prior.unit,unit);const config=readFileSync(result.configFile,'utf8');f.calls.length=0;
- const after=installUpdateManager({...f.options,upgrade:true});assert.equal(after.managerVersion,'0.2.61');assert.notEqual(realpathSync(prior.current),prior.old);
+ const after=installUpdateManager({...f.options,upgrade:true});assert.equal(after.managerVersion,'0.2.62');assert.notEqual(realpathSync(prior.current),prior.old);
  assert.equal(readFileSync(prior.unit,'utf8'),unit);assert.equal(readFileSync(result.configFile,'utf8'),config);
  assert.deepEqual(f.calls.filter(c=>c[0]==='systemctl').map(c=>c[1]),[['--user','stop',result.unit],['--user','daemon-reload'],['--user','enable','--now',result.unit]]);
 });
@@ -29,4 +29,12 @@ test('failed new-manager activation restores the old private code without touchi
  const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result);const calls=[];
  assert.throws(()=>installUpdateManager({...f.options,upgrade:true,run:(cmd,args)=>{calls.push(args);if(args.includes('enable'))throw Error('activation refused');}}),/activation refused/);
  assert.equal(realpathSync(prior.current),prior.old);assert.deepEqual(calls.at(-1),['--user','start',result.unit]);assert.equal(calls.some(c=>c.some(a=>String(a).includes('gateway'))),false);
+});
+
+test('published 0.2.61 manager upgrades to the recovery release',t=>{
+ const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result,'0.2.61');f.calls.length=0;
+ const after=installUpdateManager({...f.options,upgrade:true});
+ assert.equal(after.managerVersion,'0.2.62');assert.notEqual(realpathSync(prior.current),prior.old);
+ assert.equal(readFileSync(path.join(prior.current,'src/update/current-release.js'),'utf8'),readFileSync(new URL('../src/update/current-release.js',import.meta.url),'utf8'));
+ assert.equal(f.calls.filter(c=>c[0]==='systemctl'&&c[1].includes('stop')).length,1);
 });
