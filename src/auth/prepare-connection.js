@@ -1,6 +1,6 @@
 import { isRetainedWork } from '../update/hot-update.js';
 // Host-authorized operations are injected by the CLI; no policy fallback here.
-export async function prepareConnection({ targetVersion, endpoint, updateOnly = false, inspect, install, upgrade, activate, coldActivate, begin, persist, ensureManager = async () => {}, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxReadinessAttempts = 60, maxIdleAttempts = 120, expiresAtMs, now = Date.now }) {
+export async function prepareConnection({ targetVersion, endpoint, updateOnly = false, inspect, install, upgrade, activate, coldActivate, begin, persist, ensureManager = async () => {}, prepareRuntime, finalizeRuntime = async () => {}, runtimeNeedsActivation = async () => true, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxReadinessAttempts = 60, maxIdleAttempts = 120, expiresAtMs, now = Date.now }) {
   if (!Number.isInteger(maxReadinessAttempts) || maxReadinessAttempts < 1) throw new Error('invalid_readiness_attempts');
   const mark = async (stage, extra = {}) => persist({ stage, ...extra });
   const checkExpiry = () => {
@@ -24,6 +24,8 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
     const original = await inspect(); // null means confirmed absence, never a failed read
     if (original && original.endpoint !== endpoint) throw new Error('existing_endpoint_mismatch');
     if (!original && updateOnly) throw new Error('existing_plugin_required');
+    let runtimePrepared;
+    if (prepareRuntime) { await mark('preparing_runtime'); runtimePrepared = await whenIdle(prepareRuntime); }
     if (!original) {
       await mark('installing');
       await whenIdle(install);
@@ -32,6 +34,10 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
     } else if (original.version !== targetVersion) {
       await mark('upgrading');
       await upgrade();
+    }
+    if ((runtimePrepared?.activationRequired ?? runtimePrepared?.changed) && await runtimeNeedsActivation(runtimePrepared)) {
+      if (typeof coldActivate !== 'function') throw Error('cold_activation_required');
+      await mark('activating_runtime'); await whenIdle(coldActivate);
     }
     await mark('verifying');
     let ready;
@@ -56,6 +62,7 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
     }
     if (!matches(ready)) throw new Error('collector_not_ready');
     await ensureManager();
+    if (runtimePrepared) await finalizeRuntime(runtimePrepared);
     if (updateOnly) { await mark('completed', { bindingPreserved: true }); return { status: 'completed' }; }
     checkExpiry();
     await mark('requesting_approval');

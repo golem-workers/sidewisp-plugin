@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {prepareRuntimeCompanion,finalizeRuntimeCompanion} from '../src/auth/runtime-companion.js';
 // Run from an extracted, SHA-256-verified release. Public invitation only;
 // credentials and approval proof never appear in arguments, logs or output.
 import {execFileSync,spawnSync} from 'node:child_process';
@@ -34,7 +35,7 @@ if(options.enqueue){
   const client=createDeviceAuthorizationClient({endpoint:endpoint.origin,stateDir});
   const result=await prepareConnection({targetVersion:version,endpoint:endpoint.origin,updateOnly:options.updateOnly,
    expiresAtMs:options['expires-at-ms'] === undefined ? undefined : Number(options['expires-at-ms']),
-   inspect:status,persist:s=>writeState({status:s.stage,...s}),
+   inspect:status,prepareRuntime:()=>prepareRuntimeCompanion({run,stateDir,configPath:process.env.OPENCLAW_CONFIG_PATH}),finalizeRuntime:prepared=>finalizeRuntimeCompanion({stateDir,prepared}),runtimeNeedsActivation:prepared=>JSON.parse(run(['gateway','status','--no-probe','--json'])).service.runtime.pid===prepared.gatewayPid,persist:s=>writeState({status:s.stage,...s}),
    // Do not wait for collector readiness before configuring a fresh install.
    // Host retained-work refusal stops this attempt; it never permits bypass.
    install:async()=>run(['plugins','install',options.archive,'--force','--accept-capabilities']),
