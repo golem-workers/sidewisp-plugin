@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {prepareConnection} from '../src/auth/prepare-connection.js';
+const good={version:'0.2.39',endpoint:'https://example.test',enabled:true,running:true,connectionReadiness:{ready:true}};
+function fixture(first=good){let reads=0;const calls=[];return {calls,options:{targetVersion:good.version,endpoint:good.endpoint,sleep:async()=>{},inspect:async()=>{calls.push('inspect');return reads++?good:first;},install:async()=>calls.push('install'),activate:async()=>calls.push('activate'),upgrade:async()=>calls.push('upgrade'),begin:async()=>{calls.push('begin');return{id:'public',expiresAtMs:1};},persist:async()=>{}}};}
+test('ready installed collector connects without reinstall or config mutation',async()=>{const f=fixture();assert.equal((await prepareConnection(f.options)).status,'approval_pending');assert.deepEqual(f.calls,['inspect','inspect','begin']);});
+test('confirmed absence installs then activates then verifies before begin',async()=>{const f=fixture(null);await prepareConnection(f.options);assert.deepEqual(f.calls,['inspect','install','activate','inspect','begin']);});
+test('old version uses upgrade path only',async()=>{const f=fixture({...good,version:'0.2.33'});await prepareConnection(f.options);assert.deepEqual(f.calls,['inspect','upgrade','inspect','begin']);});
+test('RPC refusal never becomes absence or installation',async()=>{const f=fixture();f.options.inspect=async()=>{throw Error('denied');};await assert.rejects(prepareConnection(f.options),/denied/);assert.deepEqual(f.calls,[]);});
+test('endpoint mismatch preserves existing configuration',async()=>{const f=fixture({...good,endpoint:'https://other.test'});await assert.rejects(prepareConnection(f.options),/existing_endpoint_mismatch/);assert.deepEqual(f.calls,['inspect']);});
+test('install failure cannot request approval or fall back',async()=>{const f=fixture(null);f.options.install=async()=>{throw Error('policy_denied');};await assert.rejects(prepareConnection(f.options),/policy_denied/);assert.deepEqual(f.calls,['inspect']);});
+test('unready service cannot request approval',async()=>{const f=fixture();f.options.inspect=async()=>({...good,running:false});await assert.rejects(prepareConnection(f.options),/collector_not_ready/);assert.deepEqual(f.calls,[]);});
+test('update only never requests account authorization',async()=>{const f=fixture();f.options.updateOnly=true;await prepareConnection(f.options);assert.deepEqual(f.calls,['inspect','inspect']);});
+
+test('delayed readiness precedes authorization',async()=>{const f=fixture();let n=0;f.options.inspect=async()=>++n<4?{...good,running:false}:good;await prepareConnection(f.options);assert.equal(n,4);assert.deepEqual(f.calls,['begin']);});
+test('update only maintains manager without authorization',async()=>{const f=fixture();f.options.updateOnly=true;f.options.ensureManager=async()=>f.calls.push('manager');await prepareConnection(f.options);assert.deepEqual(f.calls,['inspect','inspect','manager']);});
+test('manager refusal prevents authorization',async()=>{const f=fixture();f.options.ensureManager=async()=>{throw Error('manager_denied');};await assert.rejects(prepareConnection(f.options),/manager_denied/);assert.ok(!f.calls.includes('begin'));});
+
+test('expired invitation stops before inspection',async()=>{const f=fixture();f.options.expiresAtMs=100;f.options.now=()=>100;await assert.rejects(prepareConnection(f.options),/fresh_invitation_required/);assert.deepEqual(f.calls,[]);});
+test('expiry during manager setup prevents begin',async()=>{const f=fixture();let time=1;f.options.expiresAtMs=2;f.options.now=()=>time;f.options.ensureManager=async()=>{time=2;};await assert.rejects(prepareConnection(f.options),/fresh_invitation_required/);assert.ok(!f.calls.includes('begin'));});
+test('binding replacement stops authorization',async()=>{const f=fixture({...good,installation:{installationId:'original'}});await assert.rejects(prepareConnection(f.options),/existing_binding_changed/);assert.ok(!f.calls.includes('begin'));});
+test('readiness budget cannot skip verification',async()=>{for(const maxReadinessAttempts of [0,-1,NaN,1.5]){const f=fixture();f.options.maxReadinessAttempts=maxReadinessAttempts;await assert.rejects(prepareConnection(f.options),/invalid_readiness_attempts/);assert.deepEqual(f.calls,[]);}});
+test('transport failure writes sanitized terminal state',async()=>{const f=fixture();const states=[];f.options.persist=async s=>states.push(s);f.options.inspect=async()=>{throw Error('private credential value');};await assert.rejects(prepareConnection(f.options));assert.deepEqual(states.at(-1),{stage:'blocked',reason:'preparation_failed'});assert.doesNotMatch(JSON.stringify(states),/credential/);});
+test('truthy nonboolean readiness does not authorize',async()=>{const f=fixture();f.options.maxReadinessAttempts=1;f.options.inspect=async()=>({...good,enabled:'true'});await assert.rejects(prepareConnection(f.options),/collector_not_ready/);assert.ok(!f.calls.includes('begin'));});
+
+test('fresh install retries only host retained work then continues',async()=>{const f=fixture(null);let attempts=0;f.options.install=async()=>{if(++attempts<3)throw Error('still has active retained work; retry after the work finishes.');};await prepareConnection(f.options);assert.equal(attempts,3);assert.ok(f.calls.includes('begin'));});
+test('idle wait stops when invitation expires',async()=>{const f=fixture(null);let time=1;f.options.now=()=>time;f.options.expiresAtMs=2;f.options.install=async()=>{throw Error('still has active retained work; retry after the work finishes.');};f.options.sleep=async()=>{time=2;};await assert.rejects(prepareConnection(f.options),/fresh_invitation_required/);assert.ok(!f.calls.includes('begin'));});
+test('retained work retry budget is bounded',async()=>{const f=fixture(null);let attempts=0;f.options.maxIdleAttempts=2;f.options.install=async()=>{attempts++;throw Error('still has active retained work; retry after the work finishes.');};await assert.rejects(prepareConnection(f.options),/retained work/);assert.equal(attempts,2);assert.ok(!f.calls.includes('begin'));});
+
+test('cold activation completes before approval and never repeats install or reload',async()=>{
+ const f=fixture(null);let ready=false,activations=0;
+ f.options.inspect=async()=>ready?good:{...good,connectionReadiness:{ready:false,activationRequired:true}};
+ f.options.coldActivate=async()=>{activations++;ready=true;};
+ await prepareConnection(f.options);assert.equal(activations,1);assert.deepEqual(f.calls,['begin']);
+});
+test('busy cold activation waits but genuine denial stops authorization',async()=>{
+ for(const denied of [false,true]){
+  const f=fixture();let ready=false,n=0;
+  f.options.inspect=async()=>ready?good:{...good,connectionReadiness:{ready:false,activationRequired:true}};
+  f.options.coldActivate=async()=>{n++;if(denied)throw Error('policy_denied');if(n===1)throw Error('host_activation_busy');ready=true;};
+  if(denied){await assert.rejects(prepareConnection(f.options),/policy_denied/);assert.ok(!f.calls.includes('begin'));assert.equal(n,1);}else{await prepareConnection(f.options);assert.equal(n,2);}
+ }
+});

@@ -46,6 +46,7 @@ Environment=SIDEWISP_INSTALL_ROOT=$install_root
 Environment=SIDEWISP_SERVICE_MANAGER=systemd-user
 Environment=HERMES_SOURCE_DIR=$runtime_dir
 Environment=SIDEWISP_HEARTBEAT_INTERVAL_MS=30000
+Environment=SIDEWISP_USAGE_INTERVAL_MS=300000
 ExecStart=$(command -v node) $install_root/current/scripts/hermes-canary-daemon.mjs
 Restart=always
 RestartSec=3
@@ -64,7 +65,9 @@ WantedBy=default.target
 EOF
   chmod 600 "$unit_dir/sidewisp-hermes.service"
   systemctl --user daemon-reload
-  systemctl --user enable --now sidewisp-hermes.service
+  systemctl --user enable sidewisp-hermes.service
+  # Reload new credentials even when the collector was already running.
+  systemctl --user restart sidewisp-hermes.service
   systemctl --user is-active --quiet sidewisp-hermes.service
   echo "Sidewisp Hermes collector installed and running (systemd user service)."
 elif test "$(uname -s)" = "Darwin"; then
@@ -82,7 +85,8 @@ elif test "$(uname -s)" = "Darwin"; then
 <key>NODE_ENV</key><string>production</string><key>SIDEWISP_ENDPOINT</key><string>$endpoint</string>
 <key>SIDEWISP_STATE_DIR</key><string>$state_dir</string><key>HERMES_SOURCE_DIR</key><string>$runtime_dir</string>
 <key>SIDEWISP_INSTALL_ROOT</key><string>$install_root</string><key>SIDEWISP_SERVICE_MANAGER</key><string>launch-agent</string>
-<key>SIDEWISP_HEARTBEAT_INTERVAL_MS</key><string>30000</string></dict>
+<key>SIDEWISP_HEARTBEAT_INTERVAL_MS</key><string>30000</string>
+<key>SIDEWISP_USAGE_INTERVAL_MS</key><string>300000</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>StandardOutPath</key><string>$state_dir/collector.log</string>
 <key>StandardErrorPath</key><string>$state_dir/collector.error.log</string>

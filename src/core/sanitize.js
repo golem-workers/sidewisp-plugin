@@ -1,3 +1,5 @@
+import { readMessagePreview } from "./message-preview.js";
+import { knownCause } from "./causes.js";
 const DETAIL_KEYS = new Set(["code", "reason", "status", "component", "operation", "capability", "attempt", "count", "durationMs", "exitCode", "httpStatus", "recoverable", "expected"]);
 const CORRELATION_KEYS = new Set(["sessionId", "turnId", "toolCallId", "messageId", "parentEventId"]);
 const SAFE_TEXT = /^[A-Za-z0-9][A-Za-z0-9._:/+\-]{0,255}$/;
@@ -7,7 +9,7 @@ const SOURCE_KINDS = new Set(["hook", "log", "state", "health", "collector"]);
 const OUTCOMES = new Set(["info", "success", "failure", "degraded"]);
 const EVENT_TYPES = new Set([
   "runtime.started", "runtime.stopped", "runtime.restarted", "runtime.crashed", "gateway.connected", "gateway.disconnected",
-  "turn.started", "turn.completed", "turn.failed", "turn.timeout", "turn.cancelled", "tool.started", "tool.completed", "tool.failed", "tool.timeout", "tool.cancelled",
+  "turn.started", "turn.progress", "turn.completed", "turn.failed", "turn.timeout", "turn.cancelled", "tool.started", "tool.completed", "tool.failed", "tool.timeout", "tool.cancelled",
   "message.received", "message.delivered", "message.rejected", "message.failed", "provider.auth_failed", "provider.rate_limited", "provider.unavailable",
   "queue.stuck", "queue.recovered", "context.exhausted", "config.invalid", "plugin.failed", "health.snapshot", "collector.started", "collector.stopped", "collector.degraded",
 ]);
@@ -48,7 +50,9 @@ export function sanitizeTelemetryEvent(input) {
     if (!SOURCE_KINDS.has(source.kind)) throw new SanitizationError("invalid-source-kind");
     if (!EVENT_TYPES.has(input.type)) throw new SanitizationError("invalid-event-type");
     if (!OUTCOMES.has(input.outcome)) throw new SanitizationError("invalid-outcome");
+    const messagePreview = readMessagePreview(() => input.messagePreview, input.type);
     return {
+      ...(messagePreview ? { messagePreview } : {}),
       schema: "sidewisp.telemetry.v1",
       eventId: safeString(input.eventId, "event-id"),
       installationId: safeString(input.installationId, "installation-id"),
@@ -60,7 +64,11 @@ export function sanitizeTelemetryEvent(input) {
       type: safeString(input.type, "type"),
       outcome: safeString(input.outcome, "outcome"),
       correlation: pick(input.correlation, CORRELATION_KEYS),
-      details: pick(input.details, DETAIL_KEYS),
+      details: {
+        ...pick(input.details, DETAIL_KEYS),
+        ...(knownCause(input.details?.causeCode) ? {causeCode: input.details.causeCode} : {}),
+        ...(['failure','recovered','observing'].includes(input.details?.signalState) ? {signalState:input.details.signalState} : {}),
+      },
     };
   } catch (error) {
     if (error instanceof SanitizationError) throw error;

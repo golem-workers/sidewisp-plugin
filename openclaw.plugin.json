@@ -1,7 +1,7 @@
 {
   "id": "sidewisp",
   "name": "Sidewisp",
-  "description": "Deterministic, zero-LLM health and failure telemetry for agent runtimes",
+  "description": "Runtime monitoring and Sidewisp-admin scheduled OpenClaw tasks",
   "activation": {
     "onStartup": true
   },
@@ -34,6 +34,13 @@
         "maximum": 86400000,
         "default": 3600000,
         "description": "Maximum interval before an unchanged snapshot is refreshed"
+      },
+      "usageIntervalMs": {
+        "type": "integer",
+        "minimum": 60000,
+        "maximum": 86400000,
+        "default": 300000,
+        "description": "Privacy-safe token usage collection cadence in milliseconds"
       }
     }
   },
@@ -45,5 +52,10 @@
     "endpoint": {
       "label": "Ingestion endpoint"
     }
+  },
+  "contracts": {
+    "tools": [
+      "sidewisp_connect"
+    ]
   }
 }

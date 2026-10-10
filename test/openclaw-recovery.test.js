@@ -3,7 +3,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { discoverOpenClawSources, parseOpenClawRecord, recoverJsonl, stableOpenClawEventId } from "../src/adapters/openclaw/recovery.js";
+import {
+  discoverOpenClawSources,
+  isOpenClawHookRecoveryFact,
+  parseOpenClawRecord,
+  recoverJsonl,
+  stableOpenClawEventId,
+} from "../src/adapters/openclaw/recovery.js";
 
 test("version-aware discovery reports unsupported runtimes explicitly", async () => {
   const result = await discoverOpenClawSources("/missing", "2025.1.0");
@@ -16,6 +22,14 @@ test("typed parser ignores generic WARN/ERROR and raw content", () => {
   assert.deepEqual(parseOpenClawRecord({ event: "tool_end", outcome: "failure", toolCallId: "tool-1", result: "private" }), {
     kind: "tool_end", outcome: "failure", correlation: { toolCallId: "tool-1" }, durationMs: undefined,
   });
+});
+
+test("JSONL recovery cannot become a second lifecycle source", () => {
+  assert.equal(isOpenClawHookRecoveryFact(parseOpenClawRecord({ event: "agent_start", runId: "run" })), false);
+  assert.equal(isOpenClawHookRecoveryFact(parseOpenClawRecord({ event: "agent_start" })), false);
+  assert.equal(isOpenClawHookRecoveryFact(parseOpenClawRecord({ event: "tool_end", toolCallId: "tool" })), false);
+  assert.equal(isOpenClawHookRecoveryFact(parseOpenClawRecord({ event: "message_sent", messageId: "message" })), true);
+  assert.equal(isOpenClawHookRecoveryFact(parseOpenClawRecord({ event: "gateway_stop" })), true);
 });
 
 test("bounded JSONL recovery handles partial lines, rotation, and hostile input", async (t) => {

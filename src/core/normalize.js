@@ -1,3 +1,5 @@
+import { readMessagePreview } from "./message-preview.js";
+import { classifyRuntimeCause, knownCause } from "./causes.js";
 import { sanitizeTelemetryEvent } from "./sanitize.js";
 
 export const RUNTIME_MAPPING_VERSION = "sidewisp.runtime-map.v1";
@@ -5,7 +7,7 @@ export const RUNTIME_MAPPING_VERSION = "sidewisp.runtime-map.v1";
 export const RUNTIME_MAPPINGS = Object.freeze({
   openclaw: Object.freeze({
     runtime_start: "runtime-start", runtime_crash: "runtime-crash", gateway_up: "gateway-up", gateway_down: "gateway-down",
-    turn_start: "turn-start", turn_end: "turn-end", tool_start: "tool-start", tool_end: "tool-end",
+    turn_start: "turn-start", turn_end: "turn-end", turn_progress: "turn-progress", tool_start: "tool-start", tool_end: "tool-end",
     message_received: "message-received", delivery_end: "delivery-end", provider_error: "provider-error",
     config_invalid: "config-invalid", queue_stuck: "queue-stuck", context_exhausted: "context-exhausted",
   }),
@@ -35,6 +37,7 @@ const FIXED = Object.freeze({
   "gateway-up": ["gateway.connected", "success"], "gateway-down": ["gateway.disconnected", "failure"],
   "config-invalid": ["config.invalid", "failure"], "queue-stuck": ["queue.stuck", "failure"],
   "context-exhausted": ["context.exhausted", "failure"],
+  "turn-progress": ["turn.progress", "info"],
   "turn-start": ["turn.started", "info"], "tool-start": ["tool.started", "info"],
   "message-received": ["message.received", "info"],
 });
@@ -69,14 +72,18 @@ export function normalizeRuntimeEvent(runtimeKind, input, envelope) {
     const fact = variableFact(semantic, input) ?? FIXED[semantic];
     if (!fact) return { event: null, diagnostic: localDiagnostic("unmapped-runtime-event", runtimeKind) };
     const [type, outcome, factDetails = {}] = fact;
+    const recovery = outcome === "success" && ["recovered", "observing"].includes(input.signalState) && knownCause(input.causeCode);
+    const causeCode = recovery || (["failure","degraded"].includes(outcome) && !input.expected ? classifyRuntimeCause(input) : null);
     const event = sanitizeTelemetryEvent({
       ...envelope,
       runtime: { ...envelope.runtime, kind: runtimeKind },
       source: { ...envelope.source, adapterVersion: envelope.source.adapterVersion },
       type, outcome,
+      messagePreview: readMessagePreview(() => input.messagePreview, type),
       correlation: input.correlation ?? {},
       details: {
         ...factDetails,
+        ...(causeCode ? {causeCode, signalState:recovery ? input.signalState : 'failure'} : {}),
         code: input.code,
         component: input.component,
         operation: input.operation,

@@ -1,58 +1,45 @@
-# Sidewisp Plugin v0.2.0
+## 0.2.62 — activation-only manager recovery
 
-Public open-source release of the Sidewisp collector plugin.
+- Persist staged/mutated intent before cold activation of an already installed target, so an interrupted helper can enter the existing recovery path without reinstalling the package.
+- Deliver through an explicit private-manager upgrade from the new archive; upgrading the collector alone does not replace the independent manager. Published 0.2.61 artifacts remain unchanged.
+- Idle admission, terminal-failure revision checks, binding verification and command permissions remain unchanged.
 
-## License change
+## 0.2.61 — attachment send followed by ordinary automatic final
 
-Beginning with this release, Sidewisp Plugin is licensed under the GNU Affero
-General Public License v3.0 (`AGPL-3.0-only`) instead of MIT.
-Commercial use and modification are permitted under AGPLv3. Copyleft and
-corresponding-source obligations apply when covered versions are conveyed or
-AGPLv3 section 13 applies. Earlier releases remain governed by the license
-shipped with those releases.
+- A confirmed source `message(send)` without assistant text no longer closes work implicitly. It records progress until the ordinary automatic final arrives; explicit `final=true` and legacy implicit text finals retain their semantics.
+- Completion still uses exact inbound/work correlation and existing terminal deduplication. No event replay, transcript reconstruction, or delivery-derived completion.
+- Message-preview privacy policy is unchanged: sensitive text still completes without a preview; attachments, captions, targets and tool results are not inspected.
 
-The collector remains free to use, modify, and redistribute under AGPLv3.
-Sidewisp's hosted analysis, alerts, and recovery workflows remain separate
-managed services.
+## 0.2.60 — exact ordinary automatic-final correlation
 
-## Documentation
+- Resolve final reply observers using their captured host inbound message identity when ordinary dispatch has no runId. Never infer completion from message delivery or the latest session task.
+- Preserve work statuses, terminal deduplication, safe preview filtering, binding, cron and notification contracts.
+- Companion scoped OpenClaw hotfix forwards the existing Telegram session key to plugin message-delivery observers; it does not create lifecycle events.
 
-- Added reproducible OpenClaw and Hermes installation guides.
-- Added Codex and Claude Code command-hook adapters, installers, removal
-  scripts, and runtime guides.
-- Documented the boundary between the plugin and the managed service.
-- Added explicit licensing, security-reporting, and contribution guidance.
-- Added package metadata and package-content gates for public distribution.
+## 0.2.59 — complete ordinary-name/path qualification
 
-## Contracts and compatibility
+- Qualify readable CamelCase identifiers and path components before the opaque-key heuristic; retain known-key, assignment and random-key protection.
+- Supersedes targeted 0.2.58 before working-agent activation.
 
-- Telemetry contract: `sidewisp.telemetry.v1`; no raw prompts, responses,
-  files, credentials, or tool payloads.
-- Spool schema: version 1; credentials and pending events are stored outside
-  the package and survive reinstall or rollback.
-- OpenClaw: verified with OpenClaw 2026.7.1-2 and plugin API 2026.7.1.
-- Hermes: verified against the upstream hook, state, crash, and recovery
-  interfaces documented in `COMPATIBILITY.md`.
-- Codex: verified against CLI 0.145.0 and its stable lifecycle-hook contract.
-- Claude Code: verified against the official 2.1.218 lifecycle-hook contract.
+## 0.2.58 — ordinary reply previews
 
-## Upgrade and rollback
+- Preserve ordinary words, cron names, paths and links in message previews while omitting credential values, known token formats and opaque keys.
+- Keep plugin and API preview policy aligned. Automatic final observation also requires the separately published OpenClaw 2026.9.8 reply-observer hotfix.
+- No work status, binding, cron, or notification changes.
 
-Install the immutable release tag:
+## 0.2.57 — optional safe message preview
 
-```bash
-openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@v0.2.0 --force
-```
+Agent activity can include a single-line messagePreview of at most 160 characters. Missing or sensitive messages omit the field. Work statuses, notifications, native cron and connection semantics are unchanged. Requires the compatible API release before activation.
 
-Before changing versions, back up the plugin state directory. Roll back by
-installing the previously pinned release without deleting that directory.
-Rolling back to `v0.1.20` also rolls back to that release's MIT license.
+## 0.2.56 — native SQLite cron inventory
 
-## Verification
+- Read the authoritative OpenClaw shared SQLite cron partition read-only, including WAL and runtime state.
+- Preserve legacy JSON support only when SQLite is absent; corrupted or incomplete inventories fail closed.
+- Observe SQLite changes without uploading unrelated shared-state changes.
+- Preserve credentials, binding, scheduler and agent configuration.
 
-- The release archive is accompanied by `SHA256SUMS`.
-- GitHub Actions signs build provenance for the exact archive using OIDC and
-  Sigstore.
-- Verify provenance with
-  `gh attestation verify <archive> --repo golem-workers/sidewisp-plugin`.
-- Report security concerns privately through the repository Security tab.
+# Sidewisp Plugin v0.2.54
+
+Empty release for measuring event-driven automatic update latency.
+Runtime code and behavior are unchanged from immutable v0.2.53.
+Independent update manager remains pinned to v0.2.53; no re-bootstrap is required.

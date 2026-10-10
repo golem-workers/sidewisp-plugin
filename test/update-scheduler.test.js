@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { validUpdateDirective } from "../src/update/directive.js";
+import { isNewerVersion, validUpdateDirective } from "../src/update/directive.js";
+import { createUpdateScheduler } from "../src/update/scheduler.js";
 import { createHermesUpdateScheduler } from "../src/update/hermes-scheduler.js";
 
 const directive = {
@@ -17,7 +20,137 @@ test("update directives accept immutable SemVer releases only", () => {
   assert.equal(validUpdateDirective(directive), true);
   assert.equal(validUpdateDirective({ ...directive, targetSpec: "git:github.com/golem-workers/sidewisp-plugin@main" }), false);
   assert.equal(validUpdateDirective({ ...directive, targetSpec: "git:github.com/attacker/plugin@v0.1.15" }), false);
+  assert.equal(validUpdateDirective({ ...directive, targetVersion: "0.1.16" }), false);
+  assert.equal(validUpdateDirective({ ...directive, targetVersion: "01.1.15", targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v01.1.15" }), false);
+  assert.equal(validUpdateDirective({ ...directive, targetVersion: "0.1.15-rc.01", targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.1.15-rc.01" }), false);
+  assert.equal(validUpdateDirective({ ...directive, targetVersion: "0.1.15-rc..1", targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.1.15-rc..1" }), false);
   assert.equal(validUpdateDirective({ ...directive, restartDelaySeconds: 0 }), false);
+});
+
+test("version ordering follows SemVer and rejects downgrades", () => {
+  assert.equal(isNewerVersion("0.2.17", "0.2.18"), false);
+  assert.equal(isNewerVersion("0.2.18", "0.2.18"), false);
+  assert.equal(isNewerVersion("0.2.19", "0.2.18"), true);
+  assert.equal(isNewerVersion("0.2.18", "0.2.18-rc.1"), true);
+  assert.equal(isNewerVersion("0.2.18-rc.2", "0.2.18-rc.10"), false);
+  assert.equal(isNewerVersion("0.2.18-rc.10", "0.2.18-rc.2"), true);
+});
+
+test("OpenClaw scheduler ignores a stable-channel downgrade", () => {
+  const calls = [];
+  const scheduler = createUpdateScheduler({
+    stateDir: "/tmp/sidewisp-state",
+    currentVersion: "0.2.18",
+    logger: { info() {} },
+    spawnImpl(...args) {
+      calls.push(args);
+      return { unref() {} };
+    },
+  });
+  assert.equal(scheduler.schedule({
+    ...directive,
+    targetVersion: "0.2.17",
+    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.17",
+  }), false);
+  assert.equal(scheduler.schedule({
+    ...directive,
+    targetVersion: "0.2.19",
+    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.19",
+  }), true);
+  assert.equal(calls.length, 1);
+});
+
+test("OpenClaw scheduler escapes the Gateway cgroup through a transient user unit", () => {
+  const calls = [];
+  const previousInvocationId = process.env.INVOCATION_ID;
+  const previousSecret = process.env.SIDEWISP_SETUP_TOKEN;
+  process.env.INVOCATION_ID = "gateway-invocation";
+  process.env.SIDEWISP_SETUP_TOKEN = "must-not-be-forwarded";
+  try {
+    const scheduler = createUpdateScheduler({
+      stateDir: "/tmp/sidewisp-state",
+      currentVersion: "0.2.18",
+      logger: { info() {} },
+      spawnImpl(command, args, options) {
+        calls.push({ command, args, options });
+        return { unref() {} };
+      },
+    });
+    assert.equal(scheduler.schedule({
+      ...directive,
+      targetVersion: "0.2.20",
+      targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.20",
+    }), true);
+  } finally {
+    if (previousInvocationId === undefined) delete process.env.INVOCATION_ID;
+    else process.env.INVOCATION_ID = previousInvocationId;
+    if (previousSecret === undefined) delete process.env.SIDEWISP_SETUP_TOKEN;
+    else process.env.SIDEWISP_SETUP_TOKEN = previousSecret;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "systemd-run");
+  assert.equal(calls[0].args.includes("--user"), true);
+  assert.equal(calls[0].args.includes("--collect"), true);
+  assert.match(calls[0].args.find(arg => arg.startsWith("--unit=")), /^--unit=sidewisp-update-0_2_20-[a-f0-9]{12}$/);
+  assert.equal(calls[0].args.includes(process.execPath), true);
+  assert.equal(path.basename(calls[0].args.at(-2)), "openclaw-update-helper.mjs");
+  assert.equal(JSON.stringify(calls[0]).includes("must-not-be-forwarded"), false);
+});
+
+test("OpenClaw scheduler does not repeat the same update after a Gateway restart", (t) => {
+  const stateDir = path.join(os.tmpdir(), `sidewisp-update-state-${process.pid}-${Date.now()}`);
+  mkdirSync(path.join(stateDir, "sidewisp"), { recursive: true });
+  const stateFile = path.join(stateDir, "sidewisp", "update-status.json");
+  writeFileSync(stateFile, JSON.stringify({
+    targetVersion: "0.2.20",
+    status: "completed",
+    updatedAt: new Date().toISOString(),
+  }));
+  t.after(() => import("node:fs").then(({ rmSync }) => rmSync(stateDir, { recursive: true, force: true })));
+  const calls = [];
+  let restarted;
+  for (let gatewayStart = 0; gatewayStart < 3; gatewayStart += 1) {
+    restarted = createUpdateScheduler({
+      stateDir,
+      currentVersion: "0.2.19",
+      logger: { info() {} },
+      spawnImpl(...args) { calls.push(args); return { unref() {} }; },
+    });
+    assert.equal(restarted.schedule({
+      ...directive,
+      targetVersion: "0.2.20",
+      targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.20",
+    }), false);
+  }
+  assert.equal(calls.length, 0);
+  assert.equal(restarted.status().lastAttempt.status, "completed");
+});
+
+test("OpenClaw scheduler recovers only a stale pre-install idle wait", (t) => {
+  const stateDir = path.join(os.tmpdir(), `sidewisp-update-stale-${process.pid}-${Date.now()}`);
+  mkdirSync(path.join(stateDir, "sidewisp"), { recursive: true });
+  const stateFile = path.join(stateDir, "sidewisp", "update-status.json");
+  writeFileSync(stateFile, JSON.stringify({
+    targetVersion: "0.2.20",
+    status: "waiting_for_idle",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  }));
+  t.after(() => import("node:fs").then(({ rmSync }) => rmSync(stateDir, { recursive: true, force: true })));
+  const calls = [];
+  const restarted = createUpdateScheduler({
+    stateDir,
+    currentVersion: "0.2.19",
+    now: () => Date.parse("2026-01-01T00:03:00.000Z"),
+    logger: { info() {} },
+    spawnImpl(...args) { calls.push(args); return { unref() {} }; },
+  });
+  assert.equal(restarted.schedule({
+    ...directive,
+    targetVersion: "0.2.20",
+    targetSpec: "git:github.com/golem-workers/sidewisp-plugin@v0.2.20",
+  }), true);
+  assert.equal(calls.length, 1);
 });
 
 test("Hermes scheduler launches one detached helper with bounded non-secret state", () => {
@@ -46,4 +179,16 @@ test("Hermes scheduler launches one detached helper with bounded non-secret stat
   assert.equal(payload.sha256, "a".repeat(64));
   assert.equal(Object.keys(calls[0].options.env).includes("SIDEWISP_SETUP_TOKEN"), false);
   assert.equal(child.unrefCalled, true);
+});
+
+test('idle timeout can resume, but an interrupted rollback never retries automatically', async t => {
+ const {mkdtempSync,rmSync}=await import('node:fs');
+ const stateDir=mkdtempSync(path.join(os.tmpdir(),'sw-deferred-'));t.after(()=>rmSync(stateDir,{recursive:true,force:true}));
+ mkdirSync(path.join(stateDir,'sidewisp'));const file=path.join(stateDir,'sidewisp/update-status.json');let launches=0;
+ const scheduler=createUpdateScheduler({stateDir,currentVersion:'0.1.14',now:()=>600000,logger:{info(){}},spawnImpl:()=>{launches++;return{unref(){}};}});
+ writeFileSync(file,JSON.stringify({targetVersion:directive.targetVersion,status:'deferred',updatedAt:new Date(0).toISOString()}));
+ assert.equal(scheduler.schedule(directive),true);
+ writeFileSync(file,JSON.stringify({targetVersion:directive.targetVersion,status:'rolling_back',updatedAt:new Date(0).toISOString()}));
+ const other=createUpdateScheduler({stateDir,currentVersion:'0.1.14',now:()=>600000,logger:{info(){}},spawnImpl:()=>assert.fail('rollback repeated')});
+ assert.equal(other.schedule(directive),false);assert.equal(launches,1);
 });

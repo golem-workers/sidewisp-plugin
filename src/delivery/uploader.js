@@ -16,8 +16,10 @@ export function createUploader({
 }) {
   if (!Number.isSafeInteger(maxBatch) || maxBatch < 1 || maxBatch > 1000) throw new TypeError("invalid maxBatch");
   let attempt = 0;
+  let lastDeliveredAt = null;
   let lastResult = { status: "not-started", sent: 0, remaining: 0, at: null };
   const finish = (result) => {
+    if (!["sent", "idle"].includes(result.status)) lastDeliveredAt = null;
     lastResult = { ...result, at: new Date(now()).toISOString() };
     return result;
   };
@@ -29,8 +31,19 @@ export function createUploader({
   async function sendOnce() {
     const credential = await credentialProvider.current();
     if (!credential || credential.status !== "active") return finish({ status: "disabled", sent: 0, remaining: spool.pending(1).length });
-    const pending = spool.pending(maxBatch);
-    if (pending.length === 0) { attempt = 0; return finish({ status: "idle", sent: 0, remaining: 0 }); }
+    const queued = spool.pending(maxBatch);
+    // Never replay the deleted binding's backlog under a newly approved account.
+    for (const row of queued) {
+      if (row.event.installationId && row.event.installationId !== credential.installationId) spool.deadLetter(row.eventId, 'previous-installation');
+    }
+    const pending = queued.filter(row => !row.event.installationId || row.event.installationId === credential.installationId);
+    if (pending.length === 0) {
+      attempt = 0;
+      const remaining = spool.pending(1).length;
+      // A full stale batch may hide the new binding's first heartbeat behind
+      // it. Continue bounded draining rather than claiming an empty queue.
+      return finish({ status: remaining ? "dead-lettered" : "idle", sent: 0, remaining });
+    }
     const jsonBody = Buffer.from(JSON.stringify({ schema: "sidewisp.telemetry-batch.v1", events: pending.map(({ event }) => event) }));
     if (jsonBody.length > maxBodyBytes) {
       spool.deadLetter(pending[0].eventId, "batch-event-too-large");
@@ -72,6 +85,7 @@ export function createUploader({
     const acknowledged = Array.isArray(result.acknowledgedEventIds)
       ? result.acknowledgedEventIds.filter((id) => sentIds.has(id)) : [];
     spool.acknowledge(acknowledged);
+    if (acknowledged.length > 0) lastDeliveredAt = new Date(now()).toISOString();
     if (Array.isArray(result.rejected)) {
       for (const rejected of result.rejected) {
         if (sentIds.has(rejected?.eventId) && typeof rejected.code === "string") spool.deadLetter(rejected.eventId, rejected.code);
@@ -83,7 +97,7 @@ export function createUploader({
 
   return Object.freeze({
     sendOnce,
-    status: () => ({ ...lastResult }),
+    status: () => ({ ...lastResult, ...(lastDeliveredAt ? { lastDeliveredAt } : {}) }),
     async drain({ maxAttempts = 10 } = {}) {
       let finalResult;
       for (let count = 0; count < maxAttempts; count += 1) {
