@@ -1,3 +1,5 @@
+import { userWaitPreview } from "../../core/preview-sources.js";
+const previewFields = value => value ? { messagePreview: value } : {};
 import { readMessagePreview } from "../../core/message-preview.js";
 import { classifyRuntimeCause } from "../../core/causes.js";
 import { localDiagnostic, normalizeRuntimeEvent } from "../../core/normalize.js";
@@ -957,12 +959,13 @@ export function openClawAgentEventInput(event = {}) {
   }
   if (event.stream === "approval") {
     if (data.phase === "requested" && data.status === "pending") {
-      return { kind: "tool_start", operation: "user_approval", correlation };
+      return { kind: "tool_start", operation: "user_approval", ...previewFields(userWaitPreview(data, "user_approval", "tool.started")), correlation };
     }
     if (data.phase === "resolved") {
       return {
         kind: "tool_end",
         operation: "user_approval",
+        ...previewFields(userWaitPreview(data, "user_approval", "tool.completed")),
         outcome: ["denied", "failed", "unavailable"].includes(data.status)
           ? "cancelled"
           : "success",
@@ -972,7 +975,8 @@ export function openClawAgentEventInput(event = {}) {
   }
   if (event.stream === "tool") {
     if (["start", "started"].includes(data.phase)) {
-      return { kind: "tool_start", operation: safeOperation(data.name, data.toolName), correlation };
+      const operation = safeOperation(data.name, data.toolName);
+      return { kind: "tool_start", operation, ...previewFields(userWaitPreview(data, operation, "tool.started")), correlation };
     }
     if (["result", "end", "completed"].includes(data.phase)) {
       const exitCode = safeInteger(data.exitCode, data.result?.exitCode);
@@ -984,6 +988,7 @@ export function openClawAgentEventInput(event = {}) {
         outcome: cancelled ? "cancelled" : data.status === "timeout" ? "timeout" : failed ? "failure" : "success",
         durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
         ...toolDetails(data, failed && !cancelled),
+        ...previewFields(userWaitPreview(data, safeOperation(data.name, data.toolName), "tool.completed")),
         correlation,
       };
     }

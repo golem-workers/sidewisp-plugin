@@ -126,3 +126,21 @@ test("ordinary words, names, paths and links survive without weakening value det
     assert.equal(sanitizeMessagePreview(text, "turn.completed"), undefined, text);
   }
 });
+
+test("six preview transitions require exact context; started and arbitrary tools are excluded", () => {
+  for (const type of ["turn.progress", "turn.completed", "turn.cancelled", "turn.failed", "turn.timeout"]) {
+    assert.equal(sanitizeMessagePreview("Безопасный ответ", type), "Безопасный ответ");
+    assert.equal(sanitizeMessagePreview("Безопасный ответ " + "x".repeat(200) + " token=hidden", type), undefined);
+  }
+  assert.equal(sanitizeMessagePreview("Не показывать", "turn.started", {}), undefined);
+  assert.equal(sanitizeMessagePreview("Продолжаю", "turn.started", { status: "resumed" }), "Продолжаю");
+  for (const type of ["tool.started", "tool.completed", "tool.failed", "tool.timeout", "tool.cancelled"]) {
+    for (const operation of ["request_user_input", "user_approval", "user-approval"]) {
+      assert.equal(sanitizeMessagePreview("Безопасный вопрос", type, { operation }), "Безопасный вопрос");
+      assert.equal(sanitizeMessagePreview("password=unsafe", type, { operation }), undefined);
+    }
+    for (const operation of ["exec", "read", "message", "approval_lookalike", undefined]) {
+      assert.equal(sanitizeMessagePreview("Не показывать", type, { operation }), undefined);
+    }
+  }
+});

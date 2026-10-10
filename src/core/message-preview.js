@@ -1,6 +1,13 @@
 // This is the only free-text telemetry exception. Keep plugin/API policies in sync.
 export const MESSAGE_PREVIEW_MAX = 160;
-const PREVIEW_TYPES = new Set(["turn.progress", "turn.completed", "message.delivered"]);
+const PREVIEW_TYPES = new Set(["turn.progress", "turn.completed", "turn.cancelled", "turn.failed", "turn.timeout", "message.delivered"]);
+const WAIT_TOOL_TYPES = new Set(["tool.started", "tool.completed", "tool.failed", "tool.timeout", "tool.cancelled"]);
+function allowsPreview(type, details) {
+  if (PREVIEW_TYPES.has(type)) return true;
+  if (type === "turn.started") return details?.status === "resumed";
+  if (!WAIT_TOOL_TYPES.has(type) || typeof details?.operation !== "string") return false;
+  return ["request_user_input", "user_approval"].includes(details.operation.toLowerCase().replaceAll("-", "_"));
+}
 // Detect credential VALUES/structures, not words used to discuss credentials.
 const SENSITIVE = /(?:\b(?:bearer)\s+[^\s,;]+)|(?:(?:authorization|api[\s_-]*key|access[\s_-]*(?:key|token)|refresh[\s_-]*token|private[\s_-]*key|password|passwd|secret|credential|token|пароль|секрет|токен|ключ\s*(?:api|доступа))\s*["'`]?\s*[:=]\s*["'`]?[^\s,;"'`]+)|(?:[?&](?:key|code|sig|signature|token|password|secret)=[^\s&#]+)|(?:[a-z][a-z0-9+.-]{0,32}:\/\/[^\s/]*:[^\s/@]+@)|(?:[\w.+-]{1,64}@[\w.-]{1,253}\.[a-z]{2,63})|(?:\b(?:sk|ghp|gho|ghu|ghs|ghr|github_pat|xox[baprs])[-_][a-z0-9_-]+)|(?:\b(?:AKIA|ASIA)[A-Z0-9]{16}\b)|(?:\bAIza[a-z0-9_-]{30,})|(?:\beyJ[a-z0-9_-]+\.[a-z0-9_-]+(?:\.[a-z0-9_-]+)?)|(?:\+\d[\d\s().-]{8,}\d)|(?:\b(?:\d[ -]?){13,19}\b)|(?:```|-----BEGIN)/iu;
 
@@ -24,9 +31,9 @@ function hasOpaqueCredential(text) {
 }
 const UNSAFE_CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 
-export function sanitizeMessagePreview(value, type) {
+export function sanitizeMessagePreview(value, type, details) {
   try {
-    if (!PREVIEW_TYPES.has(type) || typeof value !== "string" || value.length > 16_384) return undefined;
+    if (!allowsPreview(type, details) || typeof value !== "string" || value.length > 16_384) return undefined;
     // Remove invisible formatting before scanning so it cannot split a secret marker.
     const text = value.normalize("NFC").replace(/\p{Cf}/gu, "").replace(/\s+/gu, " ").trim();
     // Scan the entire bounded message BEFORE truncation, including credentials past char 160.
@@ -39,6 +46,6 @@ export function sanitizeMessagePreview(value, type) {
   } catch { return undefined; } // Optional text must never suppress a lifecycle event.
 }
 
-export function readMessagePreview(read, type) {
-  try { return sanitizeMessagePreview(read(), type); } catch { return undefined; }
+export function readMessagePreview(read, type, details) {
+  try { return sanitizeMessagePreview(read(), type, details); } catch { return undefined; }
 }

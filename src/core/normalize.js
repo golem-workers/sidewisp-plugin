@@ -1,3 +1,4 @@
+import { eventReasonPreview } from "./preview-sources.js";
 import { readMessagePreview } from "./message-preview.js";
 import { classifyRuntimeCause, knownCause } from "./causes.js";
 import { sanitizeTelemetryEvent } from "./sanitize.js";
@@ -79,7 +80,8 @@ export function normalizeRuntimeEvent(runtimeKind, input, envelope) {
       runtime: { ...envelope.runtime, kind: runtimeKind },
       source: { ...envelope.source, adapterVersion: envelope.source.adapterVersion },
       type, outcome,
-      messagePreview: readMessagePreview(() => input.messagePreview, type),
+      messagePreview: readMessagePreview(() => input.messagePreview
+        ?? eventReasonPreview(type, input), type, { status: input.status, operation: input.operation }),
       correlation: input.correlation ?? {},
       details: {
         ...factDetails,

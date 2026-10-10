@@ -1,3 +1,10 @@
+# 0.2.63 — staging safe work previews
+
+- Allow bounded filtered preview for progress, waiting, resumed, completed, stopped and error; never ordinary started or arbitrary tools.
+- Read only allowlisted user-facing questions/structured answers. Label confirmed termination metadata as event reason, never assistant reply.
+- Existing lifecycle correlation/deduplication, credentials and privacy scanner unchanged. Missing/unsafe text remains absent.
+- Automatic final requires OpenClaw dispatcher forwarding appendBeforeDeliver; runtime 2026.9.8 companion repair is canary-scoped and pin-verified.
+
 ## 0.2.62 — activation-only manager recovery
 
 - Persist staged/mutated intent before cold activation of an already installed target, so an interrupted helper can enter the existing recovery path without reinstalling the package.
