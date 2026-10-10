@@ -17,6 +17,9 @@ export async function convergeCurrentRelease({targetVersion,status,idle,install,
   if(!await idle(current)) {write({status:'waiting_for_idle',reasonCode:'ACTIVE_WORK'});await sleep(5000);continue;}
   if(current?.version===targetVersion && current.connectionReadiness?.activationRequired===true) {
    if(!journal.activated) {
+    // Cold activation mutates the host even when the target was installed earlier.
+    // Persist ownership before the restart so a crashed helper can recover it.
+    journal.staged=true;journal.mutated=true;
     try {write({status:'activating',phase:'activation_intent'});await activate();journal.activated=true;write({status:'verifying',phase:'activated'});}
     catch(error){if(error.message!=='host_activation_busy')throw error;write({status:'waiting_for_idle',reasonCode:'HOST_RETAINED_WORK'});}
    }

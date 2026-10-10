@@ -1,3 +1,9 @@
+## 0.2.62 — activation-only manager recovery
+
+- Persist staged/mutated intent before cold activation of an already installed target, so an interrupted helper can enter the existing recovery path without reinstalling the package.
+- Deliver through an explicit private-manager upgrade from the new archive; upgrading the collector alone does not replace the independent manager. Published 0.2.61 artifacts remain unchanged.
+- Idle admission, terminal-failure revision checks, binding verification and command permissions remain unchanged.
+
 ## 0.2.61 — attachment send followed by ordinary automatic final
 
 - A confirmed source `message(send)` without assistant text no longer closes work implicitly. It records progress until the ordinary automatic final arrives; explicit `final=true` and legacy implicit text finals retain their semantics.
