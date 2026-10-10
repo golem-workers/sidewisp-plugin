@@ -50,7 +50,7 @@ export function sanitizeTelemetryEvent(input) {
     if (!SOURCE_KINDS.has(source.kind)) throw new SanitizationError("invalid-source-kind");
     if (!EVENT_TYPES.has(input.type)) throw new SanitizationError("invalid-event-type");
     if (!OUTCOMES.has(input.outcome)) throw new SanitizationError("invalid-outcome");
-    const messagePreview = readMessagePreview(() => input.messagePreview, input.type);
+    const messagePreview = readMessagePreview(() => input.messagePreview, input.type, input.details);
     return {
       ...(messagePreview ? { messagePreview } : {}),
       schema: "sidewisp.telemetry.v1",
