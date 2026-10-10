@@ -1,0 +1,9 @@
+[Unit]
+Description=Check Sidewisp plugin versions (%i)
+[Timer]
+OnBootSec=90
+OnUnitInactiveSec=60
+RandomizedDelaySec=5
+Unit=sidewisp-fleet@%i.service
+[Install]
+WantedBy=timers.target
