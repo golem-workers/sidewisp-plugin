@@ -6,7 +6,7 @@ import {coldActivateOpenClaw} from './cold-activate-openclaw.mjs';
 const stateDir=process.env.OPENCLAW_STATE_DIR,configPath=process.env.OPENCLAW_CONFIG_PATH;
 if(!path.isAbsolute(stateDir??'')||!path.isAbsolute(configPath??''))throw Error('explicit_active_profile_required');
 const mode=process.argv[2];if(!['--apply','--audit'].includes(mode)||process.argv.length!==3)throw Error('runtime_companion_argument_invalid');
-const journal=path.join(stateDir,'sidewisp','runtime-companion-3989','result.json');
+const journal=path.join(stateDir,'sidewisp','runtime-companion-4013','result.json');
 if(mode==='--audit'){console.log(readFileSync(journal,'utf8'));}else{
  const run=args=>execFileSync('openclaw',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:120000});
  const sha=v=>createHash('sha256').update(v).digest('hex');const sleep=ms=>new Promise(r=>setTimeout(r,ms));

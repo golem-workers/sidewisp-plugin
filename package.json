@@ -1,6 +1,6 @@
 {
   "name": "@sidewisp/plugin",
-  "version": "0.2.64",
+  "version": "0.2.65",
   "description": "Sidewisp runtime health and native cron monitoring",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -58,7 +58,10 @@
     "scripts/install-update-manager.mjs",
     "scripts/cold-activate-openclaw.mjs",
     "scripts/verify-message-preview.mjs",
-    "runtime",
+    "runtime/manifest.json",
+    "runtime/openclaw-2026.9.8-reply-observer.5.tgz",
+    "runtime/service-owner-source.patch",
+    "runtime/service-hook-owners.ts",
     "scripts/stage-runtime-companion.mjs",
     "src/auth/runtime-companion.js"
   ],

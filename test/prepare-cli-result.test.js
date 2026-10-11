@@ -17,9 +17,9 @@ async function fixture({refused=false,updateOnly=false}={}) {
   const config=path.join(state,'openclaw.json');await writeFile(config,'{}',{mode:0o600});
   const id='sw_pair_'+'x'.repeat(32),expiresAtMs=Date.now()+600000;
   const status={version,endpoint:'https://fixture.sidewisp.test',enabled:true,running:true,connectionReadiness:{ready:true}};
-  const runtime=path.join(dir,'runtime-hotfix');const extracted=spawnSync('tar',['-xzf',path.join(root,'runtime/openclaw-2026.9.8-reply-observer.4.tgz'),'-C',dir]);assert.equal(extracted.status,0);
+  const runtime=path.join(dir,'runtime-hotfix');const extracted=spawnSync('tar',['-xzf',path.join(root,'runtime/openclaw-2026.9.8-reply-observer.5.tgz'),'-C',dir]);assert.equal(extracted.status,0);
   await writeFile(path.join(runtime,'package.json'),JSON.stringify({name:'openclaw',version:'2026.9.8'}));await writeFile(path.join(runtime,'openclaw.mjs'),'');
-  await mkdir(path.join(state,'sidewisp/runtime-companion-3989'),{recursive:true});await writeFile(path.join(state,'sidewisp/runtime-companion-3989/result.json'),JSON.stringify({phase:'completed'}));
+  await mkdir(path.join(state,'sidewisp/runtime-companion-4013'),{recursive:true});await writeFile(path.join(state,'sidewisp/runtime-companion-4013/result.json'),JSON.stringify({phase:'completed',version:'2026.9.8-reply-observer.5'}));
   const service={service:{loaded:true,runtime:{status:'running',pid:1},command:{programArguments:[process.execPath,path.join(runtime,'openclaw.mjs')],environment:{OPENCLAW_STATE_DIR:state,OPENCLAW_CONFIG_PATH:config}}},config:{daemon:{path:config},mismatch:false}};
   const lanes={ts:Date.now(),dynamic:null,lanes:[{activeCount:0,queuedCount:0}]};
   await writeFile(path.join(bin,'openclaw'),'#!/bin/sh\n'+(refused?'echo "private credential material" >&2\nexit 1\n':`case "$*" in *"status --no-probe"*) echo '${JSON.stringify(service)}';; *"diagnostics.lanes"*) echo '${JSON.stringify(lanes)}';; *) echo '${JSON.stringify(status)}';; esac\n`),{mode:0o700});
