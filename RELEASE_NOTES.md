@@ -1,3 +1,11 @@
+# 0.2.65 — staging service-owned recovery observers
+
+- Require the separate immutable OpenClaw 2026.9.8 reply-observer.5 companion before new tester authorization.
+- Route passive hooks to the live service owner, preserving caller grants, hook metadata, source identity and retirement/stop lifecycle.
+- Existing compatible staging plugins stay 0.2.63; deliver only the runtime through independent helpers after actual host idleness.
+- Retain published .4 unchanged. New .5 has six SHA-256 pinned runtime files, including the optional-at-source owner module; unknown source hashes refuse without mutation.
+- No new telemetry, history reconstruction, credentials, spool format, mobile/APK or production changes.
+
 # 0.2.63 — staging safe work previews
 
 - Allow bounded filtered preview for progress, waiting, resumed, completed, stopped and error; never ordinary started or arbitrary tools.
