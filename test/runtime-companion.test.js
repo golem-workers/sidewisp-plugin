@@ -8,7 +8,7 @@ test('runtime path is admitted only for the exact managed active profile and sup
 test('released .4 migrates to all six .5 pins without modifying the immutable .4 archive',()=>{
  const f=fixture();try{
   execFileSync('tar',['-xzf',new URL('../runtime/openclaw-2026.9.8-reply-observer.4.tgz',import.meta.url).pathname,'-C',f.d]);
-  for(const name of ['hook-runner-global-CwCyBBBr.mjs','services-9PyB9Rj_.mjs'])fs.copyFileSync(new URL('./fixtures/runtime-companion-2026.9.8/'+name,import.meta.url),path.join(f.runtime,'dist',name));
+  for(const name of ['hook-runner-global-CwCyBBBr.mjs','services-9PyB9Rj_.mjs'])fs.copyFileSync(new URL('./fixtures/runtime-companion-2026.9.8/'+name+'.txt',import.meta.url),path.join(f.runtime,'dist',name));
   fs.unlinkSync(path.join(f.runtime,'dist/service-hook-owners.mjs'));
   const oldArchive=fs.readFileSync(new URL('../runtime/openclaw-2026.9.8-reply-observer.4.tgz',import.meta.url));
   const result=stageRuntimeCompanion({runtime:f.runtime,stateDir:f.state});assert.equal(result.changed,true);assert.equal(Object.keys(result.hashes).length,6);
