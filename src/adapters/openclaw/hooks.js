@@ -1,6 +1,17 @@
 import { userWaitPreview } from "../../core/preview-sources.js";
 const previewFields = value => value ? { messagePreview: value } : {};
 import { readMessagePreview } from "../../core/message-preview.js";
+
+// Pinned OpenClaw 2026.9.8 owns this process-local WeakMap. Read only its
+// typed terminal marker, never isError, text, arbitrary payload data or tool output.
+function replyOutcomeMarkers(payload) {
+  try {
+    const metadata = globalThis[Symbol.for("openclaw.replyPayloadMetadata")];
+    const value = metadata instanceof WeakMap ? metadata.get(payload) : undefined;
+    return { terminalProviderError: value?.terminalProviderError === true,
+      toolErrorWarning: value?.toolErrorWarning != null };
+  } catch { return {}; }
+}
 import { classifyRuntimeCause } from "../../core/causes.js";
 import { localDiagnostic, normalizeRuntimeEvent } from "../../core/normalize.js";
 
@@ -330,7 +341,22 @@ export function createOpenClawUserTaskLifecycle({
       state.pendingTerminal
       && state.pendingTerminal.type !== "turn.completed"
       && event?.details?.component !== "agent_lifecycle_end"
+      && state.pendingTerminal.details?.component !== "final_reply"
     ) return false;
+    if (state.pendingTerminal?.details?.component === "final_reply"
+        && (NEGATIVE_TURN_TERMINALS.has(state.pendingTerminal.type)
+          || state.pendingTerminal.details.status === "tool-warning")) {
+      const warningPreview = state.pendingTerminal.details.status === "tool-warning"
+        && event?.type === "turn.completed" ? state.pendingTerminal.messagePreview : undefined;
+      if (NEGATIVE_TURN_TERMINALS.has(state.pendingTerminal.type)
+          && !NEGATIVE_TURN_TERMINALS.has(event?.type)) return false;
+      clearPending(state, true);
+      state.pendingTerminal = retarget(warningPreview
+        ? Object.freeze({ ...event, messagePreview: warningPreview }) : event, state);
+      state.pendingDeadline = nowMs;
+      attemptPending(key, state);
+      return true;
+    }
     clearPending(state, true);
     state.pendingTerminal = retarget(event, state);
     state.pendingRetryable = NEGATIVE_TURN_TERMINALS.has(event?.type);
@@ -500,7 +526,7 @@ export function createOpenClawUserTaskLifecycle({
       state.staged = false;
       return accepted(event);
     }
-    if ((component === "final_reply" && event?.type === "turn.completed")
+    if ((component === "final_reply" && TURN_TERMINALS.has(event?.type))
         || (component === "runtime_reconciliation" && TURN_TERMINALS.has(event?.type))) {
       const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
       // Ordinary reply dispatch need not carry runId. Only its captured,
@@ -547,6 +573,26 @@ export function createOpenClawUserTaskLifecycle({
         state.updatedAt = nowMs;
         clearCurrent(key, state);
         return coalesced();
+      }
+      // A typed error final is evidence of failure, not a successful reply.
+      // Native timeout/abort is stronger than the generic provider-error marker.
+      // If dispatch wins the race, wait for native settlement before choosing
+      // its subtype; the existing grace is a fallback when lifecycle is absent.
+      if (component === "final_reply" && NEGATIVE_TURN_TERMINALS.has(event.type)) {
+        if (NEGATIVE_TURN_TERMINALS.has(state.pendingTerminal?.type)) {
+          return accepted(complete(key, state, state.pendingTerminal, nowMs));
+        }
+        return deferTerminal(key, state, event, nowMs) ? buffered() : coalesced();
+      }
+      if (component === "final_reply" && event.details?.status === "tool-warning") {
+        if (state.pendingTerminal) {
+          const terminal = state.pendingTerminal.type === "turn.completed"
+            ? retarget(event, state) : state.pendingTerminal;
+          return accepted(complete(key, state, terminal, nowMs));
+        }
+        // A warning is not execution success. Await native outcome (or exact
+        // reconciliation) when dispatch precedes the lifecycle terminal.
+        return deferTerminal(key, state, event, nowMs) ? buffered() : coalesced();
       }
       return accepted(complete(key, state, retarget(event, state), nowMs));
     }
@@ -924,7 +970,9 @@ export function openClawAgentEventInput(event = {}) {
           correlation,
         };
       }
-      const timedOut = data.timedOut === true || data.outcome === "timeout";
+      const timedOut = data.timedOut === true || data.outcome === "timeout"
+        || data.stopReason === "timeout" || data.status === "timed_out"
+        || data.timeoutPhase != null;
       const cancelled = data.aborted === true
         || ["cancelled", "canceled", "aborted", "killed"].includes(
           typeof data.stopReason === "string" ? data.stopReason.toLowerCase() : "",
@@ -947,7 +995,9 @@ export function openClawAgentEventInput(event = {}) {
       const continuationPending = yieldedContinuation || toolCallsContinuation;
       return {
         kind: "turn_end",
-        outcome: cancelled ? "cancelled" : timedOut ? "timeout" : data.phase === "error" || data.success === false ? "failure" : "success",
+        outcome: timedOut ? "timeout" : cancelled ? "cancelled"
+          : data.phase === "error" || data.success === false || data.stopReason === "error"
+            || ["blocked", "abandoned"].includes(data.livenessState) ? "failure" : "success",
         component: data.phase === "end" ? "agent_lifecycle_end" : "agent_lifecycle_error",
         status: data.phase === "error" && Number.isSafeInteger(data.endedAt)
           ? "terminal-candidate"
@@ -1097,8 +1147,9 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       finalCorrelation.messageId ??= event.ctx?.MessageSidFull ?? event.ctx?.MessageSid
         ?? event.ctx?.MessageSidFirst ?? event.ctx?.MessageSidLast;
       const observeFinal = observe("reply_dispatch", (observation, _ctx) => ({
-        kind: "turn_end", outcome: "success", component: "final_reply",
-        messagePreview: observation.messagePreview,
+        kind: "turn_end", outcome: observation.terminalProviderError ? "failure" : "success", component: "final_reply",
+        messagePreview: observation.terminalProviderError ? undefined : observation.messagePreview,
+        status: observation.toolErrorWarning ? "tool-warning" : undefined,
         correlation: finalCorrelation,
       }), true);
       if (typeof ctx.dispatcher?.appendBeforeDeliver !== "function") {
@@ -1108,6 +1159,7 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       try {
         ctx.dispatcher.appendBeforeDeliver((payload, info = {}) => {
           if (info.kind === "final") void observeFinal({
+            ...replyOutcomeMarkers(payload),
             messagePreview: readMessagePreview(() => payload?.text, "turn.completed"),
           }, ctx);
           return payload;
