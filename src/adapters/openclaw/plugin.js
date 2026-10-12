@@ -1,3 +1,4 @@
+import { createOpenClawQuestionObserver } from "./questions.js";
 import { collectOpenClawCron, watchOpenClawCron } from '../../cron/openclaw.js';
 import { createCronDelivery } from '../../delivery/cron.js';
 import { createLocalWorkSnapshotRequest } from "./local-work-snapshot.js";
@@ -266,13 +267,21 @@ export default definePluginEntry({
       onDiagnostic: () => {},
     });
     settleDeferredHook = (outcome) => hookTelemetry.settle(outcome);
+    const questions = createOpenClawQuestionObserver({
+      emit(input) {
+        const result = normalizeRuntimeEvent("openclaw", input, makeEnvelope(input, "hook"));
+        if (result.event) return persistEventDetailed(result.event, "agent");
+      },
+    });
     api.agent.events.registerAgentEventSubscription({
       id: "sidewisp-runtime-events",
       description: "Content-free Sidewisp lifecycle and tool failure telemetry",
-      streams: ["lifecycle", "tool", "approval", "item"],
+      streams: ["lifecycle", "tool", "approval", "item", "assistant"],
       async handle(event) {
         agentEventTelemetry.observed += 1;
         agentEventTelemetry.lastObservedAt = new Date().toISOString();
+        questions.observe(event);
+        await questions.drain();
         const input = openClawAgentEventInput(event);
         if (!input) {
           agentEventTelemetry.ignored += 1;
@@ -385,6 +394,7 @@ export default definePluginEntry({
         }
       },
       async stop() {
+        questions.dispose();
         if(scheduleRunner) await scheduleRunner.stop().catch(()=>{});
         scheduleRunner=null;
         if (healthTimer) await healthTimer.stop();

@@ -2037,7 +2037,7 @@ test("bounded tracker evicts only durable terminals and never reads content", ()
 test("plugin subscribes through the official host-owned agent event API", () => {
   const source = readFileSync(new URL("../src/adapters/openclaw/plugin.js", import.meta.url), "utf8");
   assert.match(source, /api\.agent\.events\.registerAgentEventSubscription/);
-  assert.match(source, /streams:\s*\["lifecycle", "tool", "approval", "item"\]/);
+  assert.match(source, /streams:\s*\["lifecycle", "tool", "approval", "item", "assistant"\]/);
   assert.match(source, /userTaskLifecycle\.processDetailed\(event\)/);
   assert.match(source, /userTaskLifecycle\.commit\(result\.event\)/);
   assert.match(source, /persisted\.disposition === "emitted"/);
