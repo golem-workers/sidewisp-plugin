@@ -10,6 +10,22 @@ const hash=x=>createHash('sha256').update(x).digest('hex');
 const manifest=JSON.parse(readFileSync(new URL('../../runtime/manifest.json',import.meta.url),'utf8'));
 export const runtimeCompanionVersion=manifest.version;
 const samePath=(a,b)=>{try{return path.isAbsolute(a)&&path.isAbsolute(b)&&realpathSync(a)===realpathSync(b);}catch{return false;}};
+// Parse only the supported Node launcher prefix, never scan option values or
+// Gateway arguments for a plausible runtime path. Unknown prefixes fail closed.
+function managedEntrypoint(args) {
+ if(!Array.isArray(args)||args.some(a=>typeof a!=='string'||a.length===0)||!/^node(?:js)?(?:\.exe)?$/.test(path.basename(args[0]??'')))throw Error('runtime_path_unavailable');
+ let i=1;const seen=new Set();
+ while(i<args.length&&args[i].startsWith('-')){
+  if(args[i]==='--'){i++;break;}
+  const m=/^--(max[-_]old[-_]space[-_]size|max[-_]semi[-_]space[-_]size)(?:=(.*))?$/.exec(args[i]);
+  if(!m)throw Error('runtime_path_unavailable');
+  const key=m[1].replaceAll('_','-'),value=m[2]??args[++i];
+  if(seen.has(key)||typeof value!=='string'||!/^\d+$/.test(value)||!Number.isSafeInteger(Number(value))||Number(value)<=0)throw Error('runtime_path_unavailable');
+  seen.add(key);i++;
+ }
+ if(typeof args[i]!=='string'||!path.isAbsolute(args[i]))throw Error('runtime_path_unavailable');
+ try{const entry=realpathSync(args[i]);if(!statSync(entry).isFile())throw Error();return entry;}catch{throw Error('runtime_path_unavailable');}
+}
 export function resolveManagedRuntime({serviceStatus,stateDir,configPath}) {
  const service=serviceStatus?.service,env=service?.command?.environment;
  if(service?.loaded!==true||service.runtime?.status!=='running'||!Number.isSafeInteger(service.runtime.pid)||service.runtime.pid<=0
@@ -17,9 +33,7 @@ export function resolveManagedRuntime({serviceStatus,stateDir,configPath}) {
   ||!samePath(serviceStatus.config?.daemon?.path,configPath)
   ||(env?.OPENCLAW_CONFIG_PATH&&!samePath(env.OPENCLAW_CONFIG_PATH,configPath))
   ||!samePath(env?.OPENCLAW_STATE_DIR??path.dirname(serviceStatus.config.daemon.path),stateDir))throw Error('managed_active_profile_required');
- const args=service.command.programArguments;
- if(!Array.isArray(args)||typeof args[1]!=='string'||!path.isAbsolute(args[1]))throw Error('runtime_path_unavailable');
- let root=path.dirname(realpathSync(args[1]));
+ let root=path.dirname(managedEntrypoint(service.command.programArguments));
  for(let n=0;n<3;n++,root=path.dirname(root)){
   let pkg;try{pkg=JSON.parse(readFileSync(path.join(root,'package.json'),'utf8'));}catch{continue;}
   if(pkg.name==='openclaw'){
