@@ -340,7 +340,7 @@ export default definePluginEntry({
           contextDelivery=createContextUsageDelivery({collect:()=>collectOpenClawContext({stateDir}),endpoint:config.endpoint,
             credentialProvider:{current:async()=>auth.credential()}});
           contextDelivery.start();
-          cronDelivery = createCronDelivery({ collect: () => collectOpenClawCron({ stateDir, storePath: api.config?.cron?.store }), subscribe: onChange => watchOpenClawCron({ stateDir, storePath: api.config?.cron?.store, onChange }), endpoint: config.endpoint, credentialProvider: { current: async () => auth.credential() } });
+          cronDelivery = createCronDelivery({ collect: () => collectOpenClawCron({ stateDir, runtimeVersion: api.runtime.version, storePath: api.config?.cron?.store }), subscribe: onChange => watchOpenClawCron({ stateDir, runtimeVersion: api.runtime.version, storePath: api.config?.cron?.store, onChange }), endpoint: config.endpoint, credentialProvider: { current: async () => auth.credential() } });
           cronDelivery.start();
           usageDelivery = createUsageDelivery({
             collect: ({ collectedAtMs }) => collectOpenClawUsage({ stateDir, collectedAtMs }),

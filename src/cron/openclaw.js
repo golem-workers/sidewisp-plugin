@@ -1,11 +1,12 @@
 import path from 'node:path';
+import { classifyOpenClawCron } from './classification.js';
 import { watch } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 
 const MAX_BYTES = 2 * 1024 * 1024;
 const time = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 const text = (value, max) => typeof value === 'string' ? value.replace(/[\p{C}]/gu, '').trim().slice(0, max) : '';
-export function normalizeCronJob(job) {
+export function normalizeCronJob(job, runtimeVersion) {
   if (!job || !/^[A-Za-z0-9_-]{1,128}$/.test(job.id ?? '')) throw new Error('invalid_cron_job');
   const schedule = job.schedule;
   if (!schedule || !['cron', 'every', 'at'].includes(schedule.kind)) throw new Error('invalid_cron_schedule');
@@ -18,14 +19,14 @@ export function normalizeCronJob(job) {
   const displayName = /bearer\s|(?:token|secret|password|api.?key)\s*[:=]|sk-[A-Za-z0-9]/i.test(name) ? 'Cron job' : name || 'Cron job';
   const timezone = schedule.kind === 'cron' ? text(schedule.tz, 80) || Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC';
   try { new Intl.DateTimeFormat('en', { timeZone: timezone }); } catch { throw new Error('invalid_cron_timezone'); }
-  return { id: job.id, displayName, enabled: job.enabled !== false, kind: schedule.kind, expression, timezone,
+  return { classification: classifyOpenClawCron(job, runtimeVersion), id: job.id, displayName, enabled: job.enabled !== false, kind: schedule.kind, expression, timezone,
     payloadKind: ['agentTurn', 'systemEvent'].includes(job.payload?.kind) ? job.payload.kind : 'unknown',
     createdAtMs: time(job.createdAtMs), nextRunAtMs: time(job.state?.nextRunAtMs), lastRunAtMs: time(job.state?.lastRunAtMs),
     lastStatus: ['ok', 'error', 'skipped'].includes(job.state?.lastRunStatus ?? job.state?.lastStatus) ? job.state.lastRunStatus ?? job.state.lastStatus : 'unknown' };
 }
 // SQLite is authoritative when present. Never fall back to stale JSON on an error.
 // Read a single partition, including runtime state, without initializing or repairing it.
-export async function collectOpenClawCron({ stateDir, storePath = path.join(stateDir, 'cron', 'jobs.json'), readFileImpl = readFile, statImpl = stat, sqliteStatImpl = stat }) {
+export async function collectOpenClawCron({ stateDir, runtimeVersion, storePath = path.join(stateDir, 'cron', 'jobs.json'), readFileImpl = readFile, statImpl = stat, sqliteStatImpl = stat }) {
   let db;
   try {
     const target = path.join(stateDir, 'state', 'openclaw.sqlite');
@@ -53,7 +54,8 @@ export async function collectOpenClawCron({ stateDir, storePath = path.join(stat
       nativeJobs = JSON.parse(raw).jobs;
     }
     if (!Array.isArray(nativeJobs) || nativeJobs.length > 1000) return { status: 'unavailable', jobs: [] };
-    const jobs = nativeJobs.map(normalizeCronJob).sort((a, b) => a.id.localeCompare(b.id));
+    // Validate and retain every row: classification must not mask unsupported schedules.
+    const jobs = nativeJobs.map(job => normalizeCronJob(job, runtimeVersion)).sort((a, b) => a.id.localeCompare(b.id));
     if (new Set(jobs.map(job => job.id)).size !== jobs.length) return { status: 'unavailable', jobs: [] };
     return { status: 'ok', jobs };
   } catch (error) {
@@ -63,10 +65,10 @@ export async function collectOpenClawCron({ stateDir, storePath = path.join(stat
 
 // Watch directories, not inodes: SQLite WAL commits and atomic JSON replacements
 // both matter. Timer fallback in delivery covers stores created after startup.
-export function watchOpenClawCron({ stateDir, storePath = path.join(stateDir, 'cron', 'jobs.json'), onChange, watchImpl = watch, setTimer = setTimeout, clearTimer = clearTimeout }) {
+export function watchOpenClawCron({ stateDir, runtimeVersion, storePath = path.join(stateDir, 'cron', 'jobs.json'), onChange, watchImpl = watch, setTimer = setTimeout, clearTimer = clearTimeout }) {
   let timer = null, closed = false, lastSnapshot = null;
   const refresh = async () => {
-    const snapshot = JSON.stringify(await collectOpenClawCron({ stateDir, storePath }));
+    const snapshot = JSON.stringify(await collectOpenClawCron({ stateDir, runtimeVersion, storePath }));
     if (closed) return;
     if (snapshot !== lastSnapshot) { lastSnapshot = snapshot; onChange(); }
   };
