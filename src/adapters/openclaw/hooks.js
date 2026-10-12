@@ -1008,6 +1008,10 @@ export function openClawAgentEventInput(event = {}) {
     }
   }
   if (event.stream === "approval") {
+    // Native exec shares toolCallId with its ordinary tool receipts. The host
+    // owns a distinct command item ID for both approval phases; preserve it so
+    // those semantic boundaries do not collide in the unchanged event store.
+    if (safeCursorId(data.itemId)) correlation.toolCallId = data.itemId;
     if (data.phase === "requested" && data.status === "pending") {
       return { kind: "tool_start", operation: "user_approval", ...previewFields(userWaitPreview(data, "user_approval", "tool.started")), correlation };
     }
