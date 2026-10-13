@@ -33,7 +33,8 @@ function setup(options = {}) {
 test("4468 stays exact-bound when 4474 is admitted before its native settlement", () => {
   const { tracker, deferred } = setup();
   assert.deepEqual(tracker.activeWork().map(w => w.messageId), ["4468", "4474"]);
-  const terminal = tracker.process(settled(oldRun));
+  assert.equal(tracker.process(settled(oldRun)), null);
+  const terminal = tracker.process(final("4468"));
   assert.deepEqual([terminal.type, terminal.correlation.turnId], ["turn.completed", "4468"]);
   tracker.commit(terminal);
   tracker.process(settled(oldRun));
@@ -45,7 +46,8 @@ test("4468 stays exact-bound when 4474 is admitted before its native settlement"
 
 test("old exact final completes only old work when native settlement has not arrived", () => {
   const { tracker } = setup();
-  assert.equal(tracker.process(final("4468")).correlation.turnId, "4468");
+  assert.equal(tracker.process(final("4468")), null);
+  assert.equal(tracker.process(settled(oldRun)).correlation.turnId, "4468");
   assert.equal(tracker.process(final("4468")), null);
   assert.deepEqual(tracker.activeWork().map(w => w.messageId), ["4474"]);
 });
@@ -66,7 +68,8 @@ test("overlapping work cursor restores old exact bindings without making old wor
     const deferred = [];
     const restored = createOpenClawUserTaskLifecycle({ onDeferred: e => { deferred.push(e); return true; } });
     assert.equal(restored.restoreActiveWork(order), 2);
-    assert.equal(restored.process(settled(oldRun)).correlation.turnId, "4468");
+    assert.equal(restored.process(settled(oldRun)), null);
+    assert.equal(restored.process(final("4468")).correlation.turnId, "4468");
     assert.equal(restored.process(native(newRun, { phase: "start", startedAt: 1791854569559 })).correlation.turnId, "4474");
   }
 });
@@ -83,10 +86,11 @@ test("detached cancellation keeps its correct subtype and a duplicate cannot clo
 
 test("failed old terminal enqueue preserves both exact works and retries without selecting current", () => {
   const { tracker } = setup();
-  const terminal = tracker.process(settled(oldRun));
+  tracker.process(settled(oldRun));
+  const terminal = tracker.process(final("4468"));
   tracker.rollback(terminal);
   assert.deepEqual(tracker.activeWork().map(w => w.messageId), ["4468", "4474"]);
-  const retried = tracker.process(settled(oldRun));
+  const retried = tracker.process(final("4468"));
   assert.equal(retried.correlation.turnId, "4468");
   tracker.commit(retried);
   assert.equal(tracker.process(native(newRun, { phase: "start", startedAt: 1791854569559 })).correlation.turnId, "4474");
@@ -99,7 +103,8 @@ test("same run ID in another session and an unknown terminal cannot borrow old w
   assert.equal(otherTerminal.correlation.turnId, oldRun);
   tracker.process(settled("unknown-run"));
   assert.ok(tracker.activeWork().some(w => w.messageId === "4468"));
-  assert.equal(tracker.process(settled(oldRun)).correlation.turnId, "4468");
+  assert.equal(tracker.process(settled(oldRun)), null);
+  assert.equal(tracker.process(final("4468")).correlation.turnId, "4468");
 });
 
 test("admission at capacity cannot silently evict an executing old task", () => {
@@ -117,5 +122,6 @@ test("unbound simultaneous run fails closed while two same-session works could o
   assert.equal(tracker.process(native("ambiguous-run", { phase: "start", startedAt: 1791854560000 })), null);
   assert.ok(tracker.activeWork().every(w => !w.internalRunIds.includes("ambiguous-run")));
   tracker.process(settled(oldRun));
+  tracker.process(final("4468"));
   assert.equal(tracker.process(native(newRun, { phase: "start", startedAt: 1791854569559 })).correlation.turnId, "4474");
 });

@@ -1085,7 +1085,7 @@ test("final reply durably closes pending internal success before the next dispat
   }]);
 });
 
-test("exact final within retry grace confirms recovery from an internal failure", () => {
+test("exact final without a real retry preserves the internal failure", () => {
   const deferred = [];
   const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
@@ -1096,10 +1096,10 @@ test("exact final within retry grace confirms recovery from an internal failure"
   lifecycle.process(official("turn.started", "s", "inner"));
   lifecycle.process(official("turn.failed", "s", "inner"));
   const completed = lifecycle.process(finalReply("s", "outer"));
-  assert.equal(completed.type, "turn.completed");
+  assert.equal(completed.type, "turn.failed");
   lifecycle.commit(completed);
   assert.deepEqual(deferred, []);
-  assert.deepEqual(suppressed.map(({ type, correlation }) => [type, correlation.turnId]), [["turn.failed", "m"]]);
+  assert.deepEqual(suppressed, []);
   assert.equal(lifecycle.status().activeRuns, 0);
 });
 
@@ -1161,7 +1161,7 @@ test("lifecycle runs stay internal when dispatch omitted trusted outer run id", 
   }]);
   assert.equal(lifecycle.process(official("turn.failed", "s", "primary")), null);
   assert.equal(lifecycle.status().pendingTerminals, 1);
-  assert.equal(lifecycle.process(finalReply("s", "primary")).type, "turn.completed");
+  assert.equal(lifecycle.process(finalReply("s", "primary")).type, "turn.failed");
   assert.deepEqual(deferred, []);
 });
 
@@ -1290,7 +1290,7 @@ test("unmarked same-session run after internal success stays in task until final
   assert.equal(lifecycle.process(finalReply("s", "next-run")).correlation.turnId, "m");
 });
 
-test("exact outer negative outcomes recover when a final payload follows within grace", () => {
+test("exact outer negative outcomes remain negative when only a final payload follows", () => {
   for (const terminal of ["turn.failed", "turn.timeout", "turn.cancelled"]) {
     const deferred = [];
     const lifecycle = createOpenClawUserTaskLifecycle({
@@ -1300,7 +1300,7 @@ test("exact outer negative outcomes recover when a final payload follows within 
     lifecycle.process(official("turn.started", terminal, "outer"));
     assert.equal(lifecycle.process(official(terminal, terminal, "outer")), null);
     assert.equal(lifecycle.status().pendingTerminals, 1);
-    assert.equal(lifecycle.process(finalReply(terminal, "outer")).type, "turn.completed");
+    assert.equal(lifecycle.process(finalReply(terminal, "outer")).type, terminal);
     assert.deepEqual(deferred, []);
   }
 });
@@ -1528,7 +1528,7 @@ test("pending success never expires and a later internal start remains coalesced
   assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed", "turn.completed"]);
 });
 
-test("final commit cancels negative timer while rollback restores its remaining grace", () => {
+test("negative final commit cancels timer while rollback keeps the original negative", () => {
   const timers = manualTimers();
   const deferred = [];
   const suppressed = [];
@@ -1557,7 +1557,8 @@ test("final commit cancels negative timer while rollback restores its remaining 
   timers.advance(60_000);
 
   assert.deepEqual(deferred, []);
-  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
+  assert.equal(committedFinal.type, "turn.failed");
+  assert.deepEqual(suppressed, []);
   assert.equal(lifecycle.status().activeRuns, 0);
 });
 
@@ -1685,7 +1686,9 @@ test("retry stays with task one before task two dispatches", () => {
   assert.equal(lifecycle.process(official("turn.started", "s", "retry-1")), null);
   assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
   lifecycle.process(boundary("s", "m2", "outer-2"));
-  assert.equal(lifecycle.process(finalReply("s", "outer-1")).correlation.turnId, "m1");
+  assert.equal(lifecycle.process(finalReply("s", "outer-1")), null);
+  assert.equal(lifecycle.process({ ...official("turn.completed", "s", "retry-1"),
+    details: { component: "agent_lifecycle_end", status: "execution-settled" } }).correlation.turnId, "m1");
   assert.equal(lifecycle.process(finalReply("s", "outer-1")), null);
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
 });

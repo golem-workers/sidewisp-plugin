@@ -1,3 +1,4 @@
+const candidateVersion = JSON.parse(readFileSync(new URL('../package.json', import.meta.url))).version;
 import test from 'node:test';import assert from 'node:assert/strict';
 import {mkdtempSync,readFileSync,mkdirSync,rmSync} from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {shouldApply,updateHeartbeat} from '../src/update/manager.js';
@@ -28,7 +29,7 @@ test('manager installer creates isolated bundle and profile-scoped service witho
  const environment={HOME:home,PATH:'/usr/bin',OPENCLAW_STATE_DIR:stateDir,OPENCLAW_CONFIG_PATH:path.join(stateDir,'openclaw.json'),OPENCLAW_PROFILE:'proof',SECRET_TOKEN:'do-not-copy'};
  const result=installUpdateManager({stateDir,endpoint:'https://staging-api.sidewisp.com',environment,platform:'linux',run:(...a)=>calls.push(a)});
  const unit=readFileSync(path.join(home,'.config/systemd/user',result.unit),'utf8');assert.match(unit,/manager\/current\/scripts\/managed-updater.mjs/);assert.match(unit,/OPENCLAW_PROFILE=proof/);assert.doesNotMatch(unit,/SECRET_TOKEN|do-not-copy|gateway restart/);
- assert.equal(JSON.parse(readFileSync(path.join(stateDir,'sidewisp/manager/current/package.json'),'utf8')).version,'0.2.67');assert.equal(calls.length,2);
+ assert.equal(JSON.parse(readFileSync(path.join(stateDir,'sidewisp/manager/current/package.json'),'utf8')).version,candidateVersion);assert.equal(calls.length,2);
  assert.throws(()=>installUpdateManager({stateDir,endpoint:'https://api.sidewisp.com',environment,platform:'linux',run:()=>{}}),/MANAGER_BINDING_MISMATCH/);
  }finally{rmSync(home,{recursive:true,force:true});}
 });
