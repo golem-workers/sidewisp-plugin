@@ -1658,6 +1658,11 @@ test("new current task cannot receive a late exact run binding from the previous
   lifecycle.process(official("turn.started", "s", "inner-1"));
   lifecycle.process(boundary("s", "m2", "outer-2"));
   assert.equal(lifecycle.process(official("turn.failed", "s", "inner-1")), null);
+  assert.equal(lifecycle.process(official("turn.started", "s", "new-unbound")), null);
+  assert.equal(lifecycle.process({
+    ...official("turn.failed", "s", "inner-1"),
+    details: { component: "runtime_reconciliation" },
+  }).correlation.turnId, "m1");
   assert.equal(lifecycle.process(official("turn.started", "s", "new-unbound")).correlation.turnId, "m2");
 });
 
@@ -1680,6 +1685,7 @@ test("retry stays with task one before task two dispatches", () => {
   assert.equal(lifecycle.process(official("turn.started", "s", "retry-1")), null);
   assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
   lifecycle.process(boundary("s", "m2", "outer-2"));
+  assert.equal(lifecycle.process(finalReply("s", "outer-1")).correlation.turnId, "m1");
   assert.equal(lifecycle.process(finalReply("s", "outer-1")), null);
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
 });

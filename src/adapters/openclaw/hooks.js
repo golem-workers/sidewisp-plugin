@@ -75,6 +75,7 @@ export function parseOpenClawActiveWorkCursor(value) {
               sessionId,
               messageId,
               started: candidate.started === true,
+              ...(candidate.detached === true ? { detached: true } : {}),
               ...(safeCursorId(candidate.outerRunId) ? { outerRunId: candidate.outerRunId } : {}),
               internalRunIds: [...new Set(
                 (Array.isArray(candidate.internalRunIds) ? candidate.internalRunIds : [])
@@ -420,7 +421,10 @@ export function createOpenClawUserTaskLifecycle({
       for (const runId of previous.internalRunIds) bind(previous, transition.key, runId);
     }
     if (!previous) return;
-    if (!previous.terminal) currentBySession.set(previous.sessionId, transition.key);
+    if (!previous.terminal) {
+      previous.detached = false;
+      currentBySession.set(previous.sessionId, transition.key);
+    }
   };
   const processDetailed = (event) => {
     const nowMs = now();
@@ -497,14 +501,22 @@ export function createOpenClawUserTaskLifecycle({
         updatedAt: nowMs,
       };
       if (previous && !previous.terminal) {
-        if (previous.pendingTerminal) {
+        if (previous.pendingTerminal && previous.pendingTerminal.details?.status !== "continuation-pending") {
           if (attemptPending(previousKey, previous)) {
             rememberRetired(previous);
             remove(previousKey);
           } else {
             state.previousOnRollback = { key: previousKey, retired: false };
+            previous.detached = true;
             clearCurrent(previousKey, previous);
           }
+        } else if (previous.started) {
+          // before_dispatch is admission, not execution settlement: it may run
+          // while the previous native run is still alive. Retain only its exact
+          // run/message bindings; never let new unbound runs attach to it.
+          previous.detached = true;
+          clearCurrent(previousKey, previous);
+          state.previousOnRollback = { key: previousKey, retired: false };
         } else {
           const snapshot = snapshotTask(previous);
           retire(previousKey, previous, nowMs);
@@ -623,6 +635,12 @@ export function createOpenClawUserTaskLifecycle({
       // Every same-session lifecycle run inside that window belongs to the task,
       // even when OpenClaw omits an explicit continuation marker.
       if (candidate) {
+        // With another executing task retained in this session, an unbound
+        // run could be either a continuation or the new task. Fail closed;
+        // exact existing run/message bindings remain usable.
+        if ([...records.values()].some(other => other !== candidate
+            && other.kind === "task" && other.sessionId === correlation.sessionId
+            && other.detached && !other.terminal)) return coalesced();
         [key, state] = [candidateKey, candidate];
       }
     }
@@ -658,6 +676,12 @@ export function createOpenClawUserTaskLifecycle({
         return accepted(state.startEvent);
       }
       if (!state.started) return coalesced();
+      // A producer-confirmed terminal of a retained old run is not a terminal
+      // of the newer current task. Keep normal enqueue/rollback accounting;
+      // do not invoke the deferred sink before its observer has registered it.
+      if (state.detached && event.details?.status === "execution-settled") {
+        return accepted(complete(key, state, retarget(event, state), nowMs));
+      }
       return deferTerminal(key, state, event, nowMs) ? buffered() : coalesced();
     }
     if (key) return coalesced();
@@ -693,6 +717,7 @@ export function createOpenClawUserTaskLifecycle({
     .map((state) => Object.freeze(state.kind === "task" ? {
       kind: "task", sessionId: state.sessionId, messageId: state.messageId,
       turnId: state.turnId, started: state.started,
+      ...(state.detached === true ? { detached: true } : {}),
       ...(state.outerRunId ? { outerRunId: state.outerRunId } : {}),
       internalRunIds: [...state.internalRunIds],
     } : {
@@ -705,11 +730,12 @@ export function createOpenClawUserTaskLifecycle({
       const nowMs = now();
       if (candidate?.kind === "task") {
         const key = taskKey(candidate.sessionId, candidate.messageId);
-        if (!key || records.has(key) || currentTask(candidate.sessionId)[1]) continue;
+        if (!key || records.has(key) || (candidate.detached !== true && currentTask(candidate.sessionId)[1])) continue;
         const state = {
           kind: "task", sessionId: candidate.sessionId, messageId: candidate.messageId,
           turnId: candidate.turnId, outerRunId: candidate.outerRunId,
           internalRunIds: [...(candidate.internalRunIds ?? [])], started: candidate.started === true,
+          detached: candidate.detached === true,
           terminal: false, durable: false, pendingTerminal: null, pendingRetryable: false,
           pendingAwaitingFinal: false, pendingConfirmed: false, pendingPersistAttempts: 0,
           pendingDeadline: null, pendingTimer: null, registrationEvent: null, startEvent: null,
@@ -717,7 +743,7 @@ export function createOpenClawUserTaskLifecycle({
           previousOnRollback: null, pendingInboundOnRollback: null, staged: false, updatedAt: nowMs,
         };
         if (!track(key, state)) continue;
-        currentBySession.set(state.sessionId, key);
+        if (!state.detached) currentBySession.set(state.sessionId, key);
         bind(state, key, state.outerRunId);
         for (const runId of state.internalRunIds) bind(state, key, runId);
         restored += 1;
@@ -1001,7 +1027,9 @@ export function openClawAgentEventInput(event = {}) {
         component: data.phase === "end" ? "agent_lifecycle_end" : "agent_lifecycle_error",
         status: data.phase === "error" && Number.isSafeInteger(data.endedAt)
           ? "terminal-candidate"
-          : continuationPending ? "continuation-pending" : undefined,
+          : continuationPending ? "continuation-pending"
+            : data.executionSettled === true && Number.isSafeInteger(data.endedAt)
+              ? "execution-settled" : undefined,
         durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
         correlation,
       };
