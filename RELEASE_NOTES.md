@@ -1,3 +1,7 @@
+# 0.2.72 — staging native cron bootstrap
+
+The verified plugin provisions the corrected canonical cron helper into configured OpenClaw agent workspaces on collector start. Fresh setup, manager updates and reconnect use the same idempotent path. Only exact legacy canonical bytes are upgraded, with a retained backup. Custom helpers and instructions remain untouched; unknown custom helpers are explicitly unverified. Non-staging endpoints are unchanged. Credentials, cron stores, pause/filter settings and unrelated work are not reset.
+
 # 0.2.65 — staging service-owned recovery observers
 
 - Require the separate immutable OpenClaw 2026.9.8 reply-observer.5 companion before new tester authorization.

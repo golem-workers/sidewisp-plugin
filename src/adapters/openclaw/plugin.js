@@ -1,3 +1,5 @@
+import { ensureNativeCronHelper } from "../../bootstrap/native-cron-helper.js";
+import { listAgentIds, resolveAgentWorkspaceDir } from "openclaw/plugin-sdk/agent-runtime";
 import { createOpenClawQuestionObserver } from "./questions.js";
 import { collectOpenClawCron, watchOpenClawCron } from '../../cron/openclaw.js';
 import { createCronDelivery } from '../../delivery/cron.js';
@@ -47,7 +49,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.71";
+const VERSION = "0.2.72";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -309,6 +311,11 @@ export default definePluginEntry({
         activation.serviceStarted(ctx);
         if (!config.enabled) return;
         try {
+          if (config.endpoint === "https://staging-api.sidewisp.com") {
+            const hostConfig = api.runtime.config.current();
+            const helper = await ensureNativeCronHelper({ endpoint: config.endpoint, workspaces: listAgentIds(hostConfig).map(id => resolveAgentWorkspaceDir(hostConfig, id)) });
+            if (helper.status === "custom_preserved") ctx.logger.warn("Sidewisp preserved a custom native cron helper; managed helper readiness is unverified");
+          }
           await auth.load();
           if (setupToken) {
             try { await auth.applySetupToken(setupToken); }
