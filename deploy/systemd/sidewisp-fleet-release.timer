@@ -1,0 +1,9 @@
+[Unit]
+Description=Discover verified Sidewisp plugin releases every 15 minutes
+[Timer]
+OnBootSec=30
+OnUnitInactiveSec=900
+RandomizedDelaySec=30
+Unit=sidewisp-fleet-release.service
+[Install]
+WantedBy=timers.target

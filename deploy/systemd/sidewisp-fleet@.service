@@ -1,0 +1,11 @@
+[Unit]
+Description=Sidewisp verified plugin rollout (%i)
+After=network-online.target
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/usr/bin/python3 /opt/sidewisp-fleet/current/scripts/fleet-controller.py /etc/sidewisp-fleet/%i.json
+TimeoutStartSec=300
+NoNewPrivileges=true
+PrivateTmp=true
+
