@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, rm, stat, symlink } from 'node:fs/promises';
 import os from 'node:os';import path from 'node:path';import { spawnSync } from 'node:child_process';
-import { ensureNativeCronHelper } from '../src/bootstrap/native-cron-helper.js';
+import { ensureNativeCronHelper, nativeCronWorkspaces } from '../src/bootstrap/native-cron-helper.js';
 const endpoint='https://staging-api.sidewisp.com';
 const source=await readFile(new URL('../src/bootstrap/native-cron/cron-helper.sh',import.meta.url),'utf8');
 async function fixture(t) {const workspace=await mkdtemp(path.join(os.tmpdir(),'sw-native-cron-'));t.after(()=>rm(workspace,{recursive:true,force:true}));return {workspace,options:{endpoint,workspaces:[workspace]}};}
@@ -42,3 +42,5 @@ for(const [kind,expected,attempts] of [['failure',42,1],['pairing',42,3],['recov
  const r=spawnSync('bash',[path.join(f.workspace,'cron-helper/cron-helper.sh'),'list','--all','--json'],{encoding:'utf8',env:{...process.env,OPENCLAW_PNPM_HOME:path.join(f.workspace,'absent'),OPENCLAW_STATE_DIR:f.workspace,OPENCLAW_CONFIG_PATH:path.join(f.workspace,'openclaw.json'),OPENCLAW_CRON_RETRY_ATTEMPTS:'3',OPENCLAW_CRON_RETRY_DELAY_SECONDS:'0',PATH:path.join(f.workspace,'bin')+':'+process.env.PATH,TEST_CASE:kind,COUNT_FILE:path.join(f.workspace,'count')}});
  assert.equal(r.status,expected,r.stderr);assert.equal(Number(await readFile(path.join(f.workspace,'count'),'utf8')),attempts);if(expected)assert.doesNotMatch(r.stdout,/ok.*true/);
 });
+
+test("shared provisioned base and SDK model workspace are both retained",()=>assert.deepEqual(nativeCronWorkspaces({config:{agents:{defaults:{workspace:"~/workspace"}}},home:"/profile",resolvedWorkspaces:["/profile/workspace/main","/custom/secondary"]}),["/profile/workspace","/profile/workspace/main","/custom/secondary"]));

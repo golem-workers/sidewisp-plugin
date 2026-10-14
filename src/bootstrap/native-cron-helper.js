@@ -3,6 +3,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, lstat, mkdir, writeFile, rename, unlink, chmod } from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const pins = {
  'cron-helper/cron-helper.sh': { source:'cron-helper.sh', mode:0o755, current:'7989fc94c23f59c8441205b64c144e1de54462db72ba3d3aaa19cfe168cceb9c', previous:['a165a012664adb6c81051311b20417aed9947d4d2556da7d5c58e3525f77c6b3'] },
@@ -15,6 +16,13 @@ async function regular(file) {
 async function directory(dir) {
  try { const st = await lstat(dir); if(!st.isDirectory() || st.isSymbolicLink()) throw Error('native_cron_nonregular_directory'); }
  catch(e) { if(e.code !== 'ENOENT') throw e; try { await mkdir(dir, {mode:0o755}); } catch(race) { if(race.code !== 'EEXIST') throw race; const st=await lstat(dir); if(!st.isDirectory() || st.isSymbolicLink()) throw Error('native_cron_nonregular_directory'); } }
+}
+// The provisioned shared helper predates per-agent workspace subdivision.
+// Upgrade its configured base as well as the SDK-resolved model workspaces.
+export function nativeCronWorkspaces({ config, resolvedWorkspaces, home = os.homedir() }) {
+ const base = config?.agents?.defaults?.workspace;
+ const expanded = typeof base === 'string' && base.startsWith('~/') ? path.join(home, base.slice(2)) : base;
+ return [...new Set([...(typeof expanded === 'string' && path.isAbsolute(expanded) ? [expanded] : []), ...resolvedWorkspaces])];
 }
 export async function ensureNativeCronHelper({endpoint, workspaces}) {
  // Production defaults and existing production collectors stay byte-identical.
