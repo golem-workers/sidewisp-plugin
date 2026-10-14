@@ -12,12 +12,12 @@ bash -n \
   scripts/promote-production.sh
 npm run check
 archive=$(npm pack --pack-destination "$release_dir" --silent)
-OPENCLAW_STATE_DIR="$release_dir/state" openclaw plugins install "$release_dir/$archive" --force >/dev/null
+OPENCLAW_STATE_DIR="$release_dir/state" openclaw plugins install "$release_dir/$archive" --force --accept-capabilities >/dev/null
 inspection=$(OPENCLAW_STATE_DIR="$release_dir/state" openclaw plugins inspect sidewisp --runtime --json)
 node -e '
 const value = JSON.parse(process.argv[1]);
 if (value.plugin.status !== "loaded") throw new Error(`plugin status: ${value.plugin.status}`);
 if (!value.services.includes("sidewisp-collector")) throw new Error("collector service missing");
-if (value.tools.length || value.plugin.providerIds.length) throw new Error("plugin exposed an agent capability");
+if (JSON.stringify(value.tools.flatMap(tool => typeof tool === "string" ? [tool] : tool.names ?? [])) !== JSON.stringify(["sidewisp_connect"]) || value.plugin.providerIds.length) throw new Error("unexpected plugin agent capability");
 if (!value.gatewayMethods.includes("sidewisp.status") || !value.gatewayMethods.includes("sidewisp.supportBundle")) throw new Error("diagnostic methods missing");
 ' "$inspection"

@@ -131,3 +131,19 @@ test("backend rejection and clock-skew response retain the newest snapshot", asy
     assert.equal(spool.pending.snapshotId, "sw_diag_clock");
   }
 });
+test('unchanged observations refresh every probe cadence so stable recovery is visible', async () => {
+ const spool=memorySpool();let time=Date.parse('2026-09-21T00:00:00Z');let sent=0;let ttl;
+ const delivery=createRuntimeDiagnosticsDelivery({adapter:{collectDiagnostics:async options=>{ttl=options.ttlSeconds;return snapshot('sw_diag_'+time,new Date(time).toISOString())}},spool,endpoint:'https://sidewisp.test',credentialProvider:{current:async()=>credential},now:()=>time,fetchImpl:async(_url,request)=>{sent++;return {ok:true,status:200,json:async()=>({schema:'sidewisp.runtime-diagnostics-ack.v1',snapshotId:JSON.parse(request.body).snapshotId,accepted:true,current:true})}}});
+ await delivery.run();time+=900001;await delivery.run();assert.equal(sent,2);assert.ok(ttl>900);
+});
+
+ test("first diagnostics does not wait a full fifteen-minute sampling interval", () => {
+  const delays = [];
+  const delivery = createRuntimeDiagnosticsDelivery({
+    adapter: {}, spool: memorySpool(), endpoint: "https://sidewisp.test",
+    credentialProvider: {}, random: () => 1,
+    setTimer: (_fn, delay) => { delays.push(delay); return { unref() {} }; },
+  });
+  delivery.start();
+  assert.deepEqual(delays, [30000]);
+});

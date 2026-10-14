@@ -1,15 +1,29 @@
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import path from "node:path";
 
 const INSTALLATION_ID = /^sw_ins_[A-Za-z0-9_-]{8,128}$/;
 const SECRET = /^sw_secret_[A-Za-z0-9_-]{24,256}$/;
+const SETUP_TOKEN_FINGERPRINT = /^[a-f0-9]{64}$/;
+
+function setupTokenFingerprint(setupToken) {
+  return crypto.createHash("sha256").update(setupToken).digest("hex");
+}
 
 function validateCredential(value) {
   if (!value || typeof value !== "object" || !INSTALLATION_ID.test(value.installationId) || !SECRET.test(value.secret)) {
     throw new TypeError("invalid installation credential");
   }
   if (!['active', 'revoked'].includes(value.status)) throw new TypeError("invalid credential status");
-  return { installationId: value.installationId, secret: value.secret, status: value.status };
+  if (value.setupTokenFingerprint !== undefined && !SETUP_TOKEN_FINGERPRINT.test(value.setupTokenFingerprint)) {
+    throw new TypeError("invalid setup token fingerprint");
+  }
+  return {
+    installationId: value.installationId,
+    secret: value.secret,
+    status: value.status,
+    ...(value.setupTokenFingerprint ? { setupTokenFingerprint: value.setupTokenFingerprint } : {}),
+  };
 }
 
 export function createFileCredentialStore({ stateDir }) {
@@ -69,7 +83,12 @@ export function createEnrollmentManager({ endpoint, store, fetchImpl = globalThi
         });
         if (!response.ok) throw new Error(`enrollment failed (${response.status})`);
         const body = await response.json();
-        await persist(validateCredential({ installationId: body.installationId, secret: body.installationSecret, status: "active" }));
+        await persist(validateCredential({
+          installationId: body.installationId,
+          secret: body.installationSecret,
+          status: "active",
+          setupTokenFingerprint: setupTokenFingerprint(setupToken),
+        }));
         try { await clearSetupToken(); }
         catch { return { installationId: credential.installationId, status: state, setupTokenCleanupPending: true }; }
         return { installationId: credential.installationId, status: state };
@@ -77,6 +96,12 @@ export function createEnrollmentManager({ endpoint, store, fetchImpl = globalThi
         state = "enrollment-failed";
         throw error;
       }
+    },
+    async applySetupToken(setupToken) {
+      if (typeof setupToken !== "string" || !setupToken.startsWith("sw_setup_")) throw new TypeError("invalid setup token");
+      if (credential?.setupTokenFingerprint !== setupTokenFingerprint(setupToken)) return this.enroll(setupToken);
+      await clearSetupToken();
+      return { installationId: credential.installationId, status: state };
     },
     async clearStoredSetupToken() {
       if (state !== "active") return false;
@@ -93,6 +118,8 @@ export function createEnrollmentManager({ endpoint, store, fetchImpl = globalThi
     },
     canSend: () => state === "active",
     status: () => ({ state, installationId: credential?.installationId ?? null }),
-    credential: () => credential && state === "active" ? { ...credential } : null,
+    credential: () => credential && state === "active"
+      ? { installationId: credential.installationId, secret: credential.secret, status: credential.status }
+      : null,
   });
 }
