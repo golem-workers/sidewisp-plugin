@@ -1258,12 +1258,16 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
           || receipt.nonDelivery === true || receipt.noOp === true) return null;
       // A successful attachment-only send is not the assistant's final reply.
       // Preserve legacy implicit text finals and explicit final=true, but leave
-      // textless sends open for the automatic reply observer. Decide from text
-      // presence, NOT sanitizer acceptance: sensitive finals still complete
-      // without a preview. Read no attachment/caption/target or result content.
+      // textless sends open for the automatic reply observer. Decide from
+      // message/caption presence, NOT sanitizer acceptance: sensitive finals
+      // still complete without a preview. Read no attachment/target/result content.
       let hasText = false;
       const messagePreview = readMessagePreview(() => {
-        const text = event.params.message;
+        const message = event.params.message;
+        // A delivered file caption is also a user-facing source answer. Read
+        // only this bounded text fallback, never file bytes or destination data.
+        const text = typeof message === "string" && /\S/u.test(message.slice(0, 16_384))
+          ? message : event.params.caption;
         hasText = typeof text === "string" && /\S/u.test(text.slice(0, 16_384));
         return text;
       }, event.params.final === false ? "turn.progress" : "turn.completed");
