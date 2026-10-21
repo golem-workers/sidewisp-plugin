@@ -121,6 +121,7 @@ export function prepareRuntimeCompanion({run,stateDir,configPath}) {
 }
 
 export function finalizeRuntimeCompanion({stateDir,prepared}) {
+ mkdirSync(path.join(stateDir,'sidewisp','runtime-companion-4013'),{recursive:true,mode:0o700});
  const journal=path.join(stateDir,'sidewisp','runtime-companion-4013','result.json');let previous={};try{previous=JSON.parse(readFileSync(journal,'utf8'));}catch{}
  writeFileSync(journal+'.complete.tmp',JSON.stringify({...previous,...prepared,phase:'completed',completedAtMs:Date.now()})+'\n',{mode:0o600});renameSync(journal+'.complete.tmp',journal);
 }
