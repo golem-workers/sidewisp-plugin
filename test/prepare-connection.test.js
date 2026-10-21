@@ -25,7 +25,7 @@ test('truthy nonboolean readiness does not authorize',async()=>{const f=fixture(
 
 test('fresh install retries only host retained work then continues',async()=>{const f=fixture(null);let attempts=0;f.options.install=async()=>{if(++attempts<3)throw Error('still has active retained work; retry after the work finishes.');};await prepareConnection(f.options);assert.equal(attempts,3);assert.ok(f.calls.includes('begin'));});
 test('idle wait stops when invitation expires',async()=>{const f=fixture(null);let time=1;f.options.now=()=>time;f.options.expiresAtMs=2;f.options.install=async()=>{throw Error('still has active retained work; retry after the work finishes.');};f.options.sleep=async()=>{time=2;};await assert.rejects(prepareConnection(f.options),/fresh_invitation_required/);assert.ok(!f.calls.includes('begin'));});
-test('retained work retry budget is bounded',async()=>{const f=fixture(null);let attempts=0;f.options.maxIdleAttempts=2;f.options.install=async()=>{attempts++;throw Error('still has active retained work; retry after the work finishes.');};await assert.rejects(prepareConnection(f.options),/retained work/);assert.equal(attempts,2);assert.ok(!f.calls.includes('begin'));});
+test('retained work retry budget is bounded',async()=>{const f=fixture(null);let attempts=0;f.options.maxIdleAttempts=2;f.options.install=async()=>{attempts++;throw Error('still has active retained work; retry after the work finishes.');};await assert.rejects(prepareConnection(f.options),/host_idle_timeout/);assert.equal(attempts,2);assert.ok(!f.calls.includes('begin'));});
 
 test('cold activation completes before approval and never repeats install or reload',async()=>{
  const f=fixture(null);let ready=false,activations=0;

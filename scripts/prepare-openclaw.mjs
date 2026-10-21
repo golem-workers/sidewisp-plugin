@@ -2,7 +2,7 @@
 import {prepareRuntimeCompanion,finalizeRuntimeCompanion} from '../src/auth/runtime-companion.js';
 // Run from an extracted, SHA-256-verified release. Public invitation only;
 // credentials and approval proof never appear in arguments, logs or output.
-import {execFileSync,spawnSync} from 'node:child_process';
+import {execFileSync,spawnSync,spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,mkdirSync,renameSync} from 'node:fs';
 import path from 'node:path';import {fileURLToPath} from 'node:url';
@@ -33,9 +33,21 @@ if(options.enqueue){
  try{
   const status=()=>{try{return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}catch(e){if(/unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}};
   const client=createDeviceAuthorizationClient({endpoint:endpoint.origin,stateDir});
+  let reported='',reportedAt=0;
+  const persist=async s=>{
+   writeState({status:s.stage,...s});
+   if(options.updateOnly || ['completed','connection_pending','approval_pending'].includes(s.stage))return;
+   const key=s.stage+':'+(s.reasonCode??s.reason??'');
+   if(key===reported&&Date.now()-reportedAt<30000)return;
+   reported=key;reportedAt=Date.now();
+   const allowed=['ACTIVE_WORK','HOST_RETAINED_WORK','IDLE_WINDOW_TIMEOUT','host_idle_timeout','fresh_invitation_required','update_failed','collector_not_ready','preparation_failed'];
+   const reason=s.reasonCode??s.reason;
+   try{await client.reportPreparation({id:options['request-id'],stage:s.stage,...(reason?{reasonCode:allowed.includes(reason)?reason:'preparation_failed'}:{})});}
+   catch{writeState({status:s.stage,...s,progressReporting:'unavailable'});}
+  };
   const result=await prepareConnection({targetVersion:version,endpoint:endpoint.origin,updateOnly:options.updateOnly,
    expiresAtMs:options['expires-at-ms'] === undefined ? undefined : Number(options['expires-at-ms']),
-   inspect:status,prepareRuntime:()=>prepareRuntimeCompanion({run,stateDir,configPath:process.env.OPENCLAW_CONFIG_PATH}),finalizeRuntime:prepared=>finalizeRuntimeCompanion({stateDir,prepared}),runtimeNeedsActivation:prepared=>JSON.parse(run(['gateway','status','--no-probe','--json'])).service.runtime.pid===prepared.gatewayPid,persist:s=>writeState({status:s.stage,...s}),
+   inspect:status,prepareRuntime:()=>prepareRuntimeCompanion({run,stateDir,configPath:process.env.OPENCLAW_CONFIG_PATH}),finalizeRuntime:prepared=>finalizeRuntimeCompanion({stateDir,prepared}),runtimeNeedsActivation:prepared=>JSON.parse(run(['gateway','status','--no-probe','--json'])).service.runtime.pid===prepared.gatewayPid,persist,
    // Do not wait for collector readiness before configuring a fresh install.
    // Host retained-work refusal stops this attempt; it never permits bypass.
    install:async()=>run(['plugins','install',options.archive,'--force','--accept-capabilities']),
@@ -45,8 +57,10 @@ if(options.enqueue){
    },
    coldActivate:()=>coldActivateOpenClaw({run,stateDir,configPath:process.env.OPENCLAW_CONFIG_PATH}),
    upgrade:async()=>{
-    runHelper();
+    await runHelper(s=>persist({stage:'waiting_for_host_idle',reasonCode:s.reasonCode??'ACTIVE_WORK'}));
     const state=JSON.parse(readFileSync(path.join(stateDir,'sidewisp/update-status.json'),'utf8'));
+    if(state.status==='deferred')throw Object.assign(new Error('update_deferred'),{reasonCode:state.reasonCode});
+    if(state.status==='failed')throw new Error('update_failed');
     if(!['completed','skipped'].includes(state.status))throw new Error('update_not_applied');
    },
    ensureManager:async()=>installUpdateManager({stateDir,endpoint:endpoint.origin,upgrade:true}),
@@ -57,8 +71,16 @@ if(options.enqueue){
   console.log(JSON.stringify(result));
  }catch(e){const result={status:'blocked',reason:isRetainedWork(e)?'host_retained_work':/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed'};writeState(result);console.log(JSON.stringify(result));process.exitCode=1;}
 }
-function runHelper(){
+async function runHelper(onProgress){
  const d={schema:'sidewisp.plugin-update.v1',targetVersion:version,targetSpec:`git:github.com/golem-workers/sidewisp-plugin@v${version}`,
  sha256:options.sha256,archivePath:options.archive,restartDelaySeconds:30,stateFile:path.join(stateDir,'sidewisp/update-status.json')};
- execFileSync(process.execPath,[fileURLToPath(new URL('./openclaw-update-helper.mjs',import.meta.url)),JSON.stringify(d)],{stdio:'pipe',timeout:900000});
+ // Keep the helper outside the Gateway lifetime and project busy admission
+ // while it runs. A deferred journal is resumable; a failed one is not retried.
+ await new Promise((resolve,reject)=>{
+  const child=spawn(process.execPath,[fileURLToPath(new URL('./openclaw-update-helper.mjs',import.meta.url)),JSON.stringify(d)],{stdio:'ignore'});
+  let pending=Promise.resolve();
+  const poll=setInterval(()=>{try{const s=JSON.parse(readFileSync(d.stateFile,'utf8'));if(s.targetVersion===version&&s.status==='waiting_for_idle')pending=pending.then(()=>onProgress(s));}catch{}},1000);
+  child.once('error',e=>{clearInterval(poll);reject(e);});
+  child.once('exit',code=>{clearInterval(poll);pending.then(()=>code===0?resolve():reject(new Error('update_failed')),reject);});
+ });
 }

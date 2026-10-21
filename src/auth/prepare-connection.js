@@ -1,6 +1,6 @@
 import { isRetainedWork } from '../update/hot-update.js';
 // Host-authorized operations are injected by the CLI; no policy fallback here.
-export async function prepareConnection({ targetVersion, endpoint, updateOnly = false, inspect, install, upgrade, activate, coldActivate, begin, persist, ensureManager = async () => {}, prepareRuntime, finalizeRuntime = async () => {}, runtimeNeedsActivation = async () => true, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxReadinessAttempts = 60, maxIdleAttempts = 120, expiresAtMs, now = Date.now }) {
+export async function prepareConnection({ targetVersion, endpoint, updateOnly = false, inspect, install, upgrade, activate, coldActivate, begin, persist, ensureManager = async () => {}, prepareRuntime, finalizeRuntime = async () => {}, runtimeNeedsActivation = async () => true, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), maxReadinessAttempts = 60, maxIdleAttempts = 3600, expiresAtMs, now = Date.now }) {
   if (!Number.isInteger(maxReadinessAttempts) || maxReadinessAttempts < 1) throw new Error('invalid_readiness_attempts');
   const mark = async (stage, extra = {}) => persist({ stage, ...extra });
   const checkExpiry = () => {
@@ -11,8 +11,9 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
     for (let attempt = 0; attempt < maxIdleAttempts; attempt++) {
       checkExpiry();
       try { return await operation(); } catch (error) {
-        if (!(isRetainedWork(error) || error?.message === 'host_activation_busy') || attempt + 1 === maxIdleAttempts) throw error;
-        await mark('waiting_for_host_idle', { attempt: attempt + 1 });
+        if (!(isRetainedWork(error) || ['host_activation_busy','update_deferred'].includes(error?.message))) throw error;
+        if (attempt + 1 === maxIdleAttempts) throw new Error('host_idle_timeout');
+        await mark('waiting_for_host_idle', { reasonCode: error?.reasonCode ?? 'HOST_RETAINED_WORK', attempt: attempt + 1 });
         await sleep(1000);
       }
     }
@@ -33,7 +34,7 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
       await whenIdle(activate);
     } else if (original.version !== targetVersion) {
       await mark('upgrading');
-      await upgrade();
+      await whenIdle(upgrade);
     }
     if ((runtimePrepared?.activationRequired ?? runtimePrepared?.changed) && await runtimeNeedsActivation(runtimePrepared)) {
       if (typeof coldActivate !== 'function') throw Error('cold_activation_required');
