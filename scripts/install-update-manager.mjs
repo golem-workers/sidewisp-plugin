@@ -21,6 +21,7 @@ export function installUpdateManager({stateDir,endpoint,run=execFileSync,environ
   if(priorVersion!==version){
    if(isNewerVersion(priorVersion,version))throw Error('NEWER_MANAGER_INSTALLED');
    if(existsSync(path.join(stateDir,'sidewisp','update-status.json.lock')))throw Error('MANAGER_UPDATE_IN_PROGRESS');
+   try {run('/usr/bin/flock',['--nonblock',path.join(stateDir,'sidewisp','update-status.json.kernel-lock'),'/usr/bin/true'],{stdio:'pipe'});}catch {throw Error('MANAGER_UPDATE_IN_PROGRESS');}
    upgradeNeeded=true;previousRelease=previous;
   }
  }

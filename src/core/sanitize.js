@@ -1,3 +1,4 @@
+import { readMessagePreview } from "./message-preview.js";
 import { knownCause } from "./causes.js";
 const DETAIL_KEYS = new Set(["code", "reason", "status", "component", "operation", "capability", "attempt", "count", "durationMs", "exitCode", "httpStatus", "recoverable", "expected"]);
 const CORRELATION_KEYS = new Set(["sessionId", "turnId", "toolCallId", "messageId", "parentEventId"]);
@@ -8,7 +9,7 @@ const SOURCE_KINDS = new Set(["hook", "log", "state", "health", "collector"]);
 const OUTCOMES = new Set(["info", "success", "failure", "degraded"]);
 const EVENT_TYPES = new Set([
   "runtime.started", "runtime.stopped", "runtime.restarted", "runtime.crashed", "gateway.connected", "gateway.disconnected",
-  "turn.started", "turn.completed", "turn.failed", "turn.timeout", "turn.cancelled", "tool.started", "tool.completed", "tool.failed", "tool.timeout", "tool.cancelled",
+  "turn.started", "turn.progress", "turn.completed", "turn.failed", "turn.timeout", "turn.cancelled", "tool.started", "tool.completed", "tool.failed", "tool.timeout", "tool.cancelled",
   "message.received", "message.delivered", "message.rejected", "message.failed", "provider.auth_failed", "provider.rate_limited", "provider.unavailable",
   "queue.stuck", "queue.recovered", "context.exhausted", "config.invalid", "plugin.failed", "health.snapshot", "collector.started", "collector.stopped", "collector.degraded",
 ]);
@@ -49,7 +50,9 @@ export function sanitizeTelemetryEvent(input) {
     if (!SOURCE_KINDS.has(source.kind)) throw new SanitizationError("invalid-source-kind");
     if (!EVENT_TYPES.has(input.type)) throw new SanitizationError("invalid-event-type");
     if (!OUTCOMES.has(input.outcome)) throw new SanitizationError("invalid-outcome");
+    const messagePreview = readMessagePreview(() => input.messagePreview, input.type, input.details);
     return {
+      ...(messagePreview ? { messagePreview } : {}),
       schema: "sidewisp.telemetry.v1",
       eventId: safeString(input.eventId, "event-id"),
       installationId: safeString(input.installationId, "installation-id"),

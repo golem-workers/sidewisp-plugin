@@ -14,12 +14,13 @@ export async function updateHeartbeat({endpoint,credential,report,fetchImpl=fetc
  if(result.schema!=='sidewisp.update-heartbeat.v1'||result.installationId!==credential.installationId||!(result.update===null||validManagedDirective(result.update)))throw Error('INVALID_CONTROL_RESPONSE');
  return result.update;
 }
-export function shouldApply({directive,currentVersion,attempt,active=false}) {
+export function shouldApply({directive,currentVersion,attempt,active=false,currentReady=true}) {
  if(active||!validManagedDirective(directive))return false;
- if(currentVersion&&!isNewerVersion(directive.targetVersion,currentVersion))return false;
+ if(currentVersion&&isNewerVersion(currentVersion,directive.targetVersion))return false;
+ if(currentVersion===directive.targetVersion&&currentReady&&attempt?.mode!=='single_current')return false;
  // A fresh policy revision can authorize retry after a resolved failure, never
  // resume an interrupted mutation or rollback blindly.
- if(['updating','verifying','rolling_back'].includes(attempt?.status))return false;
+ if(attempt?.mode!=='single_current'&&['updating','verifying','rolling_back'].includes(attempt?.status))return false;
  if(attempt?.targetVersion===directive.targetVersion && attempt?.revision===directive.revision && ['failed','rolled_back','completed','skipped'].includes(attempt.status))return false;
  return true;
 }

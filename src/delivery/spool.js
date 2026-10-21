@@ -12,50 +12,73 @@ export class SpoolError extends Error {
   constructor(code, message = code) { super(message); this.name = "SpoolError"; this.code = code; }
 }
 
-async function acquireWriterLock(lockFile, { now = Date.now, legacyStaleMs = 5_000 } = {}) {
-  const owner = { pid: process.pid, token: crypto.randomUUID(), createdAtMs: now() };
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const handle = await fsp.open(lockFile, "wx", 0o600);
-      await handle.writeFile(`${JSON.stringify(owner)}\n`);
-      await handle.sync();
-      return { handle, owner };
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      let stat;
-      let current;
-      try {
-        stat = await fsp.stat(lockFile);
-        current = JSON.parse(await fsp.readFile(lockFile, "utf8"));
-      } catch {
-        current = null;
-      }
-      let stale = false;
-      if (Number.isSafeInteger(current?.pid) && current.pid > 0) {
-        try { process.kill(current.pid, 0); }
-        catch (probeError) { stale = probeError.code === "ESRCH"; }
-      } else if (stat && now() - stat.mtimeMs >= legacyStaleMs) {
-        stale = true;
-      }
-      if (!stale || !stat) throw new SpoolError("locked", "spool already has a writer");
-      const latest = await fsp.stat(lockFile).catch(() => null);
-      if (!latest || latest.dev !== stat.dev || latest.ino !== stat.ino) throw new SpoolError("locked", "spool already has a writer");
-      await fsp.unlink(lockFile).catch((unlinkError) => {
-        if (unlinkError.code !== "ENOENT") throw unlinkError;
-      });
-    }
+// SQLite's OS-held reservation serializes reclaimers and disappears on crash.
+// It is separate from the event database, so no queue/cursor reset is needed.
+function processIdentity(pid) {
+  if (process.platform !== "linux") return null;
+  try {
+    const bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const startTicks = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    if (!bootId || !/^\d+$/.test(startTicks)) return null;
+    return { bootId, startTicks };
+  } catch { return null; }
+}
+
+function staleOwner(current) {
+  if (!Number.isSafeInteger(current?.pid) || current.pid <= 0) return false;
+  try { process.kill(current.pid, 0); }
+  catch (error) { return error.code === 'ESRCH'; } // EPERM/unknown is not stale.
+  const identity = processIdentity(current.pid);
+  if (!identity) return false;
+  if (typeof current.bootId === 'string' && typeof current.startTicks === 'string') {
+    return current.bootId !== identity.bootId || current.startTicks !== identity.startTicks;
   }
-  throw new SpoolError("locked", "spool already has a writer");
+  // Legacy records have no incarnation. A previous-boot timestamp is proof;
+  // age within the current boot alone is never sufficient to take a live lock.
+  try {
+    const bootSeconds = Number(/^btime (\d+)$/m.exec(fs.readFileSync('/proc/stat', 'utf8'))?.[1]);
+    return Number.isFinite(current.createdAtMs) && bootSeconds > 0 && current.createdAtMs < bootSeconds * 1000;
+  } catch { return false; }
+}
+
+async function acquireWriterLock(lockFile, { now = Date.now } = {}) {
+  const guard = new DatabaseSync(`${lockFile}.guard.sqlite`);
+  try { guard.exec('PRAGMA busy_timeout=0; BEGIN IMMEDIATE'); }
+  catch { guard.close(); throw new SpoolError('locked', 'spool already has a writer'); }
+  const owner = { pid: process.pid, token: crypto.randomUUID(), createdAtMs: now(), ...processIdentity(process.pid) };
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let handle;
+      try { handle = await fsp.open(lockFile, 'wx', 0o600); }
+      catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        let stat, current, bytes;
+        try { stat = await fsp.lstat(lockFile); bytes = await fsp.readFile(lockFile, 'utf8'); current = JSON.parse(bytes); }
+        catch { throw new SpoolError('locked', 'spool owner identity unavailable'); }
+        if (!stat.isFile() || stat.isSymbolicLink() || !staleOwner(current)) throw new SpoolError('locked', 'spool already has a writer');
+        const latest = await fsp.lstat(lockFile).catch(() => null);
+        if (!latest || latest.dev !== stat.dev || latest.ino !== stat.ino || latest.mtimeMs !== stat.mtimeMs
+          || await fsp.readFile(lockFile, 'utf8') !== bytes) throw new SpoolError('locked', 'spool owner changed');
+        await fsp.unlink(lockFile);
+        continue;
+      }
+      try { await handle.writeFile(`${JSON.stringify(owner)}\n`); await handle.sync(); }
+      catch (error) { await handle.close(); await fsp.unlink(lockFile).catch(() => {}); throw error; }
+      return { handle, owner, guard };
+    }
+    throw new SpoolError('locked', 'spool already has a writer');
+  } catch (error) { guard.close(); throw error; }
 }
 
 async function releaseWriterLock(lockFile, lock) {
-  await lock.handle.close();
   try {
-    const current = JSON.parse(await fsp.readFile(lockFile, "utf8"));
+    await lock.handle.close();
+    const current = JSON.parse(await fsp.readFile(lockFile, 'utf8'));
     if (current?.token === lock.owner.token) await fsp.unlink(lockFile);
   } catch (error) {
-    if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
-  }
+    if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+  } finally { lock.guard.close(); }
 }
 
 function initialize(file) {
