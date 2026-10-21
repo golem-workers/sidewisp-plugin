@@ -74,15 +74,15 @@ test("restart reclaims a dead PID writer lock without deleting a live lock", asy
   await assert.rejects(fs.stat(lockFile), (error) => error.code === "ENOENT");
 });
 
-test("restart reclaims an old legacy empty writer lock", async (t) => {
+test("malformed legacy lock fails closed without stealing an unknown writer", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "sidewisp-spool-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const file = path.join(root, "spool.sqlite");
   const lockFile = `${file}.lock`;
   await fs.writeFile(lockFile, "", { mode: 0o600 });
   await fs.utimes(lockFile, new Date(0), new Date(0));
-  const spool = await openSpool({ file });
-  await spool.close();
+  await assert.rejects(openSpool({ file }), error => error.code === 'locked');
+  assert.equal(await fs.readFile(lockFile, 'utf8'), '');
 });
 
 test("corrupt database is quarantined and recovered", async (t) => {
@@ -149,4 +149,27 @@ test("long acknowledged flow stays below quota and leaves no ACK tombstones", as
   const db = new DatabaseSync(file, { readOnly: true });
   assert.equal(db.prepare("SELECT count(*) AS count FROM events").get().count, 0);
   db.close();
+});
+
+
+test('previous boot with reused live PID and same-boot PID incarnation both recover without losing queued events', async t => {
+ if(process.platform!=='linux')return t.skip('Linux boot identity fixture');
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'sidewisp-spool-reboot-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const file=path.join(root,'spool.sqlite');
+ let spool=await openSpool({file});spool.advanceCursor('preserved','42');await spool.close();
+ const bootId=(await fs.readFile('/proc/sys/kernel/random/boot_id','utf8')).trim();
+ for(const identity of [{bootId:'previous-boot',startTicks:'1'},{bootId,startTicks:'0'},{}]) {
+  await fs.writeFile(file+'.lock',JSON.stringify({pid:process.pid,createdAtMs:1,token:'orphan',...identity}));
+  spool=await openSpool({file});assert.equal(spool.cursor('preserved'),'42');
+  await assert.rejects(openSpool({file}),error=>error.code==='locked');await spool.close();
+ }
+});
+
+test('concurrent orphan reclaimers admit exactly one writer', async t=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'sidewisp-spool-race-'));t.after(()=>fs.rm(root,{recursive:true,force:true}));
+ const file=path.join(root,'spool.sqlite');await fs.writeFile(file+'.lock',JSON.stringify({pid:2147483647,token:'dead',createdAtMs:1}));
+ const outcomes=await Promise.allSettled(Array.from({length:12},()=>openSpool({file})));
+ const winners=outcomes.filter(result=>result.status==='fulfilled');assert.equal(winners.length,1);
+ assert.ok(outcomes.filter(result=>result.status==='rejected').every(result=>result.reason.code==='locked'));
+ await winners[0].value.close();
 });
