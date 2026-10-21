@@ -34,6 +34,39 @@ export async function sendTelegramConnectionReply(route, text = 'Агент по
  if(!id)throw Error('connection_reply_receipt_missing');
  return {messageId:String(id)};
 }
+// Use the host outbound adapter in a running Gateway. A nested CLI can wait on
+// the same busy Gateway/session and expire before returning a channel receipt.
+export function createRuntimeTelegramSender(api) {
+ const runtime = api?.runtime;
+ const modern = typeof runtime?.channel?.outbound?.loadAdapter === 'function';
+ const legacy = typeof runtime?.channel?.telegram?.sendMessageTelegram === 'function';
+ if (!modern && !legacy) return sendTelegramConnectionReply;
+ return async (route, text = 'Агент подключён к Sidewisp') => {
+  const trusted = telegramReplyRoute(route);
+  if (!trusted) throw Error('invalid_connection_reply_route');
+  const cfg = api.config;
+  const channel = cfg?.channels?.telegram;
+  if (channel?.enabled === false || trusted.accountId && channel?.accounts?.[trusted.accountId]?.enabled === false)
+   throw Error('telegram_account_disabled');
+  let result;
+  if (modern) {
+   const adapter = await runtime.channel.outbound.loadAdapter('telegram');
+   if (typeof adapter?.sendText !== 'function') throw Error('telegram_channel_unavailable');
+   result = await adapter.sendText({ cfg, to: trusted.target, text,
+    ...(trusted.accountId ? {accountId: trusted.accountId} : {}),
+    ...(trusted.threadId !== undefined ? {threadId: trusted.threadId} : {}) });
+  } else {
+   const threadId = trusted.threadId === undefined ? undefined : Number(trusted.threadId);
+   if (threadId !== undefined && !Number.isSafeInteger(threadId)) throw Error('invalid_connection_reply_thread');
+   result = await runtime.channel.telegram.sendMessageTelegram(trusted.target, text, { cfg,
+    ...(trusted.accountId ? {accountId: trusted.accountId} : {}),
+    ...(threadId !== undefined ? {messageThreadId: threadId} : {}) });
+  }
+  // A failed native send must never fall through to CLI and send a duplicate.
+  if (!result?.messageId || result.outcome && result.outcome !== 'sent') throw Error('connection_reply_receipt_missing');
+  return {messageId: String(result.messageId)};
+ };
+}
 export function createConnectionNotifier({stateDir,endpoint,send=sendTelegramConnectionReply,onError=()=>{}}) {
  let flight=null,acceptedId=null;
  async function deliver(){

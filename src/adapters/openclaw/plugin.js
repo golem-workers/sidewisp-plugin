@@ -17,7 +17,7 @@ import { createContextUsageDelivery } from '../../delivery/context-usage.js';
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import crypto from "node:crypto";
 import { watch } from "node:fs";
-import { createConnectionNotifier } from "../../auth/connection-notice.js";
+import { createConnectionNotifier, createRuntimeTelegramSender } from "../../auth/connection-notice.js";
 import { createUploadPump } from "../../delivery/upload-pump.js";
 import path from "node:path";
 import { mutateConfigFile } from "openclaw/plugin-sdk/config-mutation";
@@ -51,7 +51,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.76";
+const VERSION = "0.2.77";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -140,7 +140,7 @@ export default definePluginEntry({
     let uploadTimer = null;
     let uploadPump = null;
     let authorizationWatch = null;
-    const connectionNotifier = createConnectionNotifier({ stateDir, endpoint: config.endpoint, onError: () => api.logger.warn("Sidewisp connection reply unavailable; will retry after next accepted health") });
+    const connectionNotifier = createConnectionNotifier({ stateDir, endpoint: config.endpoint, send: createRuntimeTelegramSender(api), onError: () => api.logger.warn("Sidewisp connection reply unavailable; will retry after next accepted health") });
     let startupRetry = null, serviceStopping = false;
     let healthTimer = null;
     let spoolFailure = null;
