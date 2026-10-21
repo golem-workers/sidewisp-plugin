@@ -60,3 +60,9 @@ test('real OpenClaw snapshot with no dynamic lanes reports explicit null and is 
  assert.equal(isHostIdle({...hostIdle,dynamic:null}),true);
  assert.equal(isHostIdle({...hostIdle,dynamic:undefined}),false);
 });
+
+test('target needing cold activation waits for host and verifies binding after activation',async()=>{
+ let loaded={...healthy,connectionReadiness:{ready:false,activationRequired:true}},calls=0,hostChecks=0,verified=0;const states=[];
+ await applyHotUpdate({targetVersion:healthy.version,status:async()=>loaded,idle:async()=>++hostChecks>1,coldActivate:async()=>{calls++;loaded=healthy;},verify:()=>verified++,writeState:s=>states.push(s),sleep:async()=>{}});
+ assert.equal(calls,1);assert.equal(verified,1);assert.equal(states[0].reasonCode,'ACTIVE_WORK');assert.equal(states.at(-1).status,'completed');
+});

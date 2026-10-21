@@ -24,5 +24,29 @@ test('transport failure writes sanitized terminal state',async()=>{const f=fixtu
 test('truthy nonboolean readiness does not authorize',async()=>{const f=fixture();f.options.maxReadinessAttempts=1;f.options.inspect=async()=>({...good,enabled:'true'});await assert.rejects(prepareConnection(f.options),/collector_not_ready/);assert.ok(!f.calls.includes('begin'));});
 
 test('fresh install retries only host retained work then continues',async()=>{const f=fixture(null);let attempts=0;f.options.install=async()=>{if(++attempts<3)throw Error('still has active retained work; retry after the work finishes.');};await prepareConnection(f.options);assert.equal(attempts,3);assert.ok(f.calls.includes('begin'));});
-test('idle wait stops when invitation expires',async()=>{const f=fixture(null);let time=1;f.options.now=()=>time;f.options.expiresAtMs=2;f.options.install=async()=>{throw Error('still has active retained work; retry after the work finishes.');};f.options.sleep=async()=>{time=2;};await assert.rejects(prepareConnection(f.options),/fresh_invitation_required/);assert.ok(!f.calls.includes('begin'));});
-test('retained work retry budget is bounded',async()=>{const f=fixture(null);let attempts=0;f.options.maxIdleAttempts=2;f.options.install=async()=>{attempts++;throw Error('still has active retained work; retry after the work finishes.');};await assert.rejects(prepareConnection(f.options),/retained work/);assert.equal(attempts,2);assert.ok(!f.calls.includes('begin'));});
+test('expiry while busy finishes host preparation and manager but cannot authorize',async()=>{const f=fixture(null);let time=1,attempts=0;f.options.now=()=>time;f.options.expiresAtMs=2;f.options.install=async()=>{if(++attempts===1)throw Error('still has active retained work; retry after the work finishes.');};f.options.sleep=async()=>{time=2;};f.options.ensureManager=async()=>f.calls.push('manager');await assert.rejects(prepareConnection(f.options),/fresh_invitation_required/);assert.equal(attempts,2);assert.ok(f.calls.includes('manager'));assert.ok(!f.calls.includes('begin'));});
+test('retained work retry budget is bounded',async()=>{const f=fixture(null);let attempts=0;f.options.maxIdleAttempts=2;f.options.install=async()=>{attempts++;throw Error('still has active retained work; retry after the work finishes.');};await assert.rejects(prepareConnection(f.options),/host_idle_timeout/);assert.equal(attempts,2);assert.ok(!f.calls.includes('begin'));});
+
+test('cold activation completes before approval and never repeats install or reload',async()=>{
+ const f=fixture(null);let ready=false,activations=0;
+ f.options.inspect=async()=>ready?good:{...good,connectionReadiness:{ready:false,activationRequired:true}};
+ f.options.coldActivate=async()=>{activations++;ready=true;};
+ await prepareConnection(f.options);assert.equal(activations,1);assert.deepEqual(f.calls,['begin']);
+});
+test('busy cold activation waits but genuine denial stops authorization',async()=>{
+ for(const denied of [false,true]){
+  const f=fixture();let ready=false,n=0;
+  f.options.inspect=async()=>ready?good:{...good,connectionReadiness:{ready:false,activationRequired:true}};
+  f.options.coldActivate=async()=>{n++;if(denied)throw Error('policy_denied');if(n===1)throw Error('host_activation_busy');ready=true;};
+  if(denied){await assert.rejects(prepareConnection(f.options),/policy_denied/);assert.ok(!f.calls.includes('begin'));assert.equal(n,1);}else{await prepareConnection(f.options);assert.equal(n,2);}
+ }
+});
+
+test('mandatory runtime preparation waits for idle and precedes installation and authorization',async()=>{const f=fixture(null);let n=0;f.options.prepareRuntime=async()=>{f.calls.push('runtime');if(++n===1)throw Error('host_activation_busy');return {changed:true};};f.options.coldActivate=async()=>f.calls.push('cold');await prepareConnection(f.options);assert.deepEqual(f.calls,['inspect','runtime','runtime','install','activate','cold','inspect','begin']);});
+test('runtime hash refusal blocks install and authorization without fallback',async()=>{const f=fixture(null);f.options.prepareRuntime=async()=>{throw Error('runtime_source_hash_mismatch');};await assert.rejects(prepareConnection(f.options),/runtime_source_hash_mismatch/);assert.deepEqual(f.calls,['inspect']);});
+test('already-prepared runtime and upgrade-owned activation cause no second restart',async()=>{for(const already of [true,false]){const f=fixture({...good,version:'0.2.38'});f.options.prepareRuntime=async()=>({changed:!already,gatewayPid:1});f.options.runtimeNeedsActivation=async()=>false;f.options.coldActivate=async()=>{throw Error('double_restart')};await prepareConnection(f.options);assert.ok(f.calls.includes('begin'));}});
+
+test('app-consented authorization completes preparation without manual approval guidance',async()=>{
+ const f=fixture();f.options.begin=async()=>({id:'sw_pair_'+ 'a'.repeat(32),autoConnect:true,expiresAtMs:Date.now()+60000});
+ const result=await prepareConnection(f.options);assert.equal(result.status,'connection_pending');assert.doesNotMatch(JSON.stringify(result),/Approve/);
+});

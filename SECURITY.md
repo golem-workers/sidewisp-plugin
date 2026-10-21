@@ -25,8 +25,9 @@ payloads, personal data, or full spool databases.
 
 ## Security boundary
 
-The collector must remain metadata-only, outbound-only, zero-LLM, and unable to
-control the observed agent. Changes that add model calls, inbound listeners,
+The collector is outbound-only, zero-LLM, and unable to control the observed
+agent. Telemetry is metadata-only except the explicitly bounded `messagePreview`
+contract described in docs/MESSAGE_PREVIEW.md. Changes that add model calls, inbound listeners,
 agent-facing tools, broad filesystem access, content collection, or autonomous
 remediation require a new threat model and explicit review.
 

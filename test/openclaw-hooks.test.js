@@ -12,6 +12,19 @@ import {
 import { stableOpenClawEventId } from "../src/adapters/openclaw/recovery.js";
 import { normalizeRuntimeEvent } from "../src/core/normalize.js";
 
+function invokeReplyBoundary(registered, event = {}, ctx = {}) {
+  let beforeDeliver;
+  const dispatcher = { appendBeforeDeliver(callback, options) {
+    assert.equal(options.timeoutMs, 25);
+    beforeDeliver = callback;
+  } };
+  const handler = registered.get("reply_dispatch");
+  const result = (typeof handler === "function" ? handler : handler.handler)(event, { ...ctx, dispatcher });
+  assert.equal(result, undefined, "observer must never claim reply dispatch");
+  const payload = Object.freeze({ get text() { throw new Error("payload inspected"); } });
+  assert.equal(beforeDeliver(payload, { kind: event.kind ?? ctx.kind }), payload);
+}
+
 const envelope = () => ({
   eventId: `sw_evt_${"x".repeat(20)}`, installationId: "sw_ins_fixture001", sequence: 1,
   occurredAt: "2026-07-21T00:00:00.000Z", observedAt: "2026-07-21T00:00:01.000Z",
@@ -64,8 +77,8 @@ test("reply payload hook emits only exact final run boundaries", async () => {
   registerOpenClawHooks({ on: (name, handler) => registered.set(name, handler) }, {
     emit: async (event) => events.push(event), envelopeFactory: envelope,
   });
-  registered.get("reply_payload_sending")({ kind: "tool", runId: "run" }, { sessionKey: "s" });
-  registered.get("reply_payload_sending")({
+  invokeReplyBoundary(registered, { kind: "tool", runId: "run" }, { sessionKey: "s" });
+  invokeReplyBoundary(registered, {
     kind: "final",
     runId: "run",
     get payload() { throw new Error("payload read"); },
@@ -240,7 +253,7 @@ test("runtime message_received id owns one task across internal agent runs", () 
       if (result.disposition === "accepted") persisted.push(result.event);
     }
   }
-  registered.get("reply_payload_sending")(
+  invokeReplyBoundary(registered,
     { kind: "final", runId: "outer" },
     { sessionKey: "agent:main:telegram:group:one" },
   );
@@ -282,7 +295,7 @@ test("two active-memory runs in the message hook tick produce only the user task
   registered.get("before_dispatch")({}, { sessionKey: sessionId });
   const userStart = lifecycle.process(official("turn.started", sessionId, "main-run"));
   assert.equal(lifecycle.process(official("turn.completed", sessionId, "main-run")), null);
-  registered.get("reply_payload_sending")(
+  invokeReplyBoundary(registered,
     { kind: "final", runId: "outer-run" },
     { sessionKey: sessionId },
   );
@@ -390,7 +403,7 @@ test("a fast final with exact message or unique run correlation releases autonom
       { inboundMessageId: "fast-command", runId: "command-run" },
       { sessionKey: "s" },
     );
-    await registered.get("reply_payload_sending")(
+    await invokeReplyBoundary(registered,
       { kind: "final", ...finalCorrelation },
       { sessionKey: "s" },
     );
@@ -421,12 +434,12 @@ test("an uncorrelated duplicate final cannot clear the next inbound ownership", 
     { inboundMessageId: "first", runId: "first-run" },
     { sessionKey: "s" },
   );
-  await registered.get("reply_payload_sending")({ kind: "final" }, { sessionKey: "s" });
+  await invokeReplyBoundary(registered, { kind: "final" }, { sessionKey: "s" });
   await registered.get("message_received")(
     { inboundMessageId: "second", runId: "second-run" },
     { sessionKey: "s" },
   );
-  await registered.get("reply_payload_sending")({ kind: "final" }, { sessionKey: "s" });
+  await invokeReplyBoundary(registered, { kind: "final" }, { sessionKey: "s" });
 
   assert.equal(lifecycle.process(official("turn.started", "s", "memory")), null);
   await registered.get("before_dispatch")({}, { sessionKey: "s" });
@@ -448,7 +461,7 @@ test("a retired mismatched final cannot clear the next inbound ownership", async
     { inboundMessageId: "first", runId: "first-run" },
     { sessionKey: "s" },
   );
-  await registered.get("reply_payload_sending")(
+  await invokeReplyBoundary(registered,
     { kind: "final", runId: "mismatched-final" },
     { sessionKey: "s" },
   );
@@ -456,7 +469,7 @@ test("a retired mismatched final cannot clear the next inbound ownership", async
     { inboundMessageId: "second", runId: "second-run" },
     { sessionKey: "s" },
   );
-  await registered.get("reply_payload_sending")(
+  await invokeReplyBoundary(registered,
     { kind: "final", runId: "mismatched-final" },
     { sessionKey: "s" },
   );
@@ -485,7 +498,7 @@ test("a mismatched final for an older message cannot clear newer inbound ownersh
     { inboundMessageId: "second", runId: "second-run" },
     { sessionKey: "s" },
   );
-  await registered.get("reply_payload_sending")(
+  await invokeReplyBoundary(registered,
     { kind: "final", messageId: "first", runId: "late-first-run" },
     { sessionKey: "s" },
   );
@@ -604,7 +617,7 @@ test("latest same-session inbound replaces a stale observation without shifting 
   registered.get("message_received")({ messageId: "m1", runId: "outer-1" }, { sessionKey: "s" });
   registered.get("before_dispatch")({}, { sessionKey: "s" });
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-1")).correlation.turnId, "m1");
-  registered.get("reply_payload_sending")({ kind: "final", runId: "outer-1" }, { sessionKey: "s" });
+  invokeReplyBoundary(registered, { kind: "final", runId: "outer-1" }, { sessionKey: "s" });
 
   registered.get("message_received")({ messageId: "m2", runId: "outer-2" }, { sessionKey: "s" });
   registered.get("before_dispatch")({}, { sessionKey: "s" });
@@ -638,7 +651,7 @@ test("final reply releases exact ownership synchronously before the next task st
   registered.get("message_received")({ inboundMessageId: "m1", runId: "outer-1" }, { sessionKey: "s" });
   registered.get("before_dispatch")({}, { sessionKey: "s" });
   lifecycle.process(official("turn.started", "s", "inner-1"));
-  registered.get("reply_payload_sending")({ kind: "final", runId: "outer-1" }, { sessionKey: "s" });
+  invokeReplyBoundary(registered, { kind: "final", runId: "outer-1" }, { sessionKey: "s" });
   registered.get("message_received")({ inboundMessageId: "m2", runId: "outer-2" }, { sessionKey: "s" });
   registered.get("before_dispatch")({}, { sessionKey: "s" });
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
@@ -654,7 +667,7 @@ test("missing correlation fails closed until a final uses an exact bound run", (
   registered.get("message_received")({ inboundMessageId: "m1" }, { sessionKey: "missing-run" });
   registered.get("before_dispatch")({}, { sessionKey: "missing-run" });
   lifecycle.process(official("turn.started", "missing-run", "inner"));
-  registered.get("reply_payload_sending")({ kind: "final", runId: "inner" }, { sessionKey: "missing-run" });
+  invokeReplyBoundary(registered, { kind: "final", runId: "inner" }, { sessionKey: "missing-run" });
   assert.equal(lifecycle.activeWork().length, 0);
 
   registered.get("before_dispatch")({}, { sessionKey: "missing-id" });
@@ -664,9 +677,9 @@ test("missing correlation fails closed until a final uses an exact bound run", (
   registered.get("message_received")({ messageId: "observed", runId: "outer" }, { sessionKey: "mismatch" });
   registered.get("before_dispatch")({ messageId: "canonical" }, { sessionKey: "mismatch" });
   lifecycle.process(official("turn.started", "mismatch", "inner"));
-  registered.get("reply_payload_sending")({ kind: "final", runId: "outer" }, { sessionKey: "mismatch" });
+  invokeReplyBoundary(registered, { kind: "final", runId: "outer" }, { sessionKey: "mismatch" });
   assert.equal(lifecycle.activeWork().some(({ sessionId }) => sessionId === "mismatch"), true);
-  registered.get("reply_payload_sending")({ kind: "final", runId: "inner" }, { sessionKey: "mismatch" });
+  invokeReplyBoundary(registered, { kind: "final", runId: "inner" }, { sessionKey: "mismatch" });
   assert.equal(lifecycle.activeWork().some(({ sessionId }) => sessionId === "mismatch"), false);
 });
 
@@ -1072,7 +1085,7 @@ test("final reply durably closes pending internal success before the next dispat
   }]);
 });
 
-test("exact final within retry grace confirms recovery from an internal failure", () => {
+test("exact final without a real retry preserves the internal failure", () => {
   const deferred = [];
   const suppressed = [];
   const lifecycle = createOpenClawUserTaskLifecycle({
@@ -1083,10 +1096,10 @@ test("exact final within retry grace confirms recovery from an internal failure"
   lifecycle.process(official("turn.started", "s", "inner"));
   lifecycle.process(official("turn.failed", "s", "inner"));
   const completed = lifecycle.process(finalReply("s", "outer"));
-  assert.equal(completed.type, "turn.completed");
+  assert.equal(completed.type, "turn.failed");
   lifecycle.commit(completed);
   assert.deepEqual(deferred, []);
-  assert.deepEqual(suppressed.map(({ type, correlation }) => [type, correlation.turnId]), [["turn.failed", "m"]]);
+  assert.deepEqual(suppressed, []);
   assert.equal(lifecycle.status().activeRuns, 0);
 });
 
@@ -1148,7 +1161,7 @@ test("lifecycle runs stay internal when dispatch omitted trusted outer run id", 
   }]);
   assert.equal(lifecycle.process(official("turn.failed", "s", "primary")), null);
   assert.equal(lifecycle.status().pendingTerminals, 1);
-  assert.equal(lifecycle.process(finalReply("s", "primary")).type, "turn.completed");
+  assert.equal(lifecycle.process(finalReply("s", "primary")).type, "turn.failed");
   assert.deepEqual(deferred, []);
 });
 
@@ -1277,7 +1290,7 @@ test("unmarked same-session run after internal success stays in task until final
   assert.equal(lifecycle.process(finalReply("s", "next-run")).correlation.turnId, "m");
 });
 
-test("exact outer negative outcomes recover when a final payload follows within grace", () => {
+test("exact outer negative outcomes remain negative when only a final payload follows", () => {
   for (const terminal of ["turn.failed", "turn.timeout", "turn.cancelled"]) {
     const deferred = [];
     const lifecycle = createOpenClawUserTaskLifecycle({
@@ -1287,7 +1300,7 @@ test("exact outer negative outcomes recover when a final payload follows within 
     lifecycle.process(official("turn.started", terminal, "outer"));
     assert.equal(lifecycle.process(official(terminal, terminal, "outer")), null);
     assert.equal(lifecycle.status().pendingTerminals, 1);
-    assert.equal(lifecycle.process(finalReply(terminal, "outer")).type, "turn.completed");
+    assert.equal(lifecycle.process(finalReply(terminal, "outer")).type, terminal);
     assert.deepEqual(deferred, []);
   }
 });
@@ -1515,7 +1528,7 @@ test("pending success never expires and a later internal start remains coalesced
   assert.deepEqual(suppressed.map(({ type }) => type), ["turn.completed", "turn.completed"]);
 });
 
-test("final commit cancels negative timer while rollback restores its remaining grace", () => {
+test("negative final commit cancels timer while rollback keeps the original negative", () => {
   const timers = manualTimers();
   const deferred = [];
   const suppressed = [];
@@ -1544,7 +1557,8 @@ test("final commit cancels negative timer while rollback restores its remaining 
   timers.advance(60_000);
 
   assert.deepEqual(deferred, []);
-  assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
+  assert.equal(committedFinal.type, "turn.failed");
+  assert.deepEqual(suppressed, []);
   assert.equal(lifecycle.status().activeRuns, 0);
 });
 
@@ -1645,6 +1659,11 @@ test("new current task cannot receive a late exact run binding from the previous
   lifecycle.process(official("turn.started", "s", "inner-1"));
   lifecycle.process(boundary("s", "m2", "outer-2"));
   assert.equal(lifecycle.process(official("turn.failed", "s", "inner-1")), null);
+  assert.equal(lifecycle.process(official("turn.started", "s", "new-unbound")), null);
+  assert.equal(lifecycle.process({
+    ...official("turn.failed", "s", "inner-1"),
+    details: { component: "runtime_reconciliation" },
+  }).correlation.turnId, "m1");
   assert.equal(lifecycle.process(official("turn.started", "s", "new-unbound")).correlation.turnId, "m2");
 });
 
@@ -1667,6 +1686,9 @@ test("retry stays with task one before task two dispatches", () => {
   assert.equal(lifecycle.process(official("turn.started", "s", "retry-1")), null);
   assert.deepEqual(suppressed.map(({ type }) => type), ["turn.failed"]);
   lifecycle.process(boundary("s", "m2", "outer-2"));
+  assert.equal(lifecycle.process(finalReply("s", "outer-1")), null);
+  assert.equal(lifecycle.process({ ...official("turn.completed", "s", "retry-1"),
+    details: { component: "agent_lifecycle_end", status: "execution-settled" } }).correlation.turnId, "m1");
   assert.equal(lifecycle.process(finalReply("s", "outer-1")), null);
   assert.equal(lifecycle.process(official("turn.started", "s", "inner-2")).correlation.turnId, "m2");
 });
@@ -2024,7 +2046,7 @@ test("bounded tracker evicts only durable terminals and never reads content", ()
 test("plugin subscribes through the official host-owned agent event API", () => {
   const source = readFileSync(new URL("../src/adapters/openclaw/plugin.js", import.meta.url), "utf8");
   assert.match(source, /api\.agent\.events\.registerAgentEventSubscription/);
-  assert.match(source, /streams:\s*\["lifecycle", "tool", "approval"\]/);
+  assert.match(source, /streams:\s*\["lifecycle", "tool", "approval", "item", "assistant"\]/);
   assert.match(source, /userTaskLifecycle\.processDetailed\(event\)/);
   assert.match(source, /userTaskLifecycle\.commit\(result\.event\)/);
   assert.match(source, /persisted\.disposition === "emitted"/);

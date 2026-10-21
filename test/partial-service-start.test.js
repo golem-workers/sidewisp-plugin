@@ -8,8 +8,8 @@ const block=source.slice(source.indexOf('    api.registerService({'),source.inde
 function harness(failure) {
  const running=new Set(),timers=new Set();let service;
  const delivery=name=>({start(){running.add(name)},async stop(){running.delete(name)}});
- const scope={createHeartbeatSupervisor,permanentHeartbeatFailure,adapter:{},api:{runtime:{version:'2026.10.5'},registerService(s){service=s},logger:{warn(){}}},config:{enabled:true},auth:{load:async()=>{},canSend:()=>true,credential:()=>null},setupToken:null,stateDir:'/test',spool:null,uploader:null,runtimeDiagnostics:null,contextDelivery:null,usageDelivery:null,scheduleRunner:null,healthTimer:null,uploadTimer:null,
- openSpool:async()=>({cursor:()=>null,close:async()=>running.delete('spool')}),path:{join:(...p)=>p.join('/')},parseOpenClawActiveWorkCursor:()=>[],userTaskLifecycle:{restoreActiveWork(){}},HOOK_EVENT_SOURCE:'hooks',discoverOpenClawSources:async()=>({sources:[]}),createUploader:()=>({drain:async()=>{}}),createRuntimeDiagnosticsDelivery:()=>delivery('diagnostics'),createContextUsageDelivery:()=>delivery('context'),createUsageDelivery:()=>delivery('usage'),createScheduleRunner:()=>delivery('schedules'),diagnosticProbes:{dispose(){}},updates:{},collector:{start:async()=>{if(failure==='start')throw Error('transient-start')},stop:async()=>{}},emitHeartbeat:async()=>{if(failure==='heartbeat')throw Error('transient-heartbeat')},setInterval(fn){const t={fn};timers.add(t);return t},clearInterval(t){timers.delete(t)},runDetached(){},SpoolError:class extends Error{},recordSpoolFailure(){},VERSION:'0.2.33',persistActiveWork:async()=>{},collectOpenClawContext(){},collectOpenClawUsage(){}};
+ const scope={startupRetry:null,serviceStopping:false,spoolFailure:null,questions:{dispose(){}},activation:{required:()=>false,serviceStarted(){}},createHeartbeatSupervisor,permanentHeartbeatFailure,adapter:{},api:{runtime:{version:'2026.10.5'},registerService(s){service=s},logger:{warn(){}}},config:{enabled:true,endpoint:'https://example.test'},auth:{load:async()=>{},canSend:()=>true,credential:()=>null},setupToken:null,stateDir:'/test',spool:null,uploader:null,runtimeDiagnostics:null,contextDelivery:null,cronDelivery:null,usageDelivery:null,scheduleRunner:null,healthTimer:null,uploadTimer:null,
+ openSpool:async()=>({cursor:()=>null,close:async()=>running.delete('spool')}),path:{join:(...p)=>p.join('/')},parseOpenClawActiveWorkCursor:()=>[],userTaskLifecycle:{restoreActiveWork(){}},HOOK_EVENT_SOURCE:'hooks',discoverOpenClawSources:async()=>({sources:[]}),createUploader:()=>({drain:async()=>{}}),createRuntimeDiagnosticsDelivery:()=>delivery('diagnostics'),createContextUsageDelivery:()=>delivery('context'),createCronDelivery:()=>delivery('cron'),collectOpenClawCron(){},watchOpenClawCron(){},createUsageDelivery:()=>delivery('usage'),createScheduleRunner:()=>delivery('schedules'),diagnosticProbes:{dispose(){}},updates:{},collector:{start:async()=>{if(failure==='start')throw Error('transient-start')},stop:async()=>{}},emitHeartbeat:async()=>{if(failure==='heartbeat')throw Error('transient-heartbeat')},setInterval(fn){const t={fn};timers.add(t);return t},clearInterval(t){timers.delete(t)},runDetached(){},SpoolError:class extends Error{},recordSpoolFailure(){},VERSION:'0.2.33',persistActiveWork:async()=>{},collectOpenClawContext(){},collectOpenClawUsage(){}};
  new Function('scope','with(scope){'+block+'}')(scope);
  return {service,running,timers,scope};
 }
@@ -25,7 +25,7 @@ for(const failure of ['start'])test('clean restart after '+failure+' creates exa
  h.scope.collector.start=async()=>{};h.scope.emitHeartbeat=async()=>{};
  await h.service.start({logger:{info(){},error(){}}});
  assert.equal(h.timers.size,1);
- assert.deepEqual([...h.running].sort(),['context','diagnostics','schedules','usage']);
+ assert.deepEqual([...h.running].sort(),['context','cron','diagnostics','schedules','usage']);
  await h.service.stop();assert.equal(h.timers.size,0);assert.deepEqual([...h.running],[]);
  await h.service.stop();assert.equal(h.timers.size,0);
 });
@@ -51,4 +51,12 @@ test('actual registered service does not retry explicit permission rejection',as
  await h.service.start({logger:{info(){},error(){}}});await new Promise(r=>setTimeout(r,20));
  assert.equal(attempts,1);assert.equal(h.scope.healthTimer.status().state,'blocked');assert.equal(h.scope.healthTimer.ready(),false);
  await h.service.stop();
+});
+
+test('affected hot generation does not poll or launch scheduled work before cold activation',async()=>{
+ const h=harness(null);h.scope.activation.required=()=>true;let allowed;
+ h.scope.createScheduleRunner=options=>{allowed=options.canExecute;return {start(){h.running.add('schedules')},stop:async()=>h.running.delete('schedules')}};
+ await h.service.start({logger:{info(){},error(){}}});assert.equal(allowed(),false);assert.ok(h.running.has('context'));
+ h.scope.activation.required=()=>false;assert.equal(allowed(),true);
+ await h.service.stop();assert.deepEqual([...h.running],[]);
 });

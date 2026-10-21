@@ -57,3 +57,10 @@ test('transport wait recovery remains bounded and aborts once at the original ta
  const output=await exerciseRuntime({run:async()=>{launches++;return {runId:'native-one'};},waitForRun:async()=>{waits++;time=600001;return {status:'error',retryableTransportError:true};}},{now:()=>time});
  assert.equal(launches,1);assert.equal(waits,1);assert.equal(output.state,'failed');assert.equal(output.errorCode,'execution_timeout');
 });
+
+test('activation gate makes no credential lookup, network request or launch until ready',async()=>{
+ let ready=false,lookups=0,requests=0;
+ const runner=createScheduleRunner({stateDir:'/tmp/unused-activation-fixture',endpoint:'https://example.test',credentialProvider:{current:async()=>{lookups++;return null;}},runtime:{},canExecute:()=>ready,fetchImpl:async()=>{requests++;throw Error('unexpected');}});
+ await runner.runOnce();assert.equal(lookups,0);assert.equal(requests,0);
+ ready=true;await runner.runOnce();assert.equal(lookups,1);await runner.stop();
+});

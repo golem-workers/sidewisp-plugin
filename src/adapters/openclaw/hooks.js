@@ -1,11 +1,26 @@
+import { userWaitPreview } from "../../core/preview-sources.js";
+const previewFields = value => value ? { messagePreview: value } : {};
+import { readMessagePreview } from "../../core/message-preview.js";
+
+// Pinned OpenClaw 2026.9.8 owns this process-local WeakMap. Read only its
+// typed terminal marker, never isError, text, arbitrary payload data or tool output.
+function replyOutcomeMarkers(payload) {
+  try {
+    const metadata = globalThis[Symbol.for("openclaw.replyPayloadMetadata")];
+    const value = metadata instanceof WeakMap ? metadata.get(payload) : undefined;
+    return { terminalProviderError: value?.terminalProviderError === true,
+      toolErrorWarning: value?.toolErrorWarning != null };
+  } catch { return {}; }
+}
 import { classifyRuntimeCause } from "../../core/causes.js";
 import { localDiagnostic, normalizeRuntimeEvent } from "../../core/normalize.js";
 
 export const OPENCLAW_HOOK_SOURCES = Object.freeze({
   before_dispatch: "src/plugins/hook-types.ts:before_dispatch",
-  reply_payload_sending: "src/plugins/hook-types.ts:reply_payload_sending",
+  reply_dispatch: "src/plugins/hook-types.ts:reply_dispatch",
   message_received: "src/plugins/hook-message.types.ts:70",
   message_sent: "src/plugins/hook-message.types.ts:111",
+  after_tool_call: "src/plugins/hook-types.ts:after_tool_call",
   gateway_start: "src/plugins/hook-types.ts:898",
   gateway_stop: "src/plugins/hook-types.ts:902",
 });
@@ -60,6 +75,7 @@ export function parseOpenClawActiveWorkCursor(value) {
               sessionId,
               messageId,
               started: candidate.started === true,
+              ...(candidate.detached === true ? { detached: true } : {}),
               ...(safeCursorId(candidate.outerRunId) ? { outerRunId: candidate.outerRunId } : {}),
               internalRunIds: [...new Set(
                 (Array.isArray(candidate.internalRunIds) ? candidate.internalRunIds : [])
@@ -88,6 +104,7 @@ export function createOpenClawUserTaskLifecycle({
   maxRuns = 1000,
   ttlMs = 60 * 60_000,
   terminalRetryGraceMs = AGENT_RUN_TERMINAL_RETRY_GRACE_MS,
+  finalReplyGraceMs = 15_000,
   persistRetryBaseMs = 1_000,
   persistRetryMaxMs = 60_000,
   setTimeoutFn = setTimeout,
@@ -322,20 +339,43 @@ export function createOpenClawUserTaskLifecycle({
   };
   const deferTerminal = (key, state, event, nowMs) => {
     if (state.pendingConfirmed) return false;
+    if (state.pendingTerminal?.details?.component === "final_reply"
+        && state.pendingTerminal.details.status !== "tool-warning"
+        && event?.type === "turn.completed" && event?.details?.component !== "final_reply") return false;
     if (
       state.pendingTerminal
       && state.pendingTerminal.type !== "turn.completed"
       && event?.details?.component !== "agent_lifecycle_end"
+      && state.pendingTerminal.details?.component !== "final_reply"
     ) return false;
+    if (state.pendingTerminal?.details?.component === "final_reply"
+        && (NEGATIVE_TURN_TERMINALS.has(state.pendingTerminal.type)
+          || state.pendingTerminal.details.status === "tool-warning")) {
+      const warningPreview = state.pendingTerminal.details.status === "tool-warning"
+        && event?.type === "turn.completed" ? state.pendingTerminal.messagePreview : undefined;
+      if (NEGATIVE_TURN_TERMINALS.has(state.pendingTerminal.type)
+          && !NEGATIVE_TURN_TERMINALS.has(event?.type)) return false;
+      clearPending(state, true);
+      state.pendingTerminal = retarget(warningPreview
+        ? Object.freeze({ ...event, messagePreview: warningPreview }) : event, state);
+      state.pendingDeadline = nowMs;
+      attemptPending(key, state);
+      return true;
+    }
+    const originalDeadline = state.pendingTerminal?.type === event?.type
+      && state.pendingTerminal?.details?.component === event?.details?.component
+      ? state.pendingDeadline : null;
     clearPending(state, true);
     state.pendingTerminal = retarget(event, state);
     state.pendingRetryable = NEGATIVE_TURN_TERMINALS.has(event?.type);
     state.pendingAwaitingFinal = event?.type === "turn.completed";
     state.pendingConfirmed = false;
     state.pendingPersistAttempts = 0;
-    state.pendingDeadline = isRetryableNegative(event)
+    state.pendingDeadline = originalDeadline ?? (isRetryableNegative(event)
       ? nowMs + terminalRetryGraceMs
-      : null;
+      : event?.details?.status === "execution-settled"
+          || event?.details?.component === "final_reply" && (state.detached || state.questionWaitObserved)
+        ? nowMs + finalReplyGraceMs : null);
     state.updatedAt = nowMs;
     schedulePending(key, state);
     return true;
@@ -390,7 +430,10 @@ export function createOpenClawUserTaskLifecycle({
       for (const runId of previous.internalRunIds) bind(previous, transition.key, runId);
     }
     if (!previous) return;
-    if (!previous.terminal) currentBySession.set(previous.sessionId, transition.key);
+    if (!previous.terminal) {
+      previous.detached = false;
+      currentBySession.set(previous.sessionId, transition.key);
+    }
   };
   const processDetailed = (event) => {
     const nowMs = now();
@@ -467,14 +510,23 @@ export function createOpenClawUserTaskLifecycle({
         updatedAt: nowMs,
       };
       if (previous && !previous.terminal) {
-        if (previous.pendingTerminal) {
-          if (attemptPending(previousKey, previous)) {
+        if (previous.pendingTerminal && previous.pendingTerminal.details?.status !== "continuation-pending") {
+          if ((!previous.pendingAwaitingFinal || previous.pendingDeadline === null
+                || previous.pendingDeadline <= nowMs) && attemptPending(previousKey, previous)) {
             rememberRetired(previous);
             remove(previousKey);
           } else {
             state.previousOnRollback = { key: previousKey, retired: false };
+            previous.detached = true;
             clearCurrent(previousKey, previous);
           }
+        } else if (previous.started) {
+          // before_dispatch is admission, not execution settlement: it may run
+          // while the previous native run is still alive. Retain only its exact
+          // run/message bindings; never let new unbound runs attach to it.
+          previous.detached = true;
+          clearCurrent(previousKey, previous);
+          state.previousOnRollback = { key: previousKey, retired: false };
         } else {
           const snapshot = snapshotTask(previous);
           retire(previousKey, previous, nowMs);
@@ -496,16 +548,34 @@ export function createOpenClawUserTaskLifecycle({
       state.staged = false;
       return accepted(event);
     }
-    if (component === "final_reply" && event?.type === "turn.completed") {
+    if ((component === "final_reply" && TURN_TERMINALS.has(event?.type))
+        || (component === "runtime_reconciliation" && TURN_TERMINALS.has(event?.type))) {
       const pendingInbound = pendingInboundBySession.get(correlation.sessionId);
-      if (!correlation.turnId) {
+      // Ordinary reply dispatch need not carry runId. Only its captured,
+      // exact inbound identity may resolve that final; never use latest session
+      // state or a message.delivered observation to infer completion.
+      const exactFinalKey = component === "final_reply" && !correlation.turnId
+        ? taskKey(correlation.sessionId, correlation.messageId) : null;
+      const exactFinalState = exactFinalKey ? records.get(exactFinalKey) : null;
+      if (!correlation.turnId && exactFinalState?.kind !== "task") {
         if (pendingInbound && correlation.messageId === pendingInbound.messageId) {
           retirePendingInbound(correlation.sessionId, pendingInbound, nowMs);
           pendingInboundBySession.delete(correlation.sessionId);
         }
         return coalesced();
       }
-      const [key, state] = taskForRun(correlation.sessionId, correlation.turnId);
+      let [key, state] = exactFinalState?.kind === "task"
+        ? [exactFinalKey, exactFinalState]
+        : taskForRun(correlation.sessionId, correlation.turnId);
+      if (!state && component === "runtime_reconciliation") {
+        const stableKey = taskKey(correlation.sessionId, correlation.turnId);
+        if (stableKey && records.get(stableKey)?.kind === "task") {
+          key = stableKey; state = records.get(stableKey);
+        } else {
+          const run = records.get(runKey(correlation.sessionId, correlation.turnId));
+          if (run && !run.terminal) return accepted(complete(runKey(correlation.sessionId, correlation.turnId), run, event, nowMs));
+        }
+      }
       if (!state) {
         if (!key) {
           rememberRetiredRuns(correlation.sessionId, [correlation.turnId]);
@@ -517,6 +587,8 @@ export function createOpenClawUserTaskLifecycle({
         }
         return coalesced();
       }
+      if (component === "final_reply" && correlation.messageId
+          && correlation.messageId !== state.messageId) return coalesced();
       state.updatedAt = nowMs;
       if (state.terminal) return coalesced();
       if (!state.started) {
@@ -526,7 +598,47 @@ export function createOpenClawUserTaskLifecycle({
         clearCurrent(key, state);
         return coalesced();
       }
+      // A confirmed native negative outcome cannot become success through a late reply.
+      if (NEGATIVE_TURN_TERMINALS.has(state.pendingTerminal?.type)) {
+        return accepted(complete(key, state, state.pendingTerminal, nowMs));
+      }
+      if (component === "final_reply" && state.pendingTerminal?.details?.component === "final_reply"
+          && state.pendingAwaitingFinal && !state.pendingConfirmed
+          && !NEGATIVE_TURN_TERMINALS.has(event.type)) return coalesced();
+      // For blocking-question/overlap work, final dispatch may precede native settlement.
+      // Buffer it briefly; exact run bindings and the captured inbound ID remain the owner.
+      if (component === "final_reply" && event.type === "turn.completed"
+          && !state.pendingTerminal && (state.detached || state.questionWaitObserved)) {
+        return deferTerminal(key, state, event, nowMs) ? buffered() : coalesced();
+      }
+      // A typed error final is evidence of failure, not a successful reply.
+      // Native timeout/abort is stronger than the generic provider-error marker.
+      // If dispatch wins the race, wait for native settlement before choosing
+      // its subtype; the existing grace is a fallback when lifecycle is absent.
+      if (component === "final_reply" && NEGATIVE_TURN_TERMINALS.has(event.type)) {
+        if (NEGATIVE_TURN_TERMINALS.has(state.pendingTerminal?.type)) {
+          return accepted(complete(key, state, state.pendingTerminal, nowMs));
+        }
+        return deferTerminal(key, state, event, nowMs) ? buffered() : coalesced();
+      }
+      if (component === "final_reply" && event.details?.status === "tool-warning") {
+        if (state.pendingTerminal) {
+          const terminal = state.pendingTerminal.type === "turn.completed"
+            ? retarget(event, state) : state.pendingTerminal;
+          return accepted(complete(key, state, terminal, nowMs));
+        }
+        // A warning is not execution success. Await native outcome (or exact
+        // reconciliation) when dispatch precedes the lifecycle terminal.
+        return deferTerminal(key, state, event, nowMs) ? buffered() : coalesced();
+      }
       return accepted(complete(key, state, retarget(event, state), nowMs));
+    }
+    if (event?.type === "turn.progress") {
+      const [, state] = taskForRun(correlation.sessionId, correlation.turnId);
+      if (!state || state.terminal || !state.started) return coalesced();
+      state.updatedAt = nowMs;
+      if (state.pendingTerminal && !state.pendingConfirmed) clearPending(state, true);
+      return accepted(retarget(event, state));
     }
     const started = event?.type === "turn.started";
     const terminal = TURN_TERMINALS.has(event?.type);
@@ -535,7 +647,9 @@ export function createOpenClawUserTaskLifecycle({
         const [, state] = taskForRun(correlation.sessionId, correlation.turnId);
         if (state) {
           state.updatedAt = nowMs;
+          if (event.details?.component === "ask_user_wait") state.questionWaitObserved = true;
           if (state.pendingTerminal && !state.pendingConfirmed && !state.terminal) clearPending(state, true);
+          if (!state.terminal) return accepted(retarget(event, state));
         }
       }
       return accepted(event);
@@ -547,6 +661,12 @@ export function createOpenClawUserTaskLifecycle({
       // Every same-session lifecycle run inside that window belongs to the task,
       // even when OpenClaw omits an explicit continuation marker.
       if (candidate) {
+        // With another executing task retained in this session, an unbound
+        // run could be either a continuation or the new task. Fail closed;
+        // exact existing run/message bindings remain usable.
+        if ([...records.values()].some(other => other !== candidate
+            && other.kind === "task" && other.sessionId === correlation.sessionId
+            && other.detached && !other.terminal)) return coalesced();
         [key, state] = [candidateKey, candidate];
       }
     }
@@ -582,6 +702,19 @@ export function createOpenClawUserTaskLifecycle({
         return accepted(state.startEvent);
       }
       if (!state.started) return coalesced();
+      // Pair a captured final with the native outcome in either arrival order.
+      // Only successful settlement carries that same work's safe final preview.
+      if (event.details?.status === "execution-settled") {
+        if (NEGATIVE_TURN_TERMINALS.has(event.type)) {
+          return accepted(complete(key, state, retarget(event, state), nowMs));
+        }
+        if (state.pendingTerminal?.details?.component === "final_reply") {
+          const reply = state.pendingTerminal;
+          const terminal = NEGATIVE_TURN_TERMINALS.has(reply.type) ? reply
+            : Object.freeze({ ...event, ...(reply.messagePreview ? { messagePreview: reply.messagePreview } : {}) });
+          return accepted(complete(key, state, retarget(terminal, state), nowMs));
+        }
+      }
       return deferTerminal(key, state, event, nowMs) ? buffered() : coalesced();
     }
     if (key) return coalesced();
@@ -617,6 +750,7 @@ export function createOpenClawUserTaskLifecycle({
     .map((state) => Object.freeze(state.kind === "task" ? {
       kind: "task", sessionId: state.sessionId, messageId: state.messageId,
       turnId: state.turnId, started: state.started,
+      ...(state.detached === true ? { detached: true } : {}),
       ...(state.outerRunId ? { outerRunId: state.outerRunId } : {}),
       internalRunIds: [...state.internalRunIds],
     } : {
@@ -629,11 +763,12 @@ export function createOpenClawUserTaskLifecycle({
       const nowMs = now();
       if (candidate?.kind === "task") {
         const key = taskKey(candidate.sessionId, candidate.messageId);
-        if (!key || records.has(key) || currentTask(candidate.sessionId)[1]) continue;
+        if (!key || records.has(key) || (candidate.detached !== true && currentTask(candidate.sessionId)[1])) continue;
         const state = {
           kind: "task", sessionId: candidate.sessionId, messageId: candidate.messageId,
           turnId: candidate.turnId, outerRunId: candidate.outerRunId,
           internalRunIds: [...(candidate.internalRunIds ?? [])], started: candidate.started === true,
+          detached: candidate.detached === true,
           terminal: false, durable: false, pendingTerminal: null, pendingRetryable: false,
           pendingAwaitingFinal: false, pendingConfirmed: false, pendingPersistAttempts: 0,
           pendingDeadline: null, pendingTimer: null, registrationEvent: null, startEvent: null,
@@ -641,7 +776,7 @@ export function createOpenClawUserTaskLifecycle({
           previousOnRollback: null, pendingInboundOnRollback: null, staged: false, updatedAt: nowMs,
         };
         if (!track(key, state)) continue;
-        currentBySession.set(state.sessionId, key);
+        if (!state.detached) currentBySession.set(state.sessionId, key);
         bind(state, key, state.outerRunId);
         for (const runId of state.internalRunIds) bind(state, key, runId);
         restored += 1;
@@ -873,6 +1008,12 @@ export function openClawAgentEventInput(event = {}) {
       ?? data.approvalId
       ?? data.approvalSlug,
   };
+  // A completed commentary item is a semantic progress boundary, not a token,
+  // tool summary, reasoning fragment, or final answer. Export metadata only.
+  if (event.stream === "item" && data.kind === "preamble"
+      && data.phase === "end" && safeCursorId(data.itemId)) {
+    return { kind: "turn_progress", component: "commentary", correlation };
+  }
   if (event.stream === "lifecycle") {
     if (data.phase === "start") return { kind: "turn_start", correlation };
     if (["end", "error"].includes(data.phase)) {
@@ -888,7 +1029,9 @@ export function openClawAgentEventInput(event = {}) {
           correlation,
         };
       }
-      const timedOut = data.timedOut === true || data.outcome === "timeout";
+      const timedOut = data.timedOut === true || data.outcome === "timeout"
+        || data.stopReason === "timeout" || data.status === "timed_out"
+        || data.timeoutPhase != null;
       const cancelled = data.aborted === true
         || ["cancelled", "canceled", "aborted", "killed"].includes(
           typeof data.stopReason === "string" ? data.stopReason.toLowerCase() : "",
@@ -911,24 +1054,33 @@ export function openClawAgentEventInput(event = {}) {
       const continuationPending = yieldedContinuation || toolCallsContinuation;
       return {
         kind: "turn_end",
-        outcome: cancelled ? "cancelled" : timedOut ? "timeout" : data.phase === "error" || data.success === false ? "failure" : "success",
+        outcome: timedOut ? "timeout" : cancelled ? "cancelled"
+          : data.phase === "error" || data.success === false || data.stopReason === "error"
+            || ["blocked", "abandoned"].includes(data.livenessState) ? "failure" : "success",
         component: data.phase === "end" ? "agent_lifecycle_end" : "agent_lifecycle_error",
         status: data.phase === "error" && Number.isSafeInteger(data.endedAt)
           ? "terminal-candidate"
-          : continuationPending ? "continuation-pending" : undefined,
+          : continuationPending ? "continuation-pending"
+            : data.executionSettled === true && Number.isSafeInteger(data.endedAt)
+              ? "execution-settled" : undefined,
         durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
         correlation,
       };
     }
   }
   if (event.stream === "approval") {
+    // Native exec shares toolCallId with its ordinary tool receipts. The host
+    // owns a distinct command item ID for both approval phases; preserve it so
+    // those semantic boundaries do not collide in the unchanged event store.
+    if (safeCursorId(data.itemId)) correlation.toolCallId = data.itemId;
     if (data.phase === "requested" && data.status === "pending") {
-      return { kind: "tool_start", operation: "user_approval", correlation };
+      return { kind: "tool_start", operation: "user_approval", ...previewFields(userWaitPreview(data, "user_approval", "tool.started")), correlation };
     }
     if (data.phase === "resolved") {
       return {
         kind: "tool_end",
         operation: "user_approval",
+        ...previewFields(userWaitPreview(data, "user_approval", "tool.completed")),
         outcome: ["denied", "failed", "unavailable"].includes(data.status)
           ? "cancelled"
           : "success",
@@ -938,7 +1090,8 @@ export function openClawAgentEventInput(event = {}) {
   }
   if (event.stream === "tool") {
     if (["start", "started"].includes(data.phase)) {
-      return { kind: "tool_start", operation: safeOperation(data.name, data.toolName), correlation };
+      const operation = safeOperation(data.name, data.toolName);
+      return { kind: "tool_start", operation, ...previewFields(userWaitPreview(data, operation, "tool.started")), correlation };
     }
     if (["result", "end", "completed"].includes(data.phase)) {
       const exitCode = safeInteger(data.exitCode, data.result?.exitCode);
@@ -950,6 +1103,7 @@ export function openClawAgentEventInput(event = {}) {
         outcome: cancelled ? "cancelled" : data.status === "timeout" ? "timeout" : failed ? "failure" : "success",
         durationMs: Number.isSafeInteger(data.durationMs) ? data.durationMs : undefined,
         ...toolDetails(data, failed && !cancelled),
+        ...previewFields(userWaitPreview(data, safeOperation(data.name, data.toolName), "tool.completed")),
         correlation,
       };
     }
@@ -1046,11 +1200,39 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
       component: "before_dispatch",
       correlation: correlateDispatch(event, ctx),
     }), true),
-    reply_payload_sending: observe("reply_payload_sending", (event, ctx) => (
-      (event.kind ?? ctx.kind) === "final"
-        ? { kind: "turn_end", outcome: "success", component: "final_reply", correlation: correlation(event, ctx) }
-        : null
-    ), true),
+    // appendBeforeDeliver is the public per-dispatch observer boundary. Unlike
+    // reply_payload_sending/message_sending, it does not disable Telegram drafts.
+    // Only derive a bounded safe preview of final text; never rewrite, cancel,
+    // retain the payload, inspect attachments, or claim dispatch.
+    reply_dispatch(event = {}, ctx = {}) {
+      // The actual host hook stores inbound identity in event.ctx, unlike
+      // before_dispatch. Snapshot only correlation at registration time.
+      const finalCorrelation = correlation(event, ctx);
+      finalCorrelation.sessionId ??= event.ctx?.SessionKey;
+      finalCorrelation.messageId ??= event.ctx?.MessageSidFull ?? event.ctx?.MessageSid
+        ?? event.ctx?.MessageSidFirst ?? event.ctx?.MessageSidLast;
+      const observeFinal = observe("reply_dispatch", (observation, _ctx) => ({
+        kind: "turn_end", outcome: observation.terminalProviderError ? "failure" : "success", component: "final_reply",
+        messagePreview: observation.terminalProviderError ? undefined : observation.messagePreview,
+        status: observation.toolErrorWarning ? "tool-warning" : undefined,
+        correlation: finalCorrelation,
+      }), true);
+      if (typeof ctx.dispatcher?.appendBeforeDeliver !== "function") {
+        diagnose(localDiagnostic("reply-observer-unavailable", "openclaw"));
+        return;
+      }
+      try {
+        ctx.dispatcher.appendBeforeDeliver((payload, info = {}) => {
+          if (info.kind === "final") void observeFinal({
+            ...replyOutcomeMarkers(payload),
+            messagePreview: readMessagePreview(() => payload?.text, "turn.completed"),
+          }, ctx);
+          return payload;
+        }, { timeoutMs: 25 });
+      } catch {
+        diagnose(localDiagnostic("reply-observer-unavailable", "openclaw"));
+      }
+    },
     message_received: observe("message_received", (event, ctx) => ({
       kind: "message_received",
       component: "message_observation",
@@ -1059,8 +1241,42 @@ export function registerOpenClawHooks(api, { emit, envelopeFactory, onDiagnostic
     message_sent: observe("message_sent", (event, ctx) => ({
       kind: "delivery_end",
       outcome: event.success === false ? "failure" : "success",
+      messagePreview: event.success === false ? undefined
+        : readMessagePreview(() => event.content, "message.delivered"),
       correlation: correlation(event, ctx),
     })),
+    after_tool_call: observe("after_tool_call", (event, ctx) => {
+      // Modern OpenClaw may route source commentary/finals through message.
+      // Require explicit delivery/finality flags before reading only the sent text.
+      // Never inspect attachments, targets, other tool arguments, or output.
+      if (event.toolName !== "message" || event.error != null
+          || event.params?.action !== "send" || event.params?.dryRun === true
+          || event.result?.isError === true) return null;
+      const receipt = event.result?.details;
+      if (receipt?.ok !== true || receipt.sourceReplyRoute !== "current-source"
+          || receipt.partial === true || receipt.dryRun === true
+          || receipt.nonDelivery === true || receipt.noOp === true) return null;
+      // A successful attachment-only send is not the assistant's final reply.
+      // Preserve legacy implicit text finals and explicit final=true, but leave
+      // textless sends open for the automatic reply observer. Decide from
+      // message/caption presence, NOT sanitizer acceptance: sensitive finals
+      // still complete without a preview. Read no attachment/target/result content.
+      let hasText = false;
+      const messagePreview = readMessagePreview(() => {
+        const message = event.params.message;
+        // A delivered file caption is also a user-facing source answer. Read
+        // only this bounded text fallback, never file bytes or destination data.
+        const text = typeof message === "string" && /\S/u.test(message.slice(0, 16_384))
+          ? message : event.params.caption;
+        hasText = typeof text === "string" && /\S/u.test(text.slice(0, 16_384));
+        return text;
+      }, event.params.final === false ? "turn.progress" : "turn.completed");
+      const isProgress = event.params.final === false
+        || (event.params.final !== true && !hasText);
+      return isProgress
+        ? { kind: "turn_progress", component: "source_message", messagePreview, correlation: correlation(event, ctx) }
+        : { kind: "turn_end", outcome: "success", component: "final_reply", messagePreview, correlation: correlation(event, ctx) };
+    }, true),
     gateway_start: observe("gateway_start", () => ({ kind: "gateway_up", correlation: {} })),
     gateway_stop: observe("gateway_stop", () => ({ kind: "gateway_down", correlation: {} })),
   };
