@@ -7,9 +7,11 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
     if (!updateOnly && expiresAtMs !== undefined && (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= now())) throw new Error('fresh_invitation_required');
   };
   if (!Number.isInteger(maxIdleAttempts) || maxIdleAttempts < 1) throw new Error('invalid_idle_attempts');
+  const idleDeadline = now() + 60 * 60_000;
   const whenIdle = async operation => {
     for (let attempt = 0; attempt < maxIdleAttempts; attempt++) {
       checkExpiry();
+      if (now() >= idleDeadline) throw new Error('host_idle_timeout');
       try { return await operation(); } catch (error) {
         if (!(isRetainedWork(error) || ['host_activation_busy','update_deferred'].includes(error?.message))) throw error;
         if (attempt + 1 === maxIdleAttempts) throw new Error('host_idle_timeout');
