@@ -28,7 +28,7 @@ if(options.enqueue){
  const unit='sidewisp-prepare-'+createHash('sha256').update(stateDir+(options['request-id']??version)).digest('hex').slice(0,16);
  const result=spawnSync('systemd-run',['--user','--quiet','--collect',`--unit=${unit}`,'--property=Type=exec',...Object.entries(env).map(([k,v])=>`--setenv=${k}=${v}`),process.execPath,fileURLToPath(import.meta.url),...args.filter(a=>a!=='--enqueue')],{env,encoding:'utf8',stdio:'pipe'});
  if(result.status!==0)throw new Error('background_preparation_not_started');
- console.log(JSON.stringify({status:'preparation_queued',nextAction:'Finish this setup turn so the host can release retained plugin work. Preparation continues automatically; approve in Sidewisp only for a new connection.'}));
+ console.log(JSON.stringify({status:'preparation_queued',nextAction:'Finish this setup turn so the host can release retained plugin work. Preparation and credential collection continue automatically under the initiating app invitation. No additional agent command is needed.'}));
 }else{
  try{
   const status=()=>{try{return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}catch(e){if(/unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}};

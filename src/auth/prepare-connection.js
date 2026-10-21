@@ -67,8 +67,9 @@ export async function prepareConnection({ targetVersion, endpoint, updateOnly = 
     checkExpiry();
     await mark('requesting_approval');
     const result = await begin(); // binding checks/proof remain inside authorization client
-    await mark('approval_pending', { requestId: result.id, expiresAtMs: result.expiresAtMs });
-    return { status: 'approval_pending', requestId: result.id, expiresAtMs: result.expiresAtMs };
+    const status = result.autoConnect ? 'connection_pending' : 'approval_pending';
+    await mark(status, { requestId: result.id, expiresAtMs: result.expiresAtMs });
+    return { status, requestId: result.id, expiresAtMs: result.expiresAtMs };
   } catch (error) {
     const reason = /^[a-z_]+$/.test(error?.message ?? '') ? error.message : 'preparation_failed';
     await mark('blocked', { reason });

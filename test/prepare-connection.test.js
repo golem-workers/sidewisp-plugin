@@ -45,3 +45,8 @@ test('busy cold activation waits but genuine denial stops authorization',async()
 test('mandatory runtime preparation waits for idle and precedes installation and authorization',async()=>{const f=fixture(null);let n=0;f.options.prepareRuntime=async()=>{f.calls.push('runtime');if(++n===1)throw Error('host_activation_busy');return {changed:true};};f.options.coldActivate=async()=>f.calls.push('cold');await prepareConnection(f.options);assert.deepEqual(f.calls,['inspect','runtime','runtime','install','activate','cold','inspect','begin']);});
 test('runtime hash refusal blocks install and authorization without fallback',async()=>{const f=fixture(null);f.options.prepareRuntime=async()=>{throw Error('runtime_source_hash_mismatch');};await assert.rejects(prepareConnection(f.options),/runtime_source_hash_mismatch/);assert.deepEqual(f.calls,['inspect']);});
 test('already-prepared runtime and upgrade-owned activation cause no second restart',async()=>{for(const already of [true,false]){const f=fixture({...good,version:'0.2.38'});f.options.prepareRuntime=async()=>({changed:!already,gatewayPid:1});f.options.runtimeNeedsActivation=async()=>false;f.options.coldActivate=async()=>{throw Error('double_restart')};await prepareConnection(f.options);assert.ok(f.calls.includes('begin'));}});
+
+test('app-consented authorization completes preparation without manual approval guidance',async()=>{
+ const f=fixture();f.options.begin=async()=>({id:'sw_pair_'+ 'a'.repeat(32),autoConnect:true,expiresAtMs:Date.now()+60000});
+ const result=await prepareConnection(f.options);assert.equal(result.status,'connection_pending');assert.doesNotMatch(JSON.stringify(result),/Approve/);
+});

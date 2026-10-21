@@ -62,7 +62,7 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       }
       const result = await request('/v1/device-authorizations/begin', { id, runtime, deviceSecret: state.deviceSecret });
       if (result.id !== id || !/^[A-F0-9]{10}$/.test(result.userCode ?? '')) throw new Error('invalid_device_response');
-      return { status: 'pending', id, userCode: result.userCode, expiresAtMs: result.expiresAtMs,
+      return { status: 'pending', autoConnect: result.autoConnect === true, id, userCode: result.userCode, expiresAtMs: result.expiresAtMs,
         verificationUri: `${url.origin}/device-authorization?id=${encodeURIComponent(id)}&code=${result.userCode}` };
     },
     async poll() {
