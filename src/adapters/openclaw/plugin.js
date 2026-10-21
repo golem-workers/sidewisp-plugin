@@ -18,7 +18,6 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import crypto from "node:crypto";
 import path from "node:path";
 import { mutateConfigFile } from "openclaw/plugin-sdk/config-mutation";
-import { resolveTelegramAccount } from "openclaw/plugin-sdk/telegram-account";
 import { readSetupToken, resolveConfig } from "../../../config.js";
 import { createEnrollmentManager, createFileCredentialStore } from "../../auth/credentials.js";
 import { createTelegramEnrollmentHook } from "../../auth/telegram-enrollment.js";
@@ -49,7 +48,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.72";
+const VERSION = "0.2.73";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -76,6 +75,9 @@ export default definePluginEntry({
         return normalized.startsWith("telegram:") ? [normalized.slice("telegram:".length)] : [normalized];
       }));
     const deleteTelegramSourceMessage = async ({ accountId, conversationId, messageId }) => {
+      // Legacy channel-code enrollment is optional on split-channel SDKs.
+      // Loading the prompt/tool path must not import a removed Telegram surface.
+      const { resolveTelegramAccount } = await import('openclaw/plugin-sdk/telegram-account');
       const account = resolveTelegramAccount({ cfg: api.runtime.config.current(), accountId });
       if (!account.enabled || !account.token) throw new Error("Telegram account unavailable");
       const body = new URLSearchParams({ chat_id: conversationId, message_id: messageId });
@@ -133,6 +135,7 @@ export default definePluginEntry({
     let contextDelivery = null;
     let cronDelivery = null;
     let uploadTimer = null;
+    let startupRetry = null, serviceStopping = false;
     let healthTimer = null;
     let spoolFailure = null;
     let spoolFailureCount = 0;
@@ -308,6 +311,8 @@ export default definePluginEntry({
     api.registerService({
       id: "sidewisp-collector",
       async start(ctx) {
+        serviceStopping = false;
+        clearTimeout(startupRetry); startupRetry = null;
         activation.serviceStarted(ctx);
         if (!config.enabled) return;
         try {
@@ -322,6 +327,7 @@ export default definePluginEntry({
             catch { ctx.logger.warn("Sidewisp enrollment failed; will retry on restart"); }
           }
           spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
+          spoolFailure = null;
           const previouslyActive = parseOpenClawActiveWorkCursor(spool.cursor(HOOK_EVENT_SOURCE));
           userTaskLifecycle.restoreActiveWork(previouslyActive);
           const discovery = await discoverOpenClawSources(stateDir, api.runtime.version);
@@ -397,10 +403,15 @@ export default definePluginEntry({
           uploader = null;
           await collector.stop().catch(() => {});
           if (!(error instanceof SpoolError)) throw error;
-          ctx.logger.error(`Sidewisp collector disabled after spool failure (${error.code}); gateway continues`);
+          ctx.logger.error(`Sidewisp collector unavailable after spool failure (${error.code}); gateway continues`);
+          if (error.code === 'locked' && !serviceStopping) {
+            startupRetry = setTimeout(() => { startupRetry = null; if (!serviceStopping) void this.start(ctx).catch(() => {}); }, 5000);
+            startupRetry.unref?.();
+          }
         }
       },
       async stop() {
+        serviceStopping = true; clearTimeout(startupRetry); startupRetry = null;
         questions.dispose();
         if(scheduleRunner) await scheduleRunner.stop().catch(()=>{});
         scheduleRunner=null;

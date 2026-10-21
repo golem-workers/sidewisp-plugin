@@ -1,6 +1,6 @@
 import path from 'node:path';
 import {createHash,randomUUID} from 'node:crypto';
-import {readFileSync,writeFileSync,realpathSync,mkdirSync,renameSync,statSync,lstatSync,unlinkSync,chmodSync,chownSync} from 'node:fs';
+import {readFileSync,readdirSync,writeFileSync,realpathSync,mkdirSync,renameSync,statSync,lstatSync,unlinkSync,chmodSync,chownSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {isHostIdle} from '../update/hot-update.js';
@@ -37,14 +37,39 @@ export function resolveManagedRuntime({serviceStatus,stateDir,configPath}) {
  for(let n=0;n<3;n++,root=path.dirname(root)){
   let pkg;try{pkg=JSON.parse(readFileSync(path.join(root,'package.json'),'utf8'));}catch{continue;}
   if(pkg.name==='openclaw'){
-   if(pkg.version!=='2026.9.8')throw Error('unsupported_runtime_companion');
    return root;
   }
  }
  throw Error('runtime_path_unavailable');
 }
+// Newer hosts ship the native ownership/delivery APIs. Never transplant a
+// 2026.9.8 binary hotfix onto them, and never admit a host by semver alone.
+export function inspectNativeRuntime(runtime,pkg=JSON.parse(readFileSync(path.join(runtime,'package.json'),'utf8'))) {
+ const dist=path.join(runtime,'dist'),names=readdirSync(dist),hashes={};
+ const requireSource=(prefix,markers)=>{
+  for(const name of names.filter(n=>n.startsWith(prefix)&&n.endsWith('.mjs'))){
+   const source=readFileSync(path.join(dist,name),'utf8');
+   if(markers.every(marker=>source.includes(marker))){hashes['dist/'+name]=hash(source);return;}
+  }
+  throw Error('runtime_capability_missing_'+prefix.replaceAll('-','_'));
+ };
+ for(const key of ['plugin-entry','agent-runtime','config-mutation']) {
+  const exported=pkg.exports?.['./plugin-sdk/'+key];
+  const target=typeof exported==='string'?exported:exported?.import??exported?.default;
+  if(typeof target!=='string'||!statSync(path.resolve(runtime,target)).isFile())throw Error('runtime_sdk_capability_missing');
+ }
+ requireSource('services-',['withPluginServiceScheduler','runOutsideOperatorToolGatewayAuthority','retainConsumer','lease']);
+ requireSource('hooks-',['reply_dispatch','message_sent','before_dispatch']);
+ requireSource('registry-',['registerAgentEventSubscription','registerService','createPluginApi']);
+ requireSource('delivery-',['runMessageSent','sessionKeyForInternalHooks']);
+ return {changed:false,activationRequired:false,native:true,version:pkg.version,hashes};
+}
+
 export function stageRuntimeCompanion({runtime,stateDir,archivePath=archive,descriptor=manifest}) {
- if(!path.isAbsolute(runtime)||!path.isAbsolute(stateDir)||JSON.parse(readFileSync(path.join(runtime,'package.json'),'utf8')).version!=='2026.9.8')throw Error('unsupported_runtime_companion');
+ if(!path.isAbsolute(runtime)||!path.isAbsolute(stateDir))throw Error('runtime_path_unavailable');
+ const pkg=JSON.parse(readFileSync(path.join(runtime,'package.json'),'utf8'));
+ if(pkg.name!=='openclaw')throw Error('runtime_path_unavailable');
+ if(pkg.version!=='2026.9.8')return inspectNativeRuntime(runtime,pkg);
  const journalDir=path.join(stateDir,'sidewisp','runtime-companion-4013');mkdirSync(journalDir,{recursive:true,mode:0o700});
  const journal=path.join(journalDir,'result.json');const inputs=[];
  const allowed=['dist/dispatch-from-config.finalize-BttBCKPU.mjs','dist/delivery.runtime-D3Jl_drC.mjs','dist/package-update-activation-recovery.mjs','dist/hook-runner-global-CwCyBBBr.mjs','dist/services-9PyB9Rj_.mjs','dist/service-hook-owners.mjs'];
@@ -90,12 +115,13 @@ export function prepareRuntimeCompanion({run,stateDir,configPath}) {
  if(!isHostIdle(lanes))throw Error('host_activation_busy');
  const result=stageRuntimeCompanion({runtime,stateDir});
  const journal=path.join(stateDir,'sidewisp','runtime-companion-4013','result.json');let previous={};try{previous=JSON.parse(readFileSync(journal,'utf8'));}catch{}
- const prepared={...result,gatewayPid:serviceStatus.service.runtime.pid,activationRequired:result.changed||previous.phase!=='completed'||previous.version!==runtimeCompanionVersion};
+ const prepared={...result,gatewayPid:serviceStatus.service.runtime.pid,activationRequired:result.native?false:result.changed||previous.phase!=='completed'||previous.version!==runtimeCompanionVersion};
  if(prepared.activationRequired){writeFileSync(journal+'.activation.tmp',JSON.stringify({...previous,phase:'prepared',...prepared})+'\n',{mode:0o600});renameSync(journal+'.activation.tmp',journal);}
  return prepared;
 }
 
 export function finalizeRuntimeCompanion({stateDir,prepared}) {
+ mkdirSync(path.join(stateDir,'sidewisp','runtime-companion-4013'),{recursive:true,mode:0o700});
  const journal=path.join(stateDir,'sidewisp','runtime-companion-4013','result.json');let previous={};try{previous=JSON.parse(readFileSync(journal,'utf8'));}catch{}
  writeFileSync(journal+'.complete.tmp',JSON.stringify({...previous,...prepared,phase:'completed',completedAtMs:Date.now()})+'\n',{mode:0o600});renameSync(journal+'.complete.tmp',journal);
 }

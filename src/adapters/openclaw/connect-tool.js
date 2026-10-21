@@ -10,7 +10,7 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
   return {
     name: 'sidewisp_connect',
     label: 'Connect Sidewisp',
-    description: 'Request Sidewisp monitoring access using a public invitation ID. The owner must approve in Sidewisp. Credentials stay local; the running collector completes automatically. Does not install plugins or change host configuration. Never report connected until the server receives telemetry.',
+    description: 'Request Sidewisp monitoring access using a public invitation ID. New app-consented invitations connect automatically; legacy invitations may still need in-app confirmation. Credentials stay local; the running collector completes automatically. Does not install plugins or change host configuration. Never report connected until the server receives telemetry.',
     parameters: {
       type: 'object', additionalProperties: false,
       properties: {
@@ -36,9 +36,9 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
         const result = await device.begin({ id: input.requestId, runtime: 'openclaw' });
         // Do not return fallback verification URL/code even in a private session:
         // the authenticated app already owns and displays this request.
-        return reply({ status: 'approval_pending', requestId: result.id,
+        return reply({ status: result.autoConnect ? 'connection_pending' : 'approval_pending', requestId: result.id,
           expiresAtMs: result.expiresAtMs,
-          nextAction: 'Approve the request in Sidewisp. No additional agent message is needed.' });
+          nextAction: result.autoConnect ? 'Connection is authorized by the initiating account. Wait for automatic credential collection and the first server-accepted heartbeat; no manual approval or second command.' : 'Approve the request in Sidewisp. No additional agent message is needed.' });
       } catch (error) {
         if (error.message === 'collector_activation_required') return reply({status:'preparation_required',reason:'cold_activation_required',nextAction:'Use the verified preparation helper through the authorized host route before requesting approval.'});
         const allowed = /^(collector_status_unavailable|installation_already_connected|another_authorization_pending|device_authorization_http_[0-9]{3})$/;

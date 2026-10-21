@@ -15,7 +15,12 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
   const request = async (route, input) => {
     const response = await fetchImpl(new URL(route, url), { method: 'POST', redirect: 'error',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify(input), signal: AbortSignal.timeout(15_000) });
-    if (!response.ok) throw new Error(`device_authorization_http_${response.status}`);
+    if (!response.ok) {
+      // Only a proof-specific rejection is terminal. A proxy/login 401 is not.
+      const body = await response.json().catch(() => null);
+      throw Object.assign(new Error(`device_authorization_http_${response.status}`),
+        { status: response.status, reason: body?.error });
+    }
     return response.json();
   };
   const read = async () => {
@@ -38,7 +43,15 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       let state;
       try { state = await read(); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       if (state && (state.id !== id || state.runtime !== runtime)) {
-        const previous = await request('/v1/device-authorizations/poll', { id: state.id, deviceSecret: state.deviceSecret });
+        let previous;
+        try { previous = await request('/v1/device-authorizations/poll', { id: state.id, deviceSecret: state.deviceSecret }); }
+        catch (error) {
+          // Authenticated envelope sanitizes invalid_device_proof as request_rejected.
+          // A new invitation must not remain hostage to the old local proof.
+          if (error.status === 401 && ['invalid_device_proof', 'request_rejected'].includes(error.reason)
+            || error.status === 404 && error.reason === 'authorization_not_found') previous = { status: 'expired' };
+          else throw error;
+        }
         if (!['expired', 'denied', 'completed'].includes(previous.status)) throw new Error('another_authorization_pending');
         await fs.rm(file);
         state = null;
@@ -49,7 +62,7 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       }
       const result = await request('/v1/device-authorizations/begin', { id, runtime, deviceSecret: state.deviceSecret });
       if (result.id !== id || !/^[A-F0-9]{10}$/.test(result.userCode ?? '')) throw new Error('invalid_device_response');
-      return { status: 'pending', id, userCode: result.userCode, expiresAtMs: result.expiresAtMs,
+      return { status: 'pending', autoConnect: result.autoConnect === true, id, userCode: result.userCode, expiresAtMs: result.expiresAtMs,
         verificationUri: `${url.origin}/device-authorization?id=${encodeURIComponent(id)}&code=${result.userCode}` };
     },
     async poll() {

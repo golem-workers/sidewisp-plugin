@@ -47,14 +47,14 @@ for(const [name,make] of [
  ['do not scan later absolute paths',f=>['node','/missing-script.js',f.entry]],
 ])test('refuses '+name,()=>{const f=fixture();try{assert.throws(()=>f.resolve(make(f)),/runtime_path_unavailable/);}finally{f.cleanup();}});
 
-test('memory parsing cannot weaken active profile and runtime-version checks',()=>{
+test('memory parsing preserves active profile checks while path discovery is version-neutral',()=>{
  const f=fixture();try{
   const args=['node','--max-old-space-size=3992',f.entry];f.serviceStatus.config.mismatch=true;
   assert.throws(()=>f.resolve(args),/managed_active_profile_required/);delete f.serviceStatus.config.mismatch;
   f.serviceStatus.service.command.environment.OPENCLAW_STATE_DIR=f.root;
   assert.throws(()=>f.resolve(args),/managed_active_profile_required/);f.serviceStatus.service.command.environment.OPENCLAW_STATE_DIR=f.stateDir;
   fs.writeFileSync(path.join(f.runtime,'package.json'),JSON.stringify({name:'openclaw',version:'2026.9.9'}));
-  assert.throws(()=>f.resolve(args),/unsupported_runtime_companion/);
+  assert.equal(f.resolve(args), f.runtime);
  }finally{f.cleanup();}
 });
 
