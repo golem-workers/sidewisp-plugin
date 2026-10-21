@@ -113,3 +113,9 @@ test('reconnection quarantines old installation events without sending them unde
   assert.equal((await uploader.sendOnce()).sent,1);
   assert.equal(spool.pending(10).length,0);
 });
+
+test('timer and immediate upload share one flight so an unacknowledged batch is never sent twice',async()=>{
+ const spool=memorySpool([{eventId:'first'}]);let release,calls=0;const gate=new Promise(r=>release=r);
+ const uploader=createUploader({spool,endpoint:'https://sidewisp.test',credentialProvider:{current:async()=>credential},fetchImpl:async()=>{calls++;await gate;return{ok:true,status:200,json:async()=>({acknowledgedEventIds:['first']})};}});
+ const requests=Array.from({length:20},()=>uploader.sendOnce());await new Promise(r=>setImmediate(r));assert.equal(calls,1);release();await Promise.all(requests);assert.equal(spool.pending(1).length,0);assert.equal(calls,1);
+});

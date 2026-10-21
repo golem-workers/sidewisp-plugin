@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {saveConnectionReply,sendConnectionDelay} from '../src/auth/connection-notice.js';
 import {queuePreparation} from './queue-preparation.mjs';
 import {prepareRuntimeCompanion,finalizeRuntimeCompanion} from '../src/auth/runtime-companion.js';
 // Run from an extracted, SHA-256-verified release. Public invitation only;
@@ -13,13 +14,14 @@ import {coldActivateOpenClaw} from './cold-activate-openclaw.mjs';
 import {prepareConnection} from '../src/auth/prepare-connection.js';
 import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 const args=process.argv.slice(2);const options={};
-for(let i=0;i<args.length;i++){if(args[i]==='--supervised')options.supervised=true;else if(args[i]==='--preparation-lock')options.locked=true;else if(args[i]==='--enqueue')options.enqueue=true;else if(args[i]==='--update-only')options.updateOnly=true;else if(/^--(archive|sha256|endpoint|request-id|state-dir|expires-at-ms)$/.test(args[i]))options[args[i].slice(2)]=args[++i];else throw new Error('invalid_prepare_argument');}
+for(let i=0;i<args.length;i++){if(args[i]==='--supervised')options.supervised=true;else if(args[i]==='--preparation-lock')options.locked=true;else if(args[i]==='--enqueue')options.enqueue=true;else if(args[i]==='--update-only')options.updateOnly=true;else if(/^--(archive|sha256|endpoint|request-id|state-dir|expires-at-ms|telegram-target|telegram-account|telegram-thread-id)$/.test(args[i]))options[args[i].slice(2)]=args[++i];else throw new Error('invalid_prepare_argument');}
 const version=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
 const stateDir=options['state-dir'];const endpoint=new URL(options.endpoint);
 if(!path.isAbsolute(stateDir??'') || !path.isAbsolute(options.archive??'') || !/^[a-f0-9]{64}$/.test(options.sha256??'')
  || endpoint.protocol!=='https:' || endpoint.origin!==options.endpoint || (!options.updateOnly && !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(options['request-id']??'')))throw new Error('invalid_prepare_input');
 if(createHash('sha256').update(readFileSync(options.archive)).digest('hex')!==options.sha256)throw new Error('archive_hash_mismatch');
 if(path.resolve(process.env.OPENCLAW_STATE_DIR??'')!==stateDir || !path.isAbsolute(process.env.OPENCLAW_CONFIG_PATH??''))throw new Error('explicit_active_profile_required');
+if(options['telegram-target']&&!options.updateOnly)await saveConnectionReply({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
 const stateFile=path.join(stateDir,'sidewisp','prepare-status.json');mkdirSync(path.dirname(stateFile),{recursive:true,mode:0o700});
 const writeState=s=>{writeFileSync(stateFile+'.tmp',JSON.stringify({...s,targetVersion:version,updatedAt:new Date().toISOString()}),{mode:0o600});renameSync(stateFile+'.tmp',stateFile);};
 const run=args=>execFileSync('openclaw',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:120000});
@@ -41,6 +43,8 @@ if(!options.locked){
   let reported='',reportedAt=0;
   const persist=async s=>{
    writeState({status:s.stage,...s});
+   const delayReason=s.reasonCode??s.reason;
+   if((s.stage==='blocked'||s.stage==='waiting_for_host_idle')&&delayReason)await sendConnectionDelay({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],reason:delayReason}).catch(()=>{});
    if(options.updateOnly || ['completed','connection_pending','approval_pending'].includes(s.stage))return;
    const key=s.stage+':'+(s.reasonCode??s.reason??'');
    if(key===reported&&Date.now()-reportedAt<30000)return;

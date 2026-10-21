@@ -16,6 +16,9 @@ import { collectOpenClawContext } from '../../context/openclaw.js';
 import { createContextUsageDelivery } from '../../delivery/context-usage.js';
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import crypto from "node:crypto";
+import { watch } from "node:fs";
+import { createConnectionNotifier } from "../../auth/connection-notice.js";
+import { createUploadPump } from "../../delivery/upload-pump.js";
 import path from "node:path";
 import { mutateConfigFile } from "openclaw/plugin-sdk/config-mutation";
 import { readSetupToken, resolveConfig } from "../../../config.js";
@@ -48,7 +51,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.75";
+const VERSION = "0.2.76";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -135,6 +138,9 @@ export default definePluginEntry({
     let contextDelivery = null;
     let cronDelivery = null;
     let uploadTimer = null;
+    let uploadPump = null;
+    let authorizationWatch = null;
+    const connectionNotifier = createConnectionNotifier({ stateDir, endpoint: config.endpoint, onError: () => api.logger.warn("Sidewisp connection reply unavailable; will retry after next accepted health") });
     let startupRetry = null, serviceStopping = false;
     let healthTimer = null;
     let spoolFailure = null;
@@ -180,6 +186,7 @@ export default definePluginEntry({
           openClawActiveWorkCursor(acceptedEvents.at(-1).sequence, userTaskLifecycle.activeWork()),
           acceptedEvents,
         );
+        uploadPump?.request();
         return true;
       } catch (error) {
         if (!(error instanceof SpoolError)) throw error;
@@ -347,6 +354,7 @@ export default definePluginEntry({
             spool, endpoint: config.endpoint,
             credentialProvider: { current: async () => auth.credential() },
             onUpdate: (directive) => updates.schedule(directive),
+            onAcknowledged: events => connectionNotifier.acknowledged(events),
           });
           runtimeDiagnostics = createRuntimeDiagnosticsDelivery({
             adapter, spool, endpoint: config.endpoint,
@@ -371,7 +379,10 @@ export default definePluginEntry({
             intervalMs: config.usageIntervalMs,
           });
           usageDelivery.start();
-          uploadTimer = setInterval(() => runDetached("upload", () => uploader.drain({ maxAttempts: 1 })), 5_000);
+          uploadPump = createUploadPump({ upload: () => uploader.drain({ maxAttempts: 1 }),
+            onError: error => { if (error instanceof SpoolError) recordSpoolFailure(error); else api.logger.warn("Sidewisp upload failed; disk queue retained"); } });
+          uploadPump.request();
+          uploadTimer = setInterval(() => uploadPump?.request(), 5_000);
           uploadTimer.unref?.();
           await collector.start();
           healthTimer = createHeartbeatSupervisor({ run: emitHeartbeat,
@@ -379,12 +390,19 @@ export default definePluginEntry({
             onError: error => { if (error instanceof SpoolError) recordSpoolFailure(error); api.logger.warn('Sidewisp heartbeat unavailable; recovery state exposed'); },
           });
           healthTimer.start();
+          try { authorizationWatch = watch(path.join(stateDir, "sidewisp"), (_event, filename) => {
+            if (["device-authorization.json", "installation.json"].includes(String(filename))) healthTimer?.request();
+          });
+          authorizationWatch.on("error", () => { authorizationWatch?.close(); authorizationWatch = null; });
+          authorizationWatch.unref?.(); } catch { api.logger.warn("Sidewisp authorization watch unavailable; periodic recovery remains enabled"); }
           ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
         } catch (error) {
           // Every failed start owns cleanup, not only SQLite failures.
           if (error instanceof SpoolError) recordSpoolFailure(error);
           if (scheduleRunner) await scheduleRunner.stop().catch(() => {});
           scheduleRunner = null;
+          authorizationWatch?.close(); authorizationWatch = null;
+          if (uploadPump) await uploadPump.stop(); uploadPump = null;
           if (healthTimer) await healthTimer.stop();
           healthTimer = null;
           if (uploadTimer) clearInterval(uploadTimer);
@@ -415,6 +433,8 @@ export default definePluginEntry({
         questions.dispose();
         if(scheduleRunner) await scheduleRunner.stop().catch(()=>{});
         scheduleRunner=null;
+        authorizationWatch?.close(); authorizationWatch = null;
+        if (uploadPump) await uploadPump.stop(); uploadPump = null;
         if (healthTimer) await healthTimer.stop();
         healthTimer = null;
         if (uploadTimer) clearInterval(uploadTimer);
@@ -427,6 +447,7 @@ export default definePluginEntry({
             else api.logger.warn("Sidewisp final upload failed during shutdown");
           }
         }
+        await connectionNotifier.stop();
         uploader = null;
         if (runtimeDiagnostics) {
           try { await runtimeDiagnostics.stop(); }

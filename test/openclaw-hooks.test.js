@@ -2078,3 +2078,22 @@ test("classifies structured failures without copying private error content", () 
   assert.equal(mapped.httpStatus, 429);
   assert.equal(JSON.stringify(mapped).includes("private"), false);
 });
+
+
+test('three queued messages start immediately after exact native settlement, without waiting for a late final', async () => {
+ const registered=new Map(), seen=[];
+ const lifecycle=createOpenClawUserTaskLifecycle({onDeferred(event){seen.push(event);return true;}});
+ const emit=event=>{const result=lifecycle.processDetailed(event);if(result.disposition==='accepted'){seen.push(result.event);lifecycle.commit(result.event);}return result;};
+ registerOpenClawHooks({on:(name,handler)=>registered.set(name,handler)},{emit,envelopeFactory:envelope});
+ for(let i=1;i<=3;i++){
+  await registered.get('message_received')({messageId:'queue-'+i},{sessionKey:'s'});
+  await registered.get('before_dispatch')({messageId:'queue-'+i},{sessionKey:'s'});
+  const started=emit(official('turn.started','s','native-'+i));
+  assert.equal(started.event?.correlation.turnId,'queue-'+i,'next start must not be swallowed by the previous final grace');
+  emit({...official('turn.completed','s','native-'+i),details:{component:'agent_lifecycle_end',status:'execution-settled'}});
+ }
+ await registered.get('before_dispatch')({messageId:'after-queue'},{sessionKey:'s'});
+ for(let i=1;i<=3;i++) invokeReplyBoundary(registered,{kind:'final',runId:'native-'+i},{sessionKey:'s'});
+ const transitions=seen.filter(e=>['turn.started','turn.completed'].includes(e.type));
+ assert.deepEqual(transitions.map(e=>[e.type,e.correlation.turnId]),[1,2,3].flatMap(i=>[['turn.started','queue-'+i],['turn.completed','queue-'+i]]));
+});

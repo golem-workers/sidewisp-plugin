@@ -512,7 +512,8 @@ export function createOpenClawUserTaskLifecycle({
       if (previous && !previous.terminal) {
         if (previous.pendingTerminal && previous.pendingTerminal.details?.status !== "continuation-pending") {
           if ((!previous.pendingAwaitingFinal || previous.pendingDeadline === null
-                || previous.pendingDeadline <= nowMs) && attemptPending(previousKey, previous)) {
+                || previous.pendingDeadline <= nowMs
+                || previous.pendingTerminal.details?.status === "execution-settled") && attemptPending(previousKey, previous)) {
             rememberRetired(previous);
             remove(previousKey);
           } else {

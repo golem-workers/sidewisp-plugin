@@ -1,7 +1,8 @@
+import { saveConnectionReply, telegramReplyRoute } from '../../auth/connection-notice.js';
 import { createDeviceAuthorizationClient } from '../../auth/device-authorization.js';
 
 // Endpoint and state directory belong to the host, never to model-supplied input.
-export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
+export function createConnectTool({ endpoint, stateDir, ready, fetchImpl, replyRoute }) {
   const device = createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl });
   let busy = false;
   const reply = (details, isError = false) => ({
@@ -33,6 +34,7 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
       busy = true;
       try {
         if (!await ready(input.minimumVersion)) return reply({ status: 'blocked', reason: 'collector_not_ready' }, true);
+        if(replyRoute)await saveConnectionReply({stateDir,endpoint:new URL(endpoint).origin,requestId:input.requestId,route:replyRoute});
         const result = await device.begin({ id: input.requestId, runtime: 'openclaw' });
         // Do not return fallback verification URL/code even in a private session:
         // the authenticated app already owns and displays this request.
@@ -49,8 +51,7 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl }) {
 }
 
 export function registerConnectTool(api, options) {
-  const tool = createConnectTool(options);
   // Host-derived admission only; prompt text cannot declare ownership.
-  api.registerTool(context => context.senderIsOwner === true ? tool : null,
+  api.registerTool(context => context.senderIsOwner === true ? createConnectTool({...options,replyRoute:telegramReplyRoute({...context,...context.deliveryContext})}) : null,
     { name: 'sidewisp_connect' });
 }

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { createFileCredentialStore } from './credentials.js';
+import { recordAuthorizationCompletion } from './connection-notice.js';
 import { inspectCredential } from './credential-status.js';
 
 // CLI output contains only public request details. Device proof and credentials stay on disk.
@@ -113,12 +114,14 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
           await fs.rm(file, { force: true });
           return { status: 'expired' };
         }
+        await recordAuthorizationCompletion({stateDir,endpoint:url.origin,requestId:state.id,installationId:credential.installationId});
         await fs.rm(file);
         return { status: 'credential_saved', installationId: credential.installationId };
       }
       if (result.status === 'completed') {
         const existing = await credentials.read();
         if (!existing || existing.status !== 'active') throw new Error('device_ack_without_credential');
+        await recordAuthorizationCompletion({stateDir,endpoint:url.origin,requestId:state.id,installationId:existing.installationId});
         await fs.rm(file);
         return { status: 'credential_saved', installationId: existing.installationId };
       }

@@ -9,7 +9,7 @@ export function signBatch({ secret, timestamp, nonce, body }) {
 
 export function createUploader({
   spool, credentialProvider, endpoint, fetchImpl = globalThis.fetch,
-  onUpdate = () => {},
+  onUpdate = () => {}, onAcknowledged = () => {},
   now = () => Date.now(), nonce = () => crypto.randomBytes(16).toString("base64url"),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), random = Math.random,
   maxBatch = 100, maxBodyBytes = 256 * 1024, timeoutMs = 10_000, maxBackoffMs = 60_000, compressThresholdBytes = 1024,
@@ -28,7 +28,13 @@ export function createUploader({
     return typeof value === "string" && /^[A-Za-z0-9_.-]{1,64}$/.test(value) ? value : "transport-error";
   };
 
-  async function sendOnce() {
+  let sendFlight = null;
+  const sendOnce = () => {
+    if (!sendFlight) sendFlight = performSend().finally(() => { sendFlight = null; });
+    return sendFlight;
+  };
+
+  async function performSend() {
     const credential = await credentialProvider.current();
     if (!credential || credential.status !== "active") return finish({ status: "disabled", sent: 0, remaining: spool.pending(1).length });
     const queued = spool.pending(maxBatch);
@@ -85,6 +91,8 @@ export function createUploader({
     const acknowledged = Array.isArray(result.acknowledgedEventIds)
       ? result.acknowledgedEventIds.filter((id) => sentIds.has(id)) : [];
     spool.acknowledge(acknowledged);
+    const acceptedIds = new Set(acknowledged);
+    try { void Promise.resolve(onAcknowledged(pending.filter(row => acceptedIds.has(row.eventId)).map(row => row.event))).catch(() => {}); } catch { /* channel notification must not block telemetry */ }
     if (acknowledged.length > 0) lastDeliveredAt = new Date(now()).toISOString();
     if (Array.isArray(result.rejected)) {
       for (const rejected of result.rejected) {

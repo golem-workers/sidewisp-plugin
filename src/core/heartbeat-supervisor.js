@@ -1,6 +1,6 @@
 // A timed-out operation retains its flight until it settles: never overlap it.
 export function createHeartbeatSupervisor({ run, intervalMs = 30000, retryMs = 5000, timeoutMs = 15000, maxFailures = 3, permanent = () => false, onError = () => {}, setTimer = setTimeout, clearTimer = clearTimeout }) {
-  let stopped = true, timer = null, flight = null, failures = 0, state = 'stopped', generation = 0, controller = null, healthy = false;
+  let stopped = true, timer = null, flight = null, failures = 0, state = 'stopped', generation = 0, controller = null, healthy = false, requested = false;
   const schedule = (ms, epoch) => {
     if (stopped || epoch !== generation) return;
     timer = setTimer(() => { timer = null; void tick(epoch); }, ms); timer?.unref?.();
@@ -22,16 +22,17 @@ export function createHeartbeatSupervisor({ run, intervalMs = 30000, retryMs = 5
       if (stopped || epoch !== generation) return;
       failures++; healthy = false; try { onError(error); } catch { /* reporting must not terminate supervision */ }
       if (permanent(error)) state = 'blocked';
-      else if (failures >= maxFailures) state = 'failed';
-      else { state = 'recovering'; schedule(retryMs, epoch); }
+      else { state = failures >= maxFailures ? 'failed' : 'recovering'; schedule(Math.min(intervalMs, retryMs * 2 ** Math.min(failures - 1, 4)), epoch); }
     } finally {
       clearTimer(deadline); flight = null;
+      if (requested && !stopped && epoch === generation && state !== 'blocked') { requested = false; if (timer) clearTimer(timer); timer = null; schedule(0, epoch); }
       // Timeout marks unknown, never spawns concurrent replacement work.
 
     }
   }
   return {
     start() { if (!stopped || flight) return; stopped = false; healthy = false; failures = 0; generation++; void tick(generation); },
+    request() { if (stopped || state === 'blocked') return; if (flight) { requested = true; return; } if (timer) clearTimer(timer); timer = null; schedule(0, generation); },
     async stop() { stopped = true; generation++; state = 'stopped'; if (timer) clearTimer(timer); timer = null; controller?.abort(); if (flight) { let deadline; await Promise.race([flight.catch(() => {}),new Promise(resolve => { deadline = setTimer(resolve, 1000); })]); clearTimer(deadline); } },
     ready: () => !stopped && healthy && ['ready','checking'].includes(state),
     status: () => ({ state, failures, inFlight: Boolean(flight) }),
