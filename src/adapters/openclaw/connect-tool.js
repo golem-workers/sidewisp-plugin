@@ -34,8 +34,8 @@ export function createConnectTool({ endpoint, stateDir, ready, fetchImpl, replyR
       busy = true;
       try {
         if (!await ready(input.minimumVersion)) return reply({ status: 'blocked', reason: 'collector_not_ready' }, true);
-        if(replyRoute)await saveConnectionReply({stateDir,endpoint:new URL(endpoint).origin,requestId:input.requestId,route:replyRoute});
         const result = await device.begin({ id: input.requestId, runtime: 'openclaw' });
+        if(replyRoute)await saveConnectionReply({stateDir,endpoint:new URL(endpoint).origin,requestId:input.requestId,route:replyRoute});
         // Do not return fallback verification URL/code even in a private session:
         // the authenticated app already owns and displays this request.
         return reply({ status: result.autoConnect ? 'connection_pending' : 'approval_pending', requestId: result.id,
