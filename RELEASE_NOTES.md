@@ -1,3 +1,7 @@
+# 0.2.78 — reliable enrollment event delivery
+
+Credential reads no longer re-emit filesystem metadata notifications and recursively schedule heartbeats. Successful acknowledged backlog uploads continue in serialized bounded batches. Existing credential format, privacy allowlists, and spool schema are unchanged.
+
 # 0.2.72 — staging native cron bootstrap
 
 The verified plugin provisions the corrected canonical cron helper into configured OpenClaw agent workspaces on collector start. Fresh setup, manager updates and reconnect use the same idempotent path. Only exact legacy canonical bytes are upgraded, with a retained backup. Custom helpers and instructions remain untouched; unknown custom helpers are explicitly unverified. Non-staging endpoints are unchanged. Credentials, cron stores, pause/filter settings and unrelated work are not reset.

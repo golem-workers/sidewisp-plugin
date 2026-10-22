@@ -38,6 +38,6 @@ test('real credential metadata and atomic replacement events do not create a rec
  const directory=path.join(stateDir,'sidewisp');mkdirSync(directory);const store=createFileCredentialStore({stateDir});const c={installationId:'sw_ins_eventstest123',secret:'sw_secret_'+'a'.repeat(32),status:'active'};await store.write(c);
  let notifications=0,last=null;const watcher=watchManagerFiles({directory,onCredential:value=>{notifications++;last=value;},onAttempt:()=>{},onError:()=>assert.fail('watcher failure')});t.after(()=>watcher.close());
  // This read produces genuine metadata events, but observer reads must not.
- await store.read();await new Promise(r=>setTimeout(r,70));const stable=notifications;assert.ok(stable>0);assert.ok(stable<8);await new Promise(r=>setTimeout(r,70));assert.equal(notifications,stable);
+ await store.read();const {chmod}=await import('node:fs/promises');await chmod(store.file,0o600);await new Promise(r=>setTimeout(r,70));const stable=notifications;assert.ok(stable>0);assert.ok(stable<8);await new Promise(r=>setTimeout(r,70));assert.equal(notifications,stable);
  const replacement={...c,secret:'sw_secret_'+'b'.repeat(32)};writeFileSync(path.join(directory,'new.json'),JSON.stringify(replacement));renameSync(path.join(directory,'new.json'),path.join(directory,'installation.json'));await new Promise(r=>setTimeout(r,70));assert.equal(last.secret,replacement.secret);assert.ok(notifications-stable<4);
 });

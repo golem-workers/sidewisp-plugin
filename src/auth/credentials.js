@@ -35,8 +35,11 @@ export function createFileCredentialStore({ stateDir }) {
     async read() {
       try {
         const value = validateCredential(JSON.parse(await fs.readFile(file, "utf8")));
-        await fs.chmod(directory, 0o700);
-        await fs.chmod(file, 0o600);
+        // chmod emits filesystem notifications even when the mode is unchanged.
+        // A collector credential read must not wake its own authorization watch.
+        const [directoryStat, fileStat] = await Promise.all([fs.stat(directory), fs.stat(file)]);
+        if ((directoryStat.mode & 0o7777) !== 0o700) await fs.chmod(directory, 0o700);
+        if ((fileStat.mode & 0o7777) !== 0o600) await fs.chmod(file, 0o600);
         return value;
       } catch (error) {
         if (error?.code === "ENOENT") return null;

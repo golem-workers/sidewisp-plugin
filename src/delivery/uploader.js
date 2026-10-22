@@ -121,7 +121,7 @@ export function createUploader({
           await sleep(Math.round(delay));
         }
       }
-      return finish({ status: "backpressure", sent: 0, remaining: spool.pending(1).length,
+      return finish({ status: "backpressure", sent: finalResult?.status === "sent" ? finalResult.sent : 0, remaining: spool.pending(1).length,
         ...(finalResult?.transportCode ? { transportCode: finalResult.transportCode } : {}) });
     },
   });
