@@ -45,7 +45,7 @@ if(!options.locked){
   const persist=async s=>{
    writeState({status:s.stage,...s});
    const delayReason=s.reasonCode??s.reason;
-   if((s.stage==='blocked'||s.stage==='waiting_for_host_idle')&&delayReason)await sendConnectionDelay({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],reason:delayReason}).catch(()=>{});
+   if(s.stage==='blocked'&&delayReason)await sendConnectionDelay({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],reason:delayReason}).catch(()=>{});
    if(options.updateOnly || ['completed','connection_pending','approval_pending'].includes(s.stage))return;
    const key=s.stage+':'+(s.reasonCode??s.reason??'');
    if(key===reported&&Date.now()-reportedAt<30000)return;
