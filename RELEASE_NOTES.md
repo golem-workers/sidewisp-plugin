@@ -1,3 +1,9 @@
+# 0.2.81 — silent ordinary connection waits
+
+- Do not send chat notifications for active work, retained work, or ordinary preparation waiting.
+- Keep preparation progress reporting, idle admission, automatic continuation, and durable real-blocker notices unchanged.
+- Keep the connection confirmation gated on a fresh server-accepted heartbeat and the same authorization binding.
+
 # 0.2.80 — newest accepted health wins
 
 Supersedes staging candidate 0.2.79 before new-enrollment promotion. Mixed batches of fresh and historical health cannot hide the newest accepted heartbeat from the connection reply. All 0.2.79 queue preservation guarantees remain.
