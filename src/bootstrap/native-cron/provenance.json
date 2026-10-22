@@ -1,0 +1,7 @@
+{
+  "sourceRepository": "golem-workers/golem-workers-backend",
+  "sourceCommit": "796bd117e95e03b89141de75b66c8acd842167b0",
+  "helperSHA256": "7989fc94c23f59c8441205b64c144e1de54462db72ba3d3aaa19cfe168cceb9c",
+  "legacyHelperSHA256": "a165a012664adb6c81051311b20417aed9947d4d2556da7d5c58e3525f77c6b3",
+  "skillSHA256": "347a4632d1e4b3695a8a9e20e1deaf36a895be044600f7a24705a91baacb9d0e"
+}
