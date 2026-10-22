@@ -20,7 +20,7 @@ export function queuePreparation({stateDir,version,sha256,endpoint,args,script,e
   if(expiry!==undefined&&(!Number.isSafeInteger(expiry)||expiry<=Date.now()))throw Error('fresh_invitation_required');
  }
  const job=old?.identity===identity?old:{identity,deadlineMs:Date.now()+3600000};
- if(job.terminal)return {status:job.terminal,unit};
+ if(job.terminal)return ['completed','approval_pending','connection_pending'].includes(job.terminal) ? {status:job.terminal,unit} : {status:'blocked',reason:job.terminal,unit};
  const unitDir=path.join(environment.XDG_CONFIG_HOME??path.join(environment.HOME,'.config'),'systemd','user');mkdirSync(unitDir,{recursive:true});
  const unitFile=path.join(unitDir,unit);
  const envKeys=['HOME','PATH','USER','LOGNAME','LANG','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS','OPENCLAW_STATE_DIR','OPENCLAW_CONFIG_PATH','OPENCLAW_PROFILE','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT'];

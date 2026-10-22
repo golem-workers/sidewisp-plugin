@@ -72,3 +72,15 @@ test('rejected old binding can reconnect only after approval; outages and health
     } finally { await fs.rm(stateDir,{recursive:true,force:true}); }
   }
 });
+
+
+test('reporting a separate failed invitation preserves an earlier preparation proof and imports legacy proofs',async t=>{
+ const stateDir=await fs.mkdtemp(path.join(os.tmpdir(),'sw-prep-proofs-'));t.after(()=>fs.rm(stateDir,{recursive:true,force:true}));
+ const endpoint='https://example.com',oldId='sw_pair_'+'i'.repeat(32),newId='sw_pair_'+'j'.repeat(32),legacy=path.join(stateDir,'sidewisp/prepare-authorization.json');
+ await fs.mkdir(path.dirname(legacy));const bytes=JSON.stringify({id:oldId,runtime:'openclaw',endpoint,deviceSecret:'sw_device_'+'l'.repeat(43)});await fs.writeFile(legacy,bytes,{mode:0o600});
+ const proofs=new Map();const fetchImpl=async(url,options)=>{const body=JSON.parse(options.body);if(url.pathname.endsWith('/preparation'))proofs.set(body.id,body.deviceSecret);else {assert.equal(body.deviceSecret,proofs.get(body.id));return Response.json({id:body.id,userCode:'12345ABCDE'});}return Response.json({});};
+ const client=createDeviceAuthorizationClient({endpoint,stateDir,fetchImpl});await client.reportPreparation({id:newId,stage:'blocked',reasonCode:'preparation_failed'});
+ assert.equal(await fs.readFile(legacy,'utf8'),bytes);await client.reportPreparation({id:oldId,stage:'inspecting'});assert.equal(proofs.get(oldId),JSON.parse(bytes).deviceSecret);assert.notEqual(proofs.get(oldId),proofs.get(newId));
+ await client.begin({id:oldId,runtime:'openclaw'});await assert.rejects(fs.stat(legacy),{code:'ENOENT'});
+ assert.equal(JSON.parse(await fs.readFile(path.join(stateDir,'sidewisp/prepare-authorizations',newId+'.json'),'utf8')).deviceSecret,proofs.get(newId));
+});

@@ -26,20 +26,6 @@ const writeState=s=>{writeFileSync(stateFile+'.tmp',JSON.stringify({...s,targetV
 const run=args=>execFileSync('openclaw',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:120000});
 const jobFile=path.join(stateDir,'sidewisp','prepare-job.json');
 const saveTerminal=status=>{if(options.supervised){const j=JSON.parse(readFileSync(jobFile,'utf8'));writeFileSync(jobFile+'.tmp',JSON.stringify({...j,terminal:status}),{mode:0o600});renameSync(jobFile+'.tmp',jobFile);}};
-if(!options.locked){
- const lock=stateFile+(options.enqueue?'.queue-lock':'.kernel-lock');
- const child=spawn('/usr/bin/flock',['--nonblock','--conflict-exit-code','3',lock,process.execPath,...process.execArgv,fileURLToPath(import.meta.url),...args,'--preparation-lock'],{stdio:'inherit'});
- child.once('error',()=>process.exit(3));child.once('exit',code=>process.exit(code??1));
-}else if(options.enqueue){
- const result=queuePreparation({stateDir,version,sha256:options.sha256,endpoint:endpoint.origin,args:args.filter(a=>!['--enqueue','--preparation-lock'].includes(a)),script:fileURLToPath(import.meta.url)});
- if(options['telegram-target']&&!options.updateOnly)await saveConnectionReply({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
- console.log(JSON.stringify({...result,nextAction:'Finish this setup turn. Independent preparation survives caller timeout; expired consent requires a fresh invitation, never an automatic extension.'}));
-}else{
- try{
-  const job=options.supervised?JSON.parse(readFileSync(jobFile,'utf8')):null;
-  if(job?.terminal)process.exit(0);
-  if(options['telegram-target']&&!options.updateOnly)await saveConnectionReply({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
-  const status=()=>{try{return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}catch(e){if(/unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}};
   const client=createDeviceAuthorizationClient({endpoint:endpoint.origin,stateDir});
   let reported='',reportedAt=0;
   const persist=async s=>{
@@ -55,6 +41,32 @@ if(!options.locked){
    try{await client.reportPreparation({id:options['request-id'],stage:s.stage,...(reason?{reasonCode:allowed.includes(reason)?reason:'preparation_failed'}:{})});}
    catch{writeState({status:s.stage,...s,progressReporting:'unavailable'});}
   };
+
+if(!options.locked){
+ const lock=stateFile+(options.enqueue?'.queue-lock':'.kernel-lock');
+ const child=spawn('/usr/bin/flock',['--nonblock','--conflict-exit-code','3',lock,process.execPath,...process.execArgv,fileURLToPath(import.meta.url),...args,'--preparation-lock'],{stdio:'inherit'});
+ child.once('error',()=>process.exit(3));child.once('exit',code=>process.exit(code??1));
+}else if(options.enqueue){
+ let result;
+ try{
+  result=queuePreparation({stateDir,version,sha256:options.sha256,endpoint:endpoint.origin,args:args.filter(a=>!['--enqueue','--preparation-lock'].includes(a)),script:fileURLToPath(import.meta.url)});
+ }catch(e){
+  const reason=/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed';
+  // A competing invitation must not overwrite a live job's state or local proof.
+  if(reason!=='another_preparation_pending')await persist({stage:'blocked',reason});
+  console.log(JSON.stringify({status:'blocked',reason}));process.exitCode=1;
+ }
+ if(result){
+  if(result.status==='blocked'){await persist({stage:'blocked',reason:result.reason});process.exitCode=1;}
+  if(options['telegram-target']&&!options.updateOnly)await saveConnectionReply({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
+  console.log(JSON.stringify({...result,...(result.status==='preparation_queued'?{nextAction:'Reply exactly «Подключаюсь к Sidewisp» as the final handoff acknowledgement, once; not an empty final. Independent preparation continues; do not repeat setup or begin.'}:{})}));
+ }
+}else{
+ try{
+  const job=options.supervised?JSON.parse(readFileSync(jobFile,'utf8')):null;
+  if(job?.terminal)process.exit(0);
+  if(options['telegram-target']&&!options.updateOnly)await saveConnectionReply({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
+  const status=()=>{try{return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}catch(e){if(/unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}};
   const result=await prepareConnection({targetVersion:version,endpoint:endpoint.origin,updateOnly:options.updateOnly,
    resumePreparation:options.supervised, idleDeadlineMs:job?.deadlineMs,
    expiresAtMs:options['expires-at-ms'] === undefined ? undefined : Number(options['expires-at-ms']),
@@ -80,7 +92,7 @@ if(!options.locked){
    },
   });
   saveTerminal(result.status);console.log(JSON.stringify(result));
- }catch(e){const result={status:'blocked',reason:isRetainedWork(e)?'host_retained_work':/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed'};writeState(result);saveTerminal(result.reason);console.log(JSON.stringify(result));process.exitCode=1;}
+ }catch(e){const result={status:'blocked',reason:isRetainedWork(e)?'host_retained_work':/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed'};await persist({stage:'blocked',reason:result.reason});saveTerminal(result.reason);console.log(JSON.stringify(result));process.exitCode=1;}
 }
 async function runHelper(onProgress){
  const d={schema:'sidewisp.plugin-update.v1',targetVersion:version,targetSpec:`git:github.com/golem-workers/sidewisp-plugin@v${version}`,
