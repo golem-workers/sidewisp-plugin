@@ -1,0 +1,57 @@
+import { saveConnectionReply, telegramReplyRoute } from '../../auth/connection-notice.js';
+import { createDeviceAuthorizationClient } from '../../auth/device-authorization.js';
+
+// Endpoint and state directory belong to the host, never to model-supplied input.
+export function createConnectTool({ endpoint, stateDir, ready, fetchImpl, replyRoute }) {
+  const device = createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl });
+  let busy = false;
+  const reply = (details, isError = false) => ({
+    content: [{ type: 'text', text: JSON.stringify(details) }], details, isError,
+  });
+  return {
+    name: 'sidewisp_connect',
+    label: 'Connect Sidewisp',
+    description: 'Request Sidewisp monitoring access using a public invitation ID. New app-consented invitations connect automatically; legacy invitations may still need in-app confirmation. Credentials stay local; the running collector completes automatically. Does not install plugins or change host configuration. Never report connected until the server receives telemetry.',
+    parameters: {
+      type: 'object', additionalProperties: false,
+      properties: {
+        preparationVersion: { type: 'string', enum: ['0.2.45'], description: 'Cold-activation-aware serving collector preparation contract.' },
+        requestId: { type: 'string', pattern: '^sw_pair_[A-Za-z0-9_-]{32}$' },
+        minimumVersion: { type: 'string', pattern: '^[0-9]+[.][0-9]+[.][0-9]+$', description: 'Minimum serving collector version checked internally.' },
+        endpoint: { type: 'string', description: 'Exact Sidewisp origin from the invitation; must match host configuration.' },
+      },
+      required: ['requestId', 'endpoint'],
+    },
+    async execute(_callId, input) {
+      if (!input || Object.keys(input).some(key => !['requestId', 'endpoint', 'minimumVersion', 'preparationVersion'].includes(key))
+        || (input.preparationVersion !== undefined && input.preparationVersion !== '0.2.45')
+        || (input.minimumVersion !== undefined && !/^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/.test(input.minimumVersion))
+        || !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(input.requestId ?? '')
+        || input.endpoint !== new URL(endpoint).origin) {
+        return reply({ status: 'blocked', reason: 'invalid_invitation_or_endpoint' }, true);
+      }
+      if (busy) return reply({ status: 'blocked', reason: 'connection_request_in_progress' }, true);
+      busy = true;
+      try {
+        if (!await ready(input.minimumVersion)) return reply({ status: 'blocked', reason: 'collector_not_ready' }, true);
+        const result = await device.begin({ id: input.requestId, runtime: 'openclaw' });
+        if(replyRoute)await saveConnectionReply({stateDir,endpoint:new URL(endpoint).origin,requestId:input.requestId,route:replyRoute});
+        // Do not return fallback verification URL/code even in a private session:
+        // the authenticated app already owns and displays this request.
+        return reply({ status: result.autoConnect ? 'connection_pending' : 'approval_pending', requestId: result.id,
+          expiresAtMs: result.expiresAtMs,
+          nextAction: result.autoConnect ? 'Connection is authorized by the initiating account. Wait for automatic credential collection and the first server-accepted heartbeat; no manual approval or second command.' : 'Approve the request in Sidewisp. No additional agent message is needed.' });
+      } catch (error) {
+        if (error.message === 'collector_activation_required') return reply({status:'preparation_required',reason:'cold_activation_required',nextAction:'Use the verified preparation helper through the authorized host route before requesting approval.'});
+        const allowed = /^(collector_status_unavailable|installation_already_connected|another_authorization_pending|device_authorization_http_[0-9]{3})$/;
+        return reply({ status: 'blocked', reason: allowed.test(error.message) ? error.message : 'connection_preparation_failed' }, true);
+      } finally { busy = false; }
+    },
+  };
+}
+
+export function registerConnectTool(api, options) {
+  // Host-derived admission only; prompt text cannot declare ownership.
+  api.registerTool(context => context.senderIsOwner === true ? createConnectTool({...options,replyRoute:telegramReplyRoute({...context,...context.deliveryContext})}) : null,
+    { name: 'sidewisp_connect' });
+}
