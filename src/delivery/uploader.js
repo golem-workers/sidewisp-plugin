@@ -16,6 +16,7 @@ export function createUploader({
 }) {
   if (!Number.isSafeInteger(maxBatch) || maxBatch < 1 || maxBatch > 1000) throw new TypeError("invalid maxBatch");
   let attempt = 0;
+  let healthyInstallation = null;
   let lastDeliveredAt = null;
   let lastResult = { status: "not-started", sent: 0, remaining: 0, at: null };
   const finish = (result) => {
@@ -37,7 +38,11 @@ export function createUploader({
   async function performSend() {
     const credential = await credentialProvider.current();
     if (!credential || credential.status !== "active") return finish({ status: "disabled", sent: 0, remaining: spool.pending(1).length });
-    const queued = spool.pending(maxBatch);
+    // One durable operation, not 100 old rows per five-second timer tick.
+    spool.quarantineOtherInstallations?.(credential.installationId);
+    const queued = spool.pending(maxBatch, {
+      prioritizeHealthFor: healthyInstallation === credential.installationId ? null : credential.installationId,
+    });
     // Never replay the deleted binding's backlog under a newly approved account.
     for (const row of queued) {
       if (row.event.installationId && row.event.installationId !== credential.installationId) spool.deadLetter(row.eventId, 'previous-installation');
@@ -92,6 +97,8 @@ export function createUploader({
       ? result.acknowledgedEventIds.filter((id) => sentIds.has(id)) : [];
     spool.acknowledge(acknowledged);
     const acceptedIds = new Set(acknowledged);
+    if (pending.some(row => acceptedIds.has(row.eventId) && row.event.type === 'health.snapshot'
+      && row.event.installationId === credential.installationId)) healthyInstallation = credential.installationId;
     try { void Promise.resolve(onAcknowledged(pending.filter(row => acceptedIds.has(row.eventId)).map(row => row.event))).catch(() => {}); } catch { /* channel notification must not block telemetry */ }
     if (acknowledged.length > 0) lastDeliveredAt = new Date(now()).toISOString();
     if (Array.isArray(result.rejected)) {

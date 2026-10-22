@@ -51,7 +51,7 @@ import {
 } from "./recovery.js";
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.78";
+const VERSION = "0.2.79";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -255,6 +255,9 @@ export default definePluginEntry({
         });
       }
       if (signal?.aborted || !spool || !auth.canSend()) return;
+      // Reapproval may be completed by an independent helper while we run.
+      // Free the previous binding's quota before persisting the first heartbeat.
+      spool.quarantineOtherInstallations(auth.credential().installationId);
       await workReconciliation.reconcile();
       if (signal?.aborted) return;
       const snapshot = await adapter.healthSnapshot();
@@ -333,7 +336,7 @@ export default definePluginEntry({
             try { await auth.applySetupToken(setupToken); }
             catch { ctx.logger.warn("Sidewisp enrollment failed; will retry on restart"); }
           }
-          spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
+          spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite"), installationId: auth.credential()?.installationId });
           spoolFailure = null;
           const previouslyActive = parseOpenClawActiveWorkCursor(spool.cursor(HOOK_EVENT_SOURCE));
           userTaskLifecycle.restoreActiveWork(previouslyActive);

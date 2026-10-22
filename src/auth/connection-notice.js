@@ -23,7 +23,7 @@ export async function saveConnectionReply({stateDir,endpoint,requestId,route}) {
  await atomic(file,{endpoint,requestId,route:validated});
 }
 export async function recordAuthorizationCompletion({stateDir,endpoint,requestId,installationId}) {
- await atomic(path.join(stateDir,'sidewisp','authorization-completed.json'),{endpoint,requestId,installationId});
+ await atomic(path.join(stateDir,'sidewisp','authorization-completed.json'),{endpoint,requestId,installationId,completedAtMs:Date.now()});
 }
 export async function sendTelegramConnectionReply(route, text = 'Агент подключён к Sidewisp') {
  const args=['message','send','--channel','telegram','--target',route.target,'--message',text,'--json'];
@@ -67,8 +67,8 @@ export function createRuntimeTelegramSender(api) {
   return {messageId: String(result.messageId)};
  };
 }
-export function createConnectionNotifier({stateDir,endpoint,send=sendTelegramConnectionReply,onError=()=>{}}) {
- let flight=null,acceptedId=null;
+export function createConnectionNotifier({stateDir,endpoint,send=sendTelegramConnectionReply,onError=()=>{},now=Date.now}) {
+ let flight=null,acceptedId=null,acceptedHealthAtMs=null;
  async function deliver(){
   try{
    const file=path.join(stateDir,'sidewisp','connection-reply.json');
@@ -76,16 +76,18 @@ export function createConnectionNotifier({stateDir,endpoint,send=sendTelegramCon
    const receiptFile=path.join(stateDir,'sidewisp',`connection-receipt-${reply.requestId}.json`);
    try{await fs.access(receiptFile);return;}catch(e){if(e.code!=='ENOENT')throw e;}
    if(reply.endpoint!==endpoint||completion.endpoint!==endpoint||reply.requestId!==completion.requestId||acceptedId!==completion.installationId)return;
+   if (!Number.isFinite(acceptedHealthAtMs) || acceptedHealthAtMs > now() || now()-acceptedHealthAtMs > 120000
+     || Number.isFinite(completion.completedAtMs) && acceptedHealthAtMs < completion.completedAtMs) return;
    const route=telegramReplyRoute({...reply.route,to:reply.route.target});if(!route)return;
    const receipt=await send(route);if(!receipt?.messageId)throw Error('connection_reply_receipt_missing');
    await atomic(receiptFile,{requestId:reply.requestId,installationId:acceptedId,messageId:String(receipt.messageId)});
   }catch(error){if(error.code!=='ENOENT')onError('connection_reply_unavailable');}
  }
- return {acknowledged(events){for(const e of events)if(e.type==='health.snapshot')acceptedId=e.installationId;if(!acceptedId)return; if(!flight)flight=deliver().finally(()=>{flight=null;});return flight;},async stop(){if(flight)await flight;}};
+ return {acknowledged(events){for(const e of events)if(e.type==='health.snapshot'){acceptedId=e.installationId;acceptedHealthAtMs=Date.parse(e.occurredAt);}if(!acceptedId)return; if(!flight)flight=deliver().finally(()=>{flight=null;});return flight;},async stop(){if(flight)await flight;}};
 }
 
 export async function sendConnectionDelay({stateDir,endpoint,requestId,reason,send=sendTelegramConnectionReply}) {
- const messages={ACTIVE_WORK:'Агент занят текущей задачей. Подключение продолжится автоматически после её завершения.',HOST_RETAINED_WORK:'Агент занят текущей задачей. Подключение продолжится автоматически после её завершения.',fresh_invitation_required:'Заявка истекла. Создайте новую в Sidewisp и отправьте агенту свежую инструкцию.',host_idle_timeout:'Подготовка остановлена: агент не освободился. Завершите текущую работу и повторите подключение в Sidewisp.',collector_not_ready:'Агент не запустил сборщик Sidewisp. Проверьте его запуск и повторите подключение; настройки сохранены.'};
+ const messages={ACTIVE_WORK:'Агент занят текущей задачей. Подключение продолжится автоматически после её завершения.',HOST_RETAINED_WORK:'Агент занят текущей задачей. Подключение продолжится автоматически после её завершения.',fresh_invitation_required:'Заявка истекла. Создайте новую в Sidewisp и отправьте агенту свежую инструкцию.',host_idle_timeout:'Подготовка остановлена: агент не освободился. Завершите текущую работу и повторите подключение в Sidewisp.',collector_not_ready:'Не удалось запустить мониторинг. Проверяю запуск; настройки сохранены.'};
  if(!messages[reason])return;
  try {const file=path.join(stateDir,'sidewisp','connection-reply.json');const reply=JSON.parse(await fs.readFile(file,'utf8'));
   if(reply.requestId!==requestId||reply.endpoint!==endpoint)return;

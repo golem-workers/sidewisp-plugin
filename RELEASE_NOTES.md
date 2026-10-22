@@ -1,3 +1,7 @@
+# 0.2.79 — binding-isolated connection queues
+
+Before delivery and the first heartbeat, archive foreign-binding events, diagnostics and usage in a private durable SQLite file, then remove them from the live queue. A failed archive preserves the live data. Source cursors and the current binding remain unchanged. The newest health signal gets priority until the current binding has an acknowledged heartbeat; work-event order is unchanged. Connection success requires fresh, post-authorization acknowledged health. No design, preferences, credentials, cron or push contract changes.
+
 # 0.2.78 — reliable enrollment event delivery
 
 Credential reads no longer re-emit filesystem metadata notifications and recursively schedule heartbeats. Successful acknowledged backlog uploads continue in serialized bounded batches. Existing credential format, privacy allowlists, and spool schema are unchanged.

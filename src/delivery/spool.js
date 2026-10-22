@@ -113,7 +113,7 @@ function initialize(file) {
   return db;
 }
 
-export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs = 0, now = Date.now }) {
+export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs = 0, now = Date.now, installationId = null }) {
   if (!path.isAbsolute(file)) throw new TypeError("spool file must be absolute");
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 4096) throw new TypeError("maxBytes is invalid");
   if (!Number.isSafeInteger(retentionMs) || retentionMs < 0) throw new TypeError("retentionMs is invalid");
@@ -158,7 +158,49 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
     checkpoint();
     return true;
   };
+  // Keep a durable, private copy before deleting anything from the live queue.
+  // Separate commits are intentional: a crash may leave a duplicate archive,
+  // never a lost event. The spool writer lock serializes both operations.
+  function quarantineOtherInstallations(activeId) {
+    if (typeof activeId !== "string" || !activeId) throw new TypeError("installationId is required");
+    const foreign = "json_extract(payload, '$.installationId') IS NOT NULL AND json_extract(payload, '$.installationId') != ?";
+    const events = db.prepare(`SELECT * FROM events WHERE ${foreign}`);
+    const diagnostics = db.prepare("SELECT * FROM runtime_diagnostic_pending WHERE installation_id != ?");
+    const usage = db.prepare("SELECT * FROM usage_pending WHERE installation_id != ?");
+    if (!db.prepare(`SELECT 1 FROM events WHERE ${foreign} LIMIT 1`).get(activeId)
+      && !diagnostics.get(activeId) && !usage.get(activeId)) return 0;
+    const archiveFile = `${file}.quarantine.sqlite`;
+    // Create with restrictive mode before SQLite can write any payload.
+    const fd = fs.openSync(archiveFile, 'a', 0o600); fs.closeSync(fd);
+    fs.chmodSync(archiveFile, 0o600);
+    const archive = new DatabaseSync(archiveFile);
+    let count = 0;
+    try {
+      archive.exec(`PRAGMA synchronous=FULL;
+        CREATE TABLE IF NOT EXISTS quarantined (kind TEXT NOT NULL, item_id TEXT NOT NULL,
+          payload TEXT NOT NULL, archived_at INTEGER NOT NULL, reason TEXT NOT NULL,
+          PRIMARY KEY(kind,item_id,payload)); BEGIN IMMEDIATE;`);
+      const save = archive.prepare("INSERT OR IGNORE INTO quarantined VALUES(?,?,?,?,'previous-installation')");
+      for (const [kind, statement, key] of [['event', events, 'event_id'], ['diagnostic', diagnostics, 'snapshot_id'], ['usage', usage, 'batch_id']]) {
+        for (const row of statement.iterate(activeId)) {
+          save.run(kind, row[key], JSON.stringify(row), now()); count += 1;
+        }
+      }
+      archive.exec('COMMIT');
+    } finally { archive.close(); }
+    // Only remove rows after the independent archive's FULL-sync commit.
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.prepare(`DELETE FROM events WHERE ${foreign}`).run(activeId);
+      db.prepare("DELETE FROM runtime_diagnostic_pending WHERE installation_id != ?").run(activeId);
+      db.prepare("DELETE FROM usage_pending WHERE installation_id != ?").run(activeId);
+      db.exec('COMMIT');
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+    compact();
+    return count;
+  }
   try {
+    if (installationId) quarantineOtherInstallations(installationId);
     const startupPruned = deleteAcknowledged();
     const compactionConfigured = configureCompaction();
     if (startupPruned > 0 && !compactionConfigured) compact();
@@ -177,6 +219,7 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
 
   return Object.freeze({
     recoveredFromCorruption,
+    quarantineOtherInstallations,
     enqueueSourceBatch(source, cursor, events, { beforeCommit } = {}) {
       if (!Array.isArray(events) || events.length === 0) throw new TypeError("events must be non-empty");
       const encoded = events.map((event) => ({ id: event.eventId, payload: JSON.stringify(event) }));
@@ -194,9 +237,14 @@ export async function openSpool({ file, maxBytes = 64 * 1024 * 1024, retentionMs
     advanceCursor(source, cursor) {
       db.prepare("INSERT INTO cursors(source,value,updated_at) VALUES(?,?,?) ON CONFLICT(source) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").run(source, cursor, now());
     },
-    pending(limit = 100) {
+    pending(limit = 100, { prioritizeHealthFor = null } = {}) {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new TypeError("invalid limit");
-      return db.prepare("SELECT event_id,payload FROM events WHERE acked_at IS NULL ORDER BY created_at,event_id LIMIT ?").all(limit)
+      if (!prioritizeHealthFor) return db.prepare("SELECT event_id,payload FROM events WHERE acked_at IS NULL ORDER BY created_at,event_id LIMIT ?").all(limit)
+        .map((row) => ({ eventId: row.event_id, event: JSON.parse(row.payload) }));
+      return db.prepare(`SELECT event_id,payload FROM events WHERE acked_at IS NULL
+        ORDER BY CASE WHEN json_extract(payload, '$.installationId') = ? AND json_extract(payload, '$.type') = 'health.snapshot' THEN 0 ELSE 1 END,
+        CASE WHEN json_extract(payload, '$.installationId') = ? AND json_extract(payload, '$.type') = 'health.snapshot' THEN -created_at ELSE created_at END,
+        event_id LIMIT ?`).all(prioritizeHealthFor, prioritizeHealthFor, limit)
         .map((row) => ({ eventId: row.event_id, event: JSON.parse(row.payload) }));
     },
     acknowledge(eventIds) {
