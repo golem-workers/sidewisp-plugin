@@ -83,7 +83,12 @@ export function createConnectionNotifier({stateDir,endpoint,send=sendTelegramCon
    await atomic(receiptFile,{requestId:reply.requestId,installationId:acceptedId,messageId:String(receipt.messageId)});
   }catch(error){if(error.code!=='ENOENT')onError('connection_reply_unavailable');}
  }
- return {acknowledged(events){for(const e of events)if(e.type==='health.snapshot'){acceptedId=e.installationId;acceptedHealthAtMs=Date.parse(e.occurredAt);}if(!acceptedId)return; if(!flight)flight=deliver().finally(()=>{flight=null;});return flight;},async stop(){if(flight)await flight;}};
+ return {acknowledged(events){for(const e of events)if(e.type==='health.snapshot'){
+   const at=Date.parse(e.occurredAt);
+   if(Number.isFinite(at)&&at<=now()&&(e.installationId!==acceptedId||!Number.isFinite(acceptedHealthAtMs)||at>=acceptedHealthAtMs)){
+    acceptedId=e.installationId;acceptedHealthAtMs=at;
+   }
+  }if(!acceptedId)return; if(!flight)flight=deliver().finally(()=>{flight=null;});return flight;},async stop(){if(flight)await flight;}};
 }
 
 export async function sendConnectionDelay({stateDir,endpoint,requestId,reason,send=sendTelegramConnectionReply}) {

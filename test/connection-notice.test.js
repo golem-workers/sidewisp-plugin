@@ -44,3 +44,13 @@ test('stale or pre-authorization health from backlog cannot announce a completed
  }
  await notifier.acknowledged([{type:'health.snapshot',installationId,occurredAt:new Date(now).toISOString()}]);assert.equal(sent,1);
 });
+
+test('a fresh accepted health in a mixed historical batch wins regardless of batch order',async t=>{
+ const f=await fixture(t);await saveConnectionReply({...f,route:{channel:'telegram',to:'123'}});await recordAuthorizationCompletion({...f,installationId});let sent=0;const now=Date.now()+1000;
+ const notifier=createConnectionNotifier({...f,now:()=>now,send:async()=>{sent++;return{messageId:'mixed'};}});
+ await notifier.acknowledged([
+  {type:'health.snapshot',installationId,occurredAt:new Date(now).toISOString()},
+  {type:'health.snapshot',installationId,occurredAt:new Date(now-180000).toISOString()},
+  {type:'health.snapshot',installationId,occurredAt:new Date(now+999999).toISOString()},
+ ]);assert.equal(sent,1);
+});

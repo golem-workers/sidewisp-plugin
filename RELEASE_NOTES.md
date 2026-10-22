@@ -1,3 +1,7 @@
+# 0.2.80 — newest accepted health wins
+
+Supersedes staging candidate 0.2.79 before new-enrollment promotion. Mixed batches of fresh and historical health cannot hide the newest accepted heartbeat from the connection reply. All 0.2.79 queue preservation guarantees remain.
+
 # 0.2.79 — binding-isolated connection queues
 
 Before delivery and the first heartbeat, archive foreign-binding events, diagnostics and usage in a private durable SQLite file, then remove them from the live queue. A failed archive preserves the live data. Source cursors and the current binding remain unchanged. The newest health signal gets priority until the current binding has an acknowledged heartbeat; work-event order is unchanged. Connection success requires fresh, post-authorization acknowledged health. No design, preferences, credentials, cron or push contract changes.
