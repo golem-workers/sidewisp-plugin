@@ -13,6 +13,14 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
   const directory = path.join(stateDir, 'sidewisp');
   const file = path.join(directory, 'device-authorization.json');
   const preparationFile = path.join(directory, 'prepare-authorization.json');
+  const preparationFileFor = id => path.join(directory, 'prepare-authorizations', id + '.json');
+  const readPrepared = async id => {
+    for (const candidate of [preparationFileFor(id), preparationFile]) {
+      let row;try { row=JSON.parse(await fs.readFile(candidate,'utf8')); } catch(error) {if(error.code==='ENOENT')continue;throw error;}
+      if(row.id===id && row.endpoint===url.origin)return {row,file:candidate};
+    }
+    return null;
+  };
   const credentials = createFileCredentialStore({ stateDir });
   const request = async (route, input) => {
     const response = await fetchImpl(new URL(route, url), { method: 'POST', redirect: 'error',
@@ -37,12 +45,13 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       await fs.mkdir(directory, {recursive:true,mode:0o700});
       let state;
       try { const pending=await read();if(pending.id===id)state=pending; }catch(error){if(error.code!=='ENOENT')throw error;}
-      if(!state)try { state=JSON.parse(await fs.readFile(preparationFile,'utf8')); } catch(error) {if(error.code!=='ENOENT')throw error;}
+      if(!state)state=(await readPrepared(id))?.row;
       if (state && (state.id!==id || state.endpoint!==url.origin)) state=null;
       if (!state) {
         state={id,runtime:'openclaw',endpoint:url.origin,deviceSecret:`sw_device_${randomBytes(32).toString('base64url')}`};
-        const temporary=preparationFile+'.'+process.pid+'.tmp';
-        await fs.writeFile(temporary,JSON.stringify(state),{mode:0o600});await fs.rename(temporary,preparationFile);
+        const target=preparationFileFor(id),temporary=target+'.'+process.pid+'.tmp';
+        await fs.mkdir(path.dirname(target),{recursive:true,mode:0o700});
+        await fs.writeFile(temporary,JSON.stringify(state),{mode:0o600});await fs.rename(temporary,target);
       }
       if(!/^sw_device_[A-Za-z0-9_-]{43}$/.test(state.deviceSecret??''))throw Error('invalid_device_state');
       return request('/v1/device-authorizations/preparation',{id,deviceSecret:state.deviceSecret,runtime:'openclaw',stage,...(reasonCode?{reasonCode}:{})});
@@ -74,15 +83,14 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
         state = null;
       }
       if (!state) {
-        let prepared;
-        try { prepared=JSON.parse(await fs.readFile(preparationFile,'utf8')); }catch(error){if(error.code!=='ENOENT')throw error;}
+        const prepared=(await readPrepared(id))?.row;
         state = prepared?.id===id && prepared.runtime===runtime && prepared.endpoint===url.origin
           && /^sw_device_[A-Za-z0-9_-]{43}$/.test(prepared.deviceSecret??'') ? prepared
           : { id, runtime, endpoint: url.origin, deviceSecret: `sw_device_${randomBytes(32).toString('base64url')}` };
         await fs.writeFile(file, JSON.stringify(state), { mode: 0o600, flag: 'wx' });
       }
       const result = await request('/v1/device-authorizations/begin', { id, runtime, deviceSecret: state.deviceSecret });
-      await fs.rm(preparationFile,{force:true});
+      const prepared=await readPrepared(id);if(prepared)await fs.rm(prepared.file,{force:true});
       if (result.id !== id || !/^[A-F0-9]{10}$/.test(result.userCode ?? '')) throw new Error('invalid_device_response');
       return { status: 'pending', autoConnect: result.autoConnect === true, id, userCode: result.userCode, expiresAtMs: result.expiresAtMs,
         verificationUri: `${url.origin}/device-authorization?id=${encodeURIComponent(id)}&code=${result.userCode}` };

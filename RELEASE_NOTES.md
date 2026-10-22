@@ -1,3 +1,11 @@
+## 0.2.82 — connection handoff and preparation failures
+
+- Preserve the required final handoff acknowledgement instead of ending an ordinary setup turn without a final answer.
+- Report durable-preparation admission failures and pre-inspection failures through the existing proof-bound preparation endpoint; never retry or bypass a refused operation.
+- Return cached terminal preparation failures as `blocked` with their cause.
+- Keep per-invitation preparation proofs separate, import matching legacy proofs, and preserve unrelated requests and active installation credentials.
+- No telemetry/schema, UI, animation, signing or monitoring-permission changes. Tester release; native Android and inaccessible owner-agent hosts remain separate acceptance gates.
+
 # 0.2.81 — silent ordinary connection waits
 
 - Do not send chat notifications for active work, retained work, or ordinary preparation waiting.
