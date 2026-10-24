@@ -68,7 +68,7 @@ if(!locked) {
   }
   const result=await convergeCurrentRelease({targetVersion:directive.targetVersion,journal,status,idle,write,
    recoverStopped:async()=>{if(journal.staged&&!journal.activated){try {if(idle()){await coldActivateOpenClaw({run,stateDir:process.env.OPENCLAW_STATE_DIR,configPath:process.env.OPENCLAW_CONFIG_PATH});return true;}}catch(error){if(error.message==='host_activation_busy')return false;}}return startStoppedOpenClaw({run,stateDir:process.env.OPENCLAW_STATE_DIR,configPath:process.env.OPENCLAW_CONFIG_PATH,
-    prepare:()=>{if(!journal.stoppedRepaired){if(journal.installCount>=2)throw Error('CURRENT_RELEASE_UNHEALTHY');journal.installCount++;write({status:'repairing',phase:'install_intent'});run(['plugins','install',archive,'--force','--accept-capabilities']);journal.staged=true;journal.stoppedRepaired=true;write({status:'repairing',phase:'installed'});}}});},
+    prepare:()=>{if(!journal.staged&&!journal.stoppedRepaired){if(journal.installCount>=2)throw Error('CURRENT_RELEASE_UNHEALTHY');journal.installCount++;write({status:'repairing',phase:'install_intent'});run(['plugins','install',archive,'--force','--accept-capabilities']);journal.staged=true;journal.stoppedRepaired=true;write({status:'repairing',phase:'installed'});}}});},
    verify:after=>{const saved=read(path.join(directory,'installation.json'));if(saved?.status!=='active'||after.endpoint!==journal.baseline.endpoint||after.installation?.installationId!==journal.baseline.installationId||saved.installationId!==journal.baseline.installationId)throw Error('BINDING_CHANGED');},
    install:()=>run(['plugins','install',archive,'--force','--accept-capabilities']),
    reload:()=>run(['plugins','reload','sidewisp','--accept-capabilities','--json']),

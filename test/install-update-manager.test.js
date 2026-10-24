@@ -39,3 +39,13 @@ test('published 0.2.61 manager upgrades to the recovery release',t=>{
  assert.equal(readFileSync(path.join(prior.current,'src/update/current-release.js'),'utf8'),readFileSync(new URL('../src/update/current-release.js',import.meta.url),'utf8'));
  assert.equal(f.calls.filter(c=>c[0]==='systemctl'&&c[1].includes('stop')).length,1);
 });
+
+test('an incomplete published manager directory fails closed without switching or service calls',t=>{
+ const f=fixture(t);const dir=path.join(f.root,'sidewisp/manager/releases',candidateVersion);mkdirSync(dir,{recursive:true});writeFileSync(path.join(dir,'package.json'),JSON.stringify({version:candidateVersion}));
+ assert.throws(()=>installUpdateManager(f.options),/MANAGER_RELEASE_REVIEW_REQUIRED/);assert.equal(f.calls.length,0);
+});
+test('helper acquiring its kernel lock during manager stop blocks code switch and restores the old service',t=>{
+ const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result);let locked=false;
+ assert.throws(()=>installUpdateManager({...f.options,upgrade:true,run:(cmd,args)=>{if(cmd==='systemctl'&&args.includes('stop'))locked=true;if(cmd==='/usr/bin/flock'&&locked)throw Error('busy');}}),/MANAGER_UPDATE_IN_PROGRESS/);
+ assert.equal(realpathSync(prior.current),prior.old);
+});

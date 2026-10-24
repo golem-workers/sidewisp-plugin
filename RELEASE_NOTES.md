@@ -1,3 +1,12 @@
+## 0.2.83 — interruption-safe managed updates (Linux OpenClaw)
+
+- Run each profile-scoped updater in a separate systemd service, outside both the manager and Gateway control groups. Stopping either service no longer terminates the worker.
+- Resume the same durable authorized checkpoint after worker death or host restart, including the accepted pre-install phase, without another release event or model task. Keep binding/profile checks, kernel serialization, install budget, terminal failure and policy refusal gates.
+- Defer a pre-mutation Gateway outage until the matched Gateway returns; recover an already staged stopped profile without reinstalling an already committed package.
+- Upgrade the private manager once from the verified archive before assigning this release to an existing cohort. Collector-only installation does not replace an old manager.
+- The verified automatic-update cohort is Linux/user-systemd OpenClaw 2026.9.6/2026.9.8. Hermes, Codex and Claude Code telemetry adapters are unchanged; this release does not claim managed-updater support for them or non-systemd hosts.
+- Credential format, telemetry/privacy contract, spool schema, endpoint, bindings, user settings, mobile UI and APK/OTA remain unchanged. A stopped entire VM cannot execute local recovery until the platform resumes it.
+
 ## 0.2.82 — connection handoff and preparation failures
 
 - Preserve the required final handoff acknowledgement instead of ending an ordinary setup turn without a final answer.

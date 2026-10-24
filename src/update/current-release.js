@@ -1,4 +1,5 @@
 // Forward-only convergence. Busy admission is never bypassed; no old package is installed.
+import {isNewerVersion} from './directive.js';
 import {isRetainedWork} from './hot-update.js';
 export async function convergeCurrentRelease({targetVersion,status,idle,install,reload,activate,verify,write,recoverStopped,
  journal,sleep=ms=>new Promise(r=>setTimeout(r,ms)),maxAttempts=120}) {
@@ -7,12 +8,13 @@ export async function convergeCurrentRelease({targetVersion,status,idle,install,
   let current;
   try {current=await status();} catch(error) {
    // RPC loss following our activation is transient, not an invitation to force restart.
-   if(!journal.mutated)throw error;
-   if(recoverStopped) {if(await recoverStopped()){journal.activated=true;write({status:'verifying',phase:'started'});}}
+   if(journal.mutated&&recoverStopped) {if(await recoverStopped()){journal.activated=true;write({status:'verifying',phase:'started'});}}
    write({status:'verifying',reasonCode:'WAITING_FOR_GATEWAY'});await sleep(5000);continue;
   }
+  if(isNewerVersion(current?.version,targetVersion))throw Error('NEWER_PACKAGE_INSTALLED');
+  await verify(current);
   if(current?.version===targetVersion && current.enabled===true && current.running===true && current.connectionReadiness?.ready===true) {
-   await verify(current);write({status:'completed'});return 'completed';
+   write({status:'completed'});return 'completed';
   }
   if(!await idle(current)) {write({status:'waiting_for_idle',reasonCode:'ACTIVE_WORK'});await sleep(5000);continue;}
   if(current?.version===targetVersion && current.connectionReadiness?.activationRequired===true) {

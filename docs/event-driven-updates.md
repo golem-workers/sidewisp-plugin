@@ -22,8 +22,12 @@ launch concurrent helpers or retry a terminal failed/rolled-back revision.
 
 The existing helper downloads the official hash-pinned artifact, waits for real
 host idleness, installs/reloads safely, preserves binding and verifies readiness.
-An actually applied unhealthy generation is rolled back. Interrupted mutations
-and unknown host state remain fail-closed. Model execution is not used for
+An unhealthy current release has a bounded forward repair budget, never a downgrade.
+Each helper runs in a separate profile-scoped systemd service. Stops of the manager
+or Gateway do not kill it. Worker/host interruption resumes the same durable journal
+when the manager returns, without a new release event. Accepted pre-install intents
+are resumable too. Unknown binding/profile, legacy locks, policy refusals and terminal
+failures remain fail-closed. Model execution is not used for
 ongoing updates. Publication cannot clear an operator pause or an unresolved
 failed release.
 
@@ -46,5 +50,7 @@ installed. Hosts without user-systemd or a supported native bootstrap need their
 own verified preparation path. Preserve custom unit/config settings and do not
 remove a helper lock to force manager upgrades.
 
-Use archive 0.2.51 or later: 0.2.50 is superseded before rollout because its
+Use archive 0.2.83 or later for interruption-safe workers. This is a one-time
+private-manager migration, not a model task required for each future plugin update.
+Use archive 0.2.51 or later for the original event-stream behavior: 0.2.50 is superseded before rollout because its
 credential watcher could generate metadata events recursively.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {mkdirSync,readFileSync,writeFileSync,cpSync,existsSync,symlinkSync,renameSync,realpathSync} from 'node:fs';
+import {mkdirSync,readFileSync,writeFileSync,cpSync,existsSync,symlinkSync,renameSync,realpathSync,mkdtempSync,rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
@@ -27,7 +27,14 @@ export function installUpdateManager({stateDir,endpoint,run=execFileSync,environ
  }
  mkdirSync(dir,{recursive:true,mode:0o700});
  const release=path.join(dir,'releases',version);
- if(!existsSync(release)){mkdirSync(release,{recursive:true,mode:0o700});for(const entry of ['src','scripts','package.json'])cpSync(path.join(root,entry),path.join(release,entry),{recursive:true});}
+ if(!existsSync(release)){
+  const releases=path.dirname(release);mkdirSync(releases,{recursive:true,mode:0o700});
+  const staged=mkdtempSync(path.join(releases,'.staging-'));
+  try {for(const entry of ['src','scripts','package.json'])cpSync(path.join(root,entry),path.join(staged,entry),{recursive:true});renameSync(staged,release);}
+  finally {rmSync(staged,{recursive:true,force:true});}
+ }
+ if(JSON.parse(readFileSync(path.join(release,'package.json'),'utf8')).version!==version
+  || ['scripts/managed-updater.mjs','scripts/openclaw-update-helper.mjs','src/update/worker.js'].some(entry=>!existsSync(path.join(release,entry))))throw Error('MANAGER_RELEASE_REVIEW_REQUIRED');
  const configFile=path.join(dir,'config.json');
  const config={schema:'sidewisp.update-manager.v1',stateDir,endpoint};
  if(existsSync(configFile)){const old=JSON.parse(readFileSync(configFile,'utf8'));if(old.stateDir!==stateDir||old.endpoint!==endpoint)throw Error('MANAGER_BINDING_MISMATCH');}
@@ -51,7 +58,9 @@ export function installUpdateManager({stateDir,endpoint,run=execFileSync,environ
   // Explicitly upgrade only the independent manager, never the Gateway.
   // An active helper must finish; no SIGKILL, lock removal or idle bypass.
   run('systemctl',['--user','stop',unit],{stdio:'pipe'});
-  if(existsSync(path.join(stateDir,'sidewisp','update-status.json.lock'))){
+  let helperActive=existsSync(path.join(stateDir,'sidewisp','update-status.json.lock'));
+  try {run('/usr/bin/flock',['--nonblock',path.join(stateDir,'sidewisp','update-status.json.kernel-lock'),'/usr/bin/true'],{stdio:'pipe'});}catch {helperActive=true;}
+  if(helperActive){
    run('systemctl',['--user','start',unit],{stdio:'pipe'});throw Error('MANAGER_UPDATE_IN_PROGRESS');
   }
   symlinkSync(release,link+'.upgrade.tmp');renameSync(link+'.upgrade.tmp',link);
