@@ -1,3 +1,8 @@
+## 0.2.85
+
+- Verify and enable boot-time user-manager lingering for the current account before independent preparation or manager activation. Refuse completion when unavailable; no sudo or cross-user changes.
+- Includes 0.2.84 clean-exit restart supervision fix.
+
 ## 0.2.84
 
 - Keep the independent OpenClaw manager supervised after a handled SIGTERM (clean exit), not only failures. Explicit systemd stop stays stopped.

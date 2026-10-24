@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import {ensureUserAutostart} from '../src/auth/user-autostart.js';
 import {mkdirSync,readFileSync,writeFileSync,cpSync,existsSync,symlinkSync,renameSync,realpathSync,mkdtempSync,rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {isNewerVersion} from '../src/update/directive.js';
-export function installUpdateManager({stateDir,endpoint,run=execFileSync,environment=process.env,platform=process.platform,upgrade=false}) {
+export function installUpdateManager({stateDir,endpoint,run=execFileSync,environment=process.env,platform=process.platform,upgrade=false,ensureAutostart=ensureUserAutostart}) {
  if(platform!=='linux')throw Error('MANAGER_REQUIRES_SYSTEMD_USER');
  if(!path.isAbsolute(stateDir??'')||!path.isAbsolute(environment.OPENCLAW_CONFIG_PATH??'')||environment.OPENCLAW_STATE_DIR!==stateDir)throw Error('EXPLICIT_ACTIVE_PROFILE_REQUIRED');
  const url=new URL(endpoint);if(url.protocol!=='https:'||url.origin!==endpoint)throw Error('INVALID_ENDPOINT');
@@ -62,6 +63,7 @@ export function installUpdateManager({stateDir,endpoint,run=execFileSync,environ
    if(policies[0]==='Restart=on-failure'){originalUnit=existing;upgradedUnit=existing.replace(/^Restart=on-failure$/m,'Restart=always');}
   }
  }else writeFileSync(unitFile,text,{mode:0o600});
+ ensureAutostart({run});
  if(upgradeNeeded){
   // Explicitly upgrade only the independent manager, never the Gateway.
   // An active helper must finish; no SIGKILL, lock removal or idle bypass.

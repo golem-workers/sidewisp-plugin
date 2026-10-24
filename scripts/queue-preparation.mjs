@@ -1,10 +1,11 @@
+import {ensureUserAutostart} from '../src/auth/user-autostart.js';
 import {createHash} from 'node:crypto';
 import {mkdirSync,readFileSync,writeFileSync,existsSync,renameSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 const quote=s=>'"'+s.replace(/%/g,'%%').replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"';
 // One durable supervisor per profile, independent of the Gateway and caller's exec.
-export function queuePreparation({stateDir,version,sha256,endpoint,args,script,environment=process.env,run=execFileSync}) {
+export function queuePreparation({stateDir,version,sha256,endpoint,args,script,environment=process.env,run=execFileSync,ensureAutostart=ensureUserAutostart}) {
  const dir=path.join(stateDir,'sidewisp');mkdirSync(dir,{recursive:true,mode:0o700});
  const jobFile=path.join(dir,'prepare-job.json');
  const identity=createHash('sha256').update(JSON.stringify({version,sha256,endpoint,args})).digest('hex');
@@ -13,6 +14,7 @@ export function queuePreparation({stateDir,version,sha256,endpoint,args,script,e
  let active;try{active=String(run('systemctl',['--user','is-active',unit],{encoding:'utf8',stdio:'pipe'})).trim();}catch(e){if(![3,4].includes(e.status))throw e;active='inactive';}
  if(['active','activating','reloading'].includes(active)) {
   if(old?.identity!==identity)throw Error('another_preparation_pending');
+  ensureAutostart({run});
   return {status:'preparation_queued',unit,resumed:true};
  }
  if(old?.identity!==identity && !args.includes('--update-only')) {
@@ -21,6 +23,7 @@ export function queuePreparation({stateDir,version,sha256,endpoint,args,script,e
  }
  const job=old?.identity===identity?old:{identity,deadlineMs:Date.now()+3600000};
  if(job.terminal)return ['completed','approval_pending','connection_pending'].includes(job.terminal) ? {status:job.terminal,unit} : {status:'blocked',reason:job.terminal,unit};
+ ensureAutostart({run});
  const unitDir=path.join(environment.XDG_CONFIG_HOME??path.join(environment.HOME,'.config'),'systemd','user');mkdirSync(unitDir,{recursive:true});
  const unitFile=path.join(unitDir,unit);
  const envKeys=['HOME','PATH','USER','LOGNAME','LANG','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS','OPENCLAW_STATE_DIR','OPENCLAW_CONFIG_PATH','OPENCLAW_PROFILE','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT'];

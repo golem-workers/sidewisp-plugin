@@ -70,3 +70,5 @@ lingering. An enabled unit alone does not prove that it starts without a login.
 Validate server-accepted collector and manager heartbeats after a changed VM boot
 ID before opening an SSH/login session; never extrapolate a process restart test
 to a full-machine reboot or to a suspended/depowered VM.
+
+Version 0.2.85 additionally verifies `loginctl show-user CURRENT_ACCOUNT --property=Linger --value` before handing preparation to user-systemd and before enabling the independent manager. When disabled, it enables linger for that same account and verifies it again. Unavailable logind or denied permission blocks successful setup with `user_boot_autostart_unavailable`; it never runs sudo or substitutes another account. This closes the clean-host case where a queued helper and enabled Gateway die on the last logout, before connection can finish.
