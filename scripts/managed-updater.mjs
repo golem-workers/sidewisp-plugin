@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Private code copy OUTSIDE the replaceable plugin and Gateway service.
 import {readFileSync,writeFileSync,renameSync,existsSync} from 'node:fs';
-import {execFile,spawn} from 'node:child_process';
+import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {workerActive,startUpdateWorker,recoverableDirective} from '../src/update/worker.js';
 import {createFileCredentialStore} from '../src/auth/credentials.js';
 import {updateHeartbeat,shouldApply} from '../src/update/manager.js';
 import {consumeUpdateEvents,maintainUpdateEvents,watchManagerFiles} from '../src/update/event-client.js';
@@ -17,7 +18,7 @@ const store=createFileCredentialStore({stateDir:config.stateDir});
 const directory=path.join(config.stateDir,'sidewisp'),stateFile=path.join(directory,'update-status.json'),managerFile=path.join(directory,'manager-status.json');
 const read=file=>{try{return JSON.parse(readFileSync(file,'utf8'));}catch{return null;}};
 const save=(file,value)=>{writeFileSync(file+'.manager.tmp',JSON.stringify(value)+'\n',{mode:0o600});renameSync(file+'.manager.tmp',file);};
-let child=null,running=null,dirty=false,stopping=false,pendingDirective=null,stream=null,streamCredential=null,lastReport=null;
+let running=null,dirty=false,stopping=false,pendingDirective=null,stream=null,streamCredential=null,lastReport=null;
 const lifetime=new AbortController();
 const credentialKey=c=>c?.status==='active'?`${c.installationId}\0${c.secret}`:null;
 function unavailable(error){const old=read(managerFile)??{};save(managerFile,{...old,controlStatus:'unavailable',errorCode:/^[A-Z_]+$/.test(error.message)?error.message:'MANAGER_CHECK_FAILED',checkedAt:new Date().toISOString()});}
@@ -36,19 +37,22 @@ async function tick(){
  let controlStatus='connected',controlError=null;try {await updateHeartbeat({endpoint:config.endpoint,credential,report});}catch(error){controlStatus='unavailable';controlError=error;unavailable(error);}
  save(managerFile,{...report,mode:'event_driven',controlStatus,checkedAt:new Date().toISOString(),requiredVersion:pendingDirective?.targetVersion??null});
  if(controlError?.message==='CREDENTIAL_REJECTED')return;
- const journal=read(path.join(directory,'current-update.json'));
- const recovering=journal?.schema==='sidewisp.current-update.v1'&&journal.mutated===true&&!['completed','failed'].includes(journal.status)
-  &&journal.baseline?.installationId===credential.installationId&&journal.baseline?.endpoint===config.endpoint;
- // Already-authorized mutation resumes even if SSE/control plane is unavailable.
- const directive=pendingDirective??(recovering?journal.directive:null);
- if(stopping||(!recovering&&credentialKey(credential)!==streamCredential)||!directive||!shouldApply({directive,currentVersion:current?.version,currentReady:!!(current?.enabled&&current?.running&&current?.connectionReadiness?.ready),attempt,active:!!child}))return;
+ const journalPath=path.join(directory,'current-update.json'),journal=read(journalPath);
+ if(existsSync(journalPath)&&!journal)throw Error('INVALID_UPDATE_JOURNAL');
+ const recovery=recoverableDirective({journal,credential,endpoint:config.endpoint,stateDir:config.stateDir,attempt});
+ const recovering=!!recovery;
+ if(journal&&!recovery&&!['completed','failed'].includes(journal.status))throw Error('UPDATE_RECOVERY_REVIEW_REQUIRED');
+ // Already-authorized intent (including pre-mutation) resumes without SSE.
+ const directive=recovery??pendingDirective;
+ if(stopping||(!recovering&&credentialKey(credential)!==streamCredential)||!directive)return;
+ if(await workerActive({stateDir:config.stateDir,run:exec}))return;
+ if(!recovering&&!shouldApply({directive,currentVersion:current?.version,currentReady:!!(current?.enabled&&current?.running&&current?.connectionReadiness?.ready),attempt}))return;
  if(existsSync(stateFile+'.lock'))return; // Legacy interrupted transactions require explicit recovery.
  // The helper owns the durable attempt; never erase its crash checkpoint here.
  const latestCredential=await store.read();if(credentialKey(latestCredential)!==credentialKey(credential))return;
  const payload={...directive,stateFile,baselineFile:path.join(directory,'manager-baseline.json')};
- child=spawn(process.execPath,[fileURLToPath(new URL('./openclaw-update-helper.mjs',import.meta.url)),JSON.stringify(payload)],{stdio:'ignore',env:process.env});
- let finished=false;
- const finish=code=>{if(finished)return;finished=true;child=null;if(code===3){if(stopping)process.exit(0);return;}const last=read(stateFile);if(!last||last?.status==='scheduled')save(stateFile,{...last,status:'failed',errorCode:'HELPER_EXITED',updatedAt:new Date().toISOString()});if(stopping)process.exit(0);else if(!last||['completed','failed'].includes(last.status))void run();};child.once('exit',finish);child.once('error',finish);
+ // systemd owns this worker in a separate cgroup, never a child of manager/Gateway.
+ await startUpdateWorker({stateDir:config.stateDir,directive:payload,helper:fileURLToPath(new URL('./openclaw-update-helper.mjs',import.meta.url)),run:exec});
 }
 function run(){dirty=true;if(running)return running;return running=(async()=>{while(dirty&&!stopping){dirty=false;try{await tick();}catch(e){unavailable(e);}}})().finally(()=>{running=null;});}
 await run();
@@ -60,7 +64,7 @@ const watcher=watchManagerFiles({directory,
  onAttempt:attempt=>{if(attempt?.status!=='deferred')void run();},
  onError:error=>{unavailable(error);stream?.abort();},
 });
-process.on('SIGTERM',()=>{stopping=true;lifetime.abort();stream?.abort();clearInterval(timer);watcher.close();if(!child)process.exit(0);});
+process.on('SIGTERM',()=>{stopping=true;lifetime.abort();stream?.abort();clearInterval(timer);watcher.close();process.exit(0);});
 await maintainUpdateEvents({signal:lifetime.signal,onError:unavailable,connect:async connected=>{
  const credential=await store.read();if(credential?.status!=='active')throw Error('CREDENTIAL_UNAVAILABLE');
  streamCredential=credentialKey(credential);stream=new AbortController();

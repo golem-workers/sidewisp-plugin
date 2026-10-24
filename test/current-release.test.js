@@ -48,3 +48,17 @@ test('activation refusal is propagated without another activation attempt or cla
  await assert.rejects(convergeCurrentRelease(f.options),/TASK_SCOPE_GUARD_REJECTED/);
  assert.equal(count,1);assert.ok(!f.states.some(s=>s.status==='completed'));assert.equal(f.journal.installCount,0);
 });
+test('Gateway outage before mutation defers without install/start and resumes when Gateway returns',async()=>{
+ let online=false,installs=0;const old={version:'0.2.60',enabled:true,running:true,connectionReadiness:{ready:true}};
+ const f=setup({status:async()=>{if(!online)throw Error('gateway stopped');return installs?ready:old;},
+ install:async()=>{installs++;},recoverStopped:async()=>assert.fail('pre-mutation outage must not force start')});
+ assert.equal(await convergeCurrentRelease(f.options),'deferred');assert.equal(installs,0);assert.equal(f.journal.mutated,false);
+ online=true;assert.equal(await convergeCurrentRelease(f.options),'completed');assert.equal(installs,1);
+});
+
+test('resumption never downgrades a newer serving package or mutates a changed binding',async()=>{
+ const f=setup({status:async()=>({...ready,version:'0.2.99'})});f.journal.mutated=true;
+ await assert.rejects(convergeCurrentRelease(f.options),/NEWER_PACKAGE_INSTALLED/);assert.equal(f.journal.installCount,0);
+ const g=setup({status:async()=>({...ready,version:'0.2.60'}),verify:async()=>{throw Error('BINDING_CHANGED');}});
+ await assert.rejects(convergeCurrentRelease(g.options),/BINDING_CHANGED/);assert.equal(g.journal.installCount,0);
+});
