@@ -27,9 +27,9 @@ test('manager installer creates isolated bundle and profile-scoped service witho
  const home=mkdtempSync(path.join(os.tmpdir(),'sw-manager-'));try{
  const stateDir=path.join(home,'state');mkdirSync(stateDir);const calls=[];
  const environment={HOME:home,PATH:'/usr/bin',OPENCLAW_STATE_DIR:stateDir,OPENCLAW_CONFIG_PATH:path.join(stateDir,'openclaw.json'),OPENCLAW_PROFILE:'proof',SECRET_TOKEN:'do-not-copy'};
- const result=installUpdateManager({stateDir,endpoint:'https://staging-api.sidewisp.com',environment,platform:'linux',run:(...a)=>calls.push(a)});
+ const result=installUpdateManager({stateDir,ensureAutostart:()=>true,endpoint:'https://staging-api.sidewisp.com',environment,platform:'linux',run:(...a)=>calls.push(a)});
  const unit=readFileSync(path.join(home,'.config/systemd/user',result.unit),'utf8');assert.match(unit,/manager\/current\/scripts\/managed-updater.mjs/);assert.match(unit,/OPENCLAW_PROFILE=proof/);assert.doesNotMatch(unit,/SECRET_TOKEN|do-not-copy|gateway restart/);
  assert.equal(JSON.parse(readFileSync(path.join(stateDir,'sidewisp/manager/current/package.json'),'utf8')).version,candidateVersion);assert.equal(calls.length,2);
- assert.throws(()=>installUpdateManager({stateDir,endpoint:'https://api.sidewisp.com',environment,platform:'linux',run:()=>{}}),/MANAGER_BINDING_MISMATCH/);
+ assert.throws(()=>installUpdateManager({stateDir,ensureAutostart:()=>true,endpoint:'https://api.sidewisp.com',environment,platform:'linux',run:()=>{}}),/MANAGER_BINDING_MISMATCH/);
  }finally{rmSync(home,{recursive:true,force:true});}
 });

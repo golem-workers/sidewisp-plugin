@@ -5,7 +5,7 @@ import {mkdtempSync,readFileSync,writeFileSync,rmSync,mkdirSync,unlinkSync,symli
 import os from 'node:os';
 import path from 'node:path';
 import {installUpdateManager} from '../scripts/install-update-manager.mjs';
-function fixture(t){const root=mkdtempSync(path.join(os.tmpdir(),'manager-test-'));t.after(()=>rmSync(root,{recursive:true,force:true}));const calls=[];const options={stateDir:root,endpoint:'https://example.test',platform:'linux',environment:{HOME:root,PATH:'/usr/bin',OPENCLAW_STATE_DIR:root,OPENCLAW_CONFIG_PATH:path.join(root,'openclaw.json')},run:(...args)=>calls.push(args)};return {root,calls,options};}
+function fixture(t){const root=mkdtempSync(path.join(os.tmpdir(),'manager-test-'));t.after(()=>rmSync(root,{recursive:true,force:true}));const calls=[];const options={stateDir:root,endpoint:'https://example.test',platform:'linux',ensureAutostart:()=>true,environment:{HOME:root,PATH:'/usr/bin',OPENCLAW_STATE_DIR:root,OPENCLAW_CONFIG_PATH:path.join(root,'openclaw.json')},run:(...args)=>calls.push(args)};return {root,calls,options};}
 test('repeated preparation preserves owner unit and config additions',t=>{const f=fixture(t);const result=installUpdateManager(f.options);const unit=path.join(f.root,'.config/systemd/user',result.unit);const customized=readFileSync(unit,'utf8')+'\n# owner policy\n[Service]\nMemoryMax=512M\n';writeFileSync(unit,customized);const config=JSON.parse(readFileSync(result.configFile));config.ownerSetting=true;writeFileSync(result.configFile,JSON.stringify(config));installUpdateManager(f.options);assert.equal(readFileSync(unit,'utf8'),customized);assert.equal(JSON.parse(readFileSync(result.configFile)).ownerSetting,true);});
 test('changed manager entry point fails closed without replacing unit',t=>{const f=fixture(t);const result=installUpdateManager(f.options);const unit=path.join(f.root,'.config/systemd/user',result.unit);const customized=readFileSync(unit,'utf8').replace(/^ExecStart=.*$/m,'ExecStart=/owner/custom-manager');writeFileSync(unit,customized);f.calls.length=0;assert.throws(()=>installUpdateManager(f.options),/MANAGER_UNIT_REVIEW_REQUIRED/);assert.equal(readFileSync(unit,'utf8'),customized);assert.equal(f.calls.length,0);});
 
@@ -49,3 +49,26 @@ test('helper acquiring its kernel lock during manager stop blocks code switch an
  assert.throws(()=>installUpdateManager({...f.options,upgrade:true,run:(cmd,args)=>{if(cmd==='systemctl'&&args.includes('stop'))locked=true;if(cmd==='/usr/bin/flock'&&locked)throw Error('busy');}}),/MANAGER_UPDATE_IN_PROGRESS/);
  assert.equal(realpathSync(prior.current),prior.old);
 });
+
+// A SIGTERM handler intentionally exits 0; on-failure leaves this daemon dead.
+test('new manager is supervised after clean exits as well as crashes',t=>{
+ const f=fixture(t);const result=installUpdateManager(f.options);
+ assert.match(readFileSync(path.join(f.root,'.config/systemd/user',result.unit),'utf8'),/^Restart=always$/m);
+});
+test('explicit upgrade migrates legacy restart policy without losing owner settings',t=>{
+ const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result,'0.2.83');
+ const original=readFileSync(prior.unit,'utf8').replace('Restart=always','Restart=on-failure')+'\n# owner settings\n[Service]\nMemoryMax=512M\n';writeFileSync(prior.unit,original);
+ installUpdateManager({...f.options,upgrade:true});assert.equal(readFileSync(prior.unit,'utf8'),original.replace('Restart=on-failure','Restart=always'));
+});
+test('explicit upgrade refuses deliberate owner restart policy',t=>{
+ const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result,'0.2.83');
+ const original=readFileSync(prior.unit,'utf8').replace('Restart=always','Restart=no');writeFileSync(prior.unit,original);f.calls.length=0;
+ assert.throws(()=>installUpdateManager({...f.options,upgrade:true}),/MANAGER_RESTART_POLICY_REVIEW_REQUIRED/);assert.equal(readFileSync(prior.unit,'utf8'),original);assert.equal(f.calls.some(c=>c[0]==='systemctl'),false);assert.equal(realpathSync(prior.current),prior.old);
+});
+test('activation failure restores old policy and private code together',t=>{
+ const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result,'0.2.83');
+ const original=readFileSync(prior.unit,'utf8').replace('Restart=always','Restart=on-failure');writeFileSync(prior.unit,original);
+ assert.throws(()=>installUpdateManager({...f.options,upgrade:true,run:(cmd,args)=>{if(args.includes('enable'))throw Error('refused');}}),/refused/);
+ assert.equal(readFileSync(prior.unit,'utf8'),original);assert.equal(realpathSync(prior.current),prior.old);
+});
+test('missing boot-autostart permission blocks manager replacement before service stop',t=>{const f=fixture(t);const result=installUpdateManager(f.options);const prior=oldManager(f,result,'0.2.83');f.calls.length=0;assert.throws(()=>installUpdateManager({...f.options,upgrade:true,ensureAutostart:()=>{throw Error('user_boot_autostart_unavailable');}}),/user_boot_autostart_unavailable/);assert.equal(realpathSync(prior.current),prior.old);assert.equal(f.calls.some(c=>c[0]==='systemctl'),false);});

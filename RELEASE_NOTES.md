@@ -1,3 +1,13 @@
+## 0.2.85
+
+- Verify and enable boot-time user-manager lingering for the current account before independent preparation or manager activation. Refuse completion when unavailable; no sudo or cross-user changes.
+- Includes 0.2.84 clean-exit restart supervision fix.
+
+## 0.2.84
+
+- Keep the independent OpenClaw manager supervised after a handled SIGTERM (clean exit), not only failures. Explicit systemd stop stays stopped.
+- Explicit manager upgrades safely migrate the recognized legacy restart setting while preserving owner configuration and rolling back policy with code on activation failure.
+
 ## 0.2.83 — interruption-safe managed updates (Linux OpenClaw)
 
 - Run each profile-scoped updater in a separate systemd service, outside both the manager and Gateway control groups. Stopping either service no longer terminates the worker.

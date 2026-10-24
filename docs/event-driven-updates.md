@@ -54,3 +54,21 @@ Use archive 0.2.83 or later for interruption-safe workers. This is a one-time
 private-manager migration, not a model task required for each future plugin update.
 Use archive 0.2.51 or later for the original event-stream behavior: 0.2.50 is superseded before rollout because its
 credential watcher could generate metadata events recursively.
+
+## Automatic restart (0.2.84)
+
+The profile manager uses `Restart=always`: its handled SIGTERM exits successfully,
+but an unsolicited termination must still restart it. `systemctl --user stop`
+remains an explicit stop and is not automatically undone. Explicit manager upgrade
+migrates only the recognized old `Restart=on-failure` setting, preserves owner
+additions, refuses a deliberate alternative restart policy and restores the old
+unit policy together with code if activation fails. The Gateway remains under its
+own existing host service; enrollment does not override that service's owner policy.
+
+Boot autostart additionally requires an enabled user service and user-manager
+lingering. An enabled unit alone does not prove that it starts without a login.
+Validate server-accepted collector and manager heartbeats after a changed VM boot
+ID before opening an SSH/login session; never extrapolate a process restart test
+to a full-machine reboot or to a suspended/depowered VM.
+
+Version 0.2.85 additionally verifies `loginctl show-user CURRENT_ACCOUNT --property=Linger --value` before handing preparation to user-systemd and before enabling the independent manager. When disabled, it enables linger for that same account and verifies it again. Unavailable logind or denied permission blocks successful setup with `user_boot_autostart_unavailable`; it never runs sudo or substitutes another account. This closes the clean-host case where a queued helper and enabled Gateway die on the last logout, before connection can finish.
