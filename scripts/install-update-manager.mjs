@@ -45,14 +45,22 @@ export function installUpdateManager({stateDir,endpoint,run=execFileSync,environ
  const unit='sidewisp-update-manager-'+createHash('sha256').update(stateDir).digest('hex').slice(0,12)+'.service';
  const unitDir=path.join(environment.XDG_CONFIG_HOME??path.join(environment.HOME,'.config'),'systemd','user');mkdirSync(unitDir,{recursive:true});
  const keys=['HOME','PATH','USER','LOGNAME','LANG','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS','OPENCLAW_STATE_DIR','OPENCLAW_CONFIG_PATH','OPENCLAW_PROFILE','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT'];
- const text='[Unit]\nDescription=Sidewisp independent update manager\nAfter=network-online.target\n[Service]\nType=simple\nExecStart='+[process.execPath,path.join(link,'scripts/managed-updater.mjs'),configFile].map(quote).join(' ')+'\nRestart=on-failure\nRestartSec=30\nUMask=0077\nTimeoutStopSec=900\n'+keys.filter(k=>typeof environment[k]==='string').map(k=>'Environment='+quote(k+'='+environment[k])).join('\n')+'\n[Install]\nWantedBy=default.target\n';
+ const text='[Unit]\nDescription=Sidewisp independent update manager\nAfter=network-online.target\n[Service]\nType=simple\nExecStart='+[process.execPath,path.join(link,'scripts/managed-updater.mjs'),configFile].map(quote).join(' ')+'\nRestart=always\nRestartSec=30\nUMask=0077\nTimeoutStopSec=900\n'+keys.filter(k=>typeof environment[k]==='string').map(k=>'Environment='+quote(k+'='+environment[k])).join('\n')+'\n[Install]\nWantedBy=default.target\n';
  // Existing units may contain owner policy and environment customizations.
  // Never replace them as a side effect of enrollment.
  const unitFile=path.join(unitDir,unit);
+ let originalUnit=null,upgradedUnit=null;
  if(existsSync(unitFile)){
   const existing=readFileSync(unitFile,'utf8');
   const expectedStart=text.split('\n').find(line=>line.startsWith('ExecStart='));
   if(existing.split('\n').filter(line=>line.startsWith('ExecStart=')).join('\n')!==expectedStart)throw Error('MANAGER_UNIT_REVIEW_REQUIRED');
+  if(upgrade){
+   // Migrate only our recognized old restart setting, preserving owner additions.
+   // A deliberate owner restart policy is not ours to overwrite.
+   const policies=existing.split('\n').filter(line=>line.startsWith('Restart='));
+   if(policies.length!==1||!['Restart=on-failure','Restart=always'].includes(policies[0]))throw Error('MANAGER_RESTART_POLICY_REVIEW_REQUIRED');
+   if(policies[0]==='Restart=on-failure'){originalUnit=existing;upgradedUnit=existing.replace(/^Restart=on-failure$/m,'Restart=always');}
+  }
  }else writeFileSync(unitFile,text,{mode:0o600});
  if(upgradeNeeded){
   // Explicitly upgrade only the independent manager, never the Gateway.
@@ -66,8 +74,10 @@ export function installUpdateManager({stateDir,endpoint,run=execFileSync,environ
   symlinkSync(release,link+'.upgrade.tmp');renameSync(link+'.upgrade.tmp',link);
  }
  try {
+  if(upgradedUnit){writeFileSync(unitFile+'.upgrade.tmp',upgradedUnit,{mode:0o600});renameSync(unitFile+'.upgrade.tmp',unitFile);}
   run('systemctl',['--user','daemon-reload'],{stdio:'pipe'});run('systemctl',['--user','enable','--now',unit],{stdio:'pipe'});
  } catch(error) {
+  if(originalUnit){writeFileSync(unitFile+'.restore.tmp',originalUnit,{mode:0o600});renameSync(unitFile+'.restore.tmp',unitFile);run('systemctl',['--user','daemon-reload'],{stdio:'pipe'});}
   if(upgradeNeeded){
    symlinkSync(previousRelease,link+'.restore.tmp');renameSync(link+'.restore.tmp',link);
    run('systemctl',['--user','start',unit],{stdio:'pipe'});
