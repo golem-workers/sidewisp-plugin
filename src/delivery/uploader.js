@@ -1,3 +1,4 @@
+import { createTransportDeadline } from '../transport/deadline.js';
 import crypto from "node:crypto";
 import { gzipSync } from "node:zlib";
 
@@ -65,10 +66,11 @@ export function createUploader({
     const timestamp = Math.floor(now() / 1000).toString();
     const requestNonce = nonce();
     const signature = signBatch({ secret: credential.secret, timestamp, nonce: requestNonce, body });
-    let response;
+    let response, result;
+    const deadline = createTransportDeadline({ timeoutMs });
     try {
       response = await fetchImpl(new URL("/v1/telemetry/batches", endpoint), {
-        method: "POST", signal: AbortSignal.timeout(timeoutMs), body,
+        method: "POST", signal: deadline.signal, body,
         headers: {
           "content-type": "application/json",
           ...(compressed ? { "content-encoding": "gzip" } : {}),
@@ -77,7 +79,9 @@ export function createUploader({
           "x-sidewisp-timestamp": timestamp, "x-sidewisp-nonce": requestNonce,
         },
       });
+      if (response.ok) result = await response.json();
     } catch (error) { return finish({ status: "retry", sent: 0, remaining: pending.length, transportCode: transportCode(error) }); }
+    finally { deadline.close(); }
     if (response.status === 401 || response.status === 403) {
       await credentialProvider.refresh?.();
       return finish({ status: "credential-rejected", sent: 0, remaining: pending.length });
@@ -88,7 +92,6 @@ export function createUploader({
         ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { retryAfterMs: Math.min(maxBackoffMs, retryAfter * 1000) } : {}) });
     }
     if (!response.ok) return finish({ status: "rejected", sent: 0, remaining: pending.length });
-    const result = await response.json();
     if (result?.update) {
       try { onUpdate(result.update); } catch { /* update scheduling must never block telemetry */ }
     }

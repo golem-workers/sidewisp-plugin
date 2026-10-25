@@ -6,6 +6,7 @@ import {promisify} from 'node:util';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {realpathSync} from 'node:fs';
+import {createPendingReleaseStore} from '../src/update/pending-release.js';
 import {maintenancePlan} from '../src/update/collector-maintenance.js';
 import {fileURLToPath} from 'node:url';
 import {workerActive,startUpdateWorker,recoverableDirective} from '../src/update/worker.js';
@@ -23,11 +24,13 @@ const read=file=>{try{return JSON.parse(readFileSync(file,'utf8'));}catch{return
 const save=(file,value)=>{writeFileSync(file+'.manager.tmp',JSON.stringify(value)+'\n',{mode:0o600});renameSync(file+'.manager.tmp',file);};
 let running=null,dirty=false,stopping=false,pendingDirective=null,stream=null,streamCredential=null,lastReport=null;
 const lifetime=new AbortController();
+const pendingReleases=createPendingReleaseStore({stateDir:config.stateDir,endpoint:config.endpoint});
 const credentialKey=c=>c?.status==='active'?`${c.installationId}\0${c.secret}`:null;
 function unavailable(error){const old=read(managerFile)??{};save(managerFile,{...old,controlStatus:'unavailable',errorCode:/^[A-Z_]+$/.test(error.message)?error.message:'MANAGER_CHECK_FAILED',checkedAt:new Date().toISOString()});}
 async function tick(){
  lastReport=null;
  const credential=await store.read();if(credential?.status!=='active'){pendingDirective=null;return;}
+ pendingDirective=pendingReleases.read(credential);
  let current=null;
  try{const r=await exec('openclaw',['gateway','call','sidewisp.status','--params','{}','--json'],{timeout:20000,maxBuffer:1024*1024});current=JSON.parse(r.stdout);
  if(current.endpoint!==config.endpoint||current.installation?.installationId!==credential.installationId)throw Error('BINDING_MISMATCH');
@@ -39,7 +42,7 @@ async function tick(){
  // This heartbeat reports liveness/results only. Never apply its update field.
  let controlStatus='connected',controlError=null;try {await updateHeartbeat({endpoint:config.endpoint,credential,report});}catch(error){controlStatus='unavailable';controlError=error;unavailable(error);}
  save(managerFile,{...report,mode:'event_driven',controlStatus,checkedAt:new Date().toISOString(),requiredVersion:pendingDirective?.targetVersion??null});
- if(controlError?.message==='CREDENTIAL_REJECTED')return;
+ if(controlError?.message==='CREDENTIAL_REJECTED'){pendingReleases.accept(null,credential);pendingDirective=null;return;}
  const journalPath=path.join(directory,'current-update.json'),journal=read(journalPath);
  if(existsSync(journalPath)&&!journal)throw Error('INVALID_UPDATE_JOURNAL');
  const recovery=recoverableDirective({journal,credential,endpoint:config.endpoint,stateDir:config.stateDir,attempt});
@@ -58,7 +61,7 @@ async function tick(){
   }
  }
  const directive=recovery??pendingDirective;
- if(stopping||(!recovering&&credentialKey(credential)!==streamCredential)||!directive)return;
+ if(stopping||!directive)return;
  if(await workerActive({stateDir:config.stateDir,run:exec}))return;
  if(!recovering&&!shouldApply({directive,currentVersion:current?.version,currentReady:!!(current?.enabled&&current?.running&&current?.connectionReadiness?.ready),attempt}))return;
  if(existsSync(stateFile+'.lock'))return; // Legacy interrupted transactions require explicit recovery.
@@ -84,6 +87,9 @@ await maintainUpdateEvents({signal:lifetime.signal,onError:unavailable,connect:a
  streamCredential=credentialKey(credential);stream=new AbortController();
  const abort=()=>stream.abort();lifetime.signal.addEventListener('abort',abort,{once:true});
  try{await run();if(!lastReport)throw Error('MANAGER_CHECK_FAILED');
- await consumeUpdateEvents({endpoint:config.endpoint,credential,report:lastReport,signal:stream.signal,onDirective:async directive=>{connected();pendingDirective=directive;await run();}});
- }finally{lifetime.signal.removeEventListener('abort',abort);streamCredential=null;pendingDirective=null;}
+ await consumeUpdateEvents({endpoint:config.endpoint,credential,report:lastReport,signal:stream.signal,onDirective:async directive=>{
+  const latestCredential=await store.read();
+  if(credentialKey(latestCredential)!==credentialKey(credential))throw Error('CREDENTIAL_CHANGED');
+  pendingReleases.accept(directive,credential);connected();pendingDirective=directive;await run();}});
+ }finally{lifetime.signal.removeEventListener('abort',abort);streamCredential=null;}
 }});
