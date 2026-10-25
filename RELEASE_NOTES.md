@@ -1,3 +1,9 @@
+## 0.2.86 — bounded collector startup recovery
+
+- Retry allowlisted transient collector initialization failures after cleaning up partially started components, with a 5–60 second backoff and one active attempt. Recovery does not restart Gateway or alter credentials, permissions, binding or settings.
+- Explicit stop cancels retries. Authentication refusal, unsupported state and unknown programming errors remain diagnostic failures rather than restart loops.
+- Includes 0.2.85 boot-time user-service autostart and independent-manager clean-exit supervision. This does not establish or repair the cause of an unreachable agent without host evidence.
+
 ## 0.2.85
 
 - Verify and enable boot-time user-manager lingering for the current account before independent preparation or manager activation. Refuse completion when unavailable; no sudo or cross-user changes.
