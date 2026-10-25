@@ -19,6 +19,7 @@ export function createCollector({ adapter, emit = async () => {} }) {
     async recover(cursor = null) {
       return adapter.recover(cursor, context);
     },
+    isRunning: () => running,
     async status() {
       return {
         running,

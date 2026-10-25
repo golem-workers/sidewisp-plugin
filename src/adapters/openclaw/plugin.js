@@ -1,9 +1,30 @@
+import { ensureNativeCronHelper, nativeCronWorkspaces } from "../../bootstrap/native-cron-helper.js";
+import { listAgentIds, resolveAgentWorkspaceDir } from "openclaw/plugin-sdk/agent-runtime";
+import { createOpenClawQuestionObserver } from "./questions.js";
+import { collectOpenClawCron, watchOpenClawCron } from '../../cron/openclaw.js';
+import { createCronDelivery } from '../../delivery/cron.js';
+import { createLocalWorkSnapshotRequest } from "./local-work-snapshot.js";
+import { createOpenClawWorkReconciliation } from "./work-reconciliation.js";
+import { retryableCollectorStartupFailure, collectorStartupRetryDelay } from '../../core/startup-recovery.js';
+import { createHeartbeatSupervisor, permanentHeartbeatFailure } from '../../core/heartbeat-supervisor.js';
+import { createScheduleRunner } from "../../schedules/runner.js";
+import { createActivationReadiness } from './activation-readiness.js';
+import { registerConnectTool } from './connect-tool.js';
+import { collectorStateId, createCollectorReadiness, readServingCollectorStatus } from './collector-readiness.js';
+import { createDeviceAuthorizationClient } from "../../auth/device-authorization.js";
+import { synchronizeCollectorAuthorization } from "../../auth/collector-authorization.js";
+import { collectOpenClawContext } from '../../context/openclaw.js';
+import { createContextUsageDelivery } from '../../delivery/context-usage.js';
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import crypto from "node:crypto";
+import { watch } from "node:fs";
+import { createConnectionNotifier, createRuntimeTelegramSender } from "../../auth/connection-notice.js";
+import { createUploadPump } from "../../delivery/upload-pump.js";
 import path from "node:path";
 import { mutateConfigFile } from "openclaw/plugin-sdk/config-mutation";
 import { readSetupToken, resolveConfig } from "../../../config.js";
 import { createEnrollmentManager, createFileCredentialStore } from "../../auth/credentials.js";
+import { createTelegramEnrollmentHook } from "../../auth/telegram-enrollment.js";
 import { createCollector } from "../../core/collector.js";
 import { normalizeRuntimeEvent } from "../../core/normalize.js";
 import { sanitizeTelemetryEvent } from "../../core/sanitize.js";
@@ -12,12 +33,28 @@ import { createSafeSupportBundle } from "../../core/support.js";
 import { openSpool, SpoolError } from "../../delivery/spool.js";
 import { createUploader } from "../../delivery/uploader.js";
 import { createRuntimeDiagnosticsDelivery } from "../../delivery/runtime-diagnostics.js";
+import { createUsageDelivery } from "../../delivery/usage.js";
+import { collectOpenClawUsage } from "../../usage/openclaw.js";
+import { createOpenClawDiagnosticProbes } from "./diagnostic-probes.js";
 import { createOpenClawAdapter } from "./index.js";
-import { openClawAgentEventInput, registerOpenClawHooks } from "./hooks.js";
-import { discoverOpenClawSources, recoverJsonl, stableOpenClawEventId } from "./recovery.js";
+import {
+  createOpenClawUserTaskLifecycle,
+  openClawActiveWorkCursor,
+  openClawAgentEventInput,
+  parseOpenClawActiveWorkCursor,
+  registerOpenClawHooks,
+} from "./hooks.js";
+import {
+  discoverOpenClawSources,
+  isOpenClawHookRecoveryFact,
+  recoverJsonl,
+  stableOpenClawEventId,
+} from "./recovery.js";
+import { adoptInstalledManager } from '../../update/manager-adoption.js';
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.17";
+const VERSION = "0.2.87";
+const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
   id: "sidewisp",
@@ -26,7 +63,9 @@ export default definePluginEntry({
   register(api) {
     const config = resolveConfig(api.pluginConfig);
     const setupToken = readSetupToken(api.pluginConfig);
+    const activation = createActivationReadiness(api.runtime.version);
     const stateDir = api.runtime.state.resolveStateDir();
+    if(config.enabled)void adoptInstalledManager({stateDir,endpoint:config.endpoint}).catch(()=>api.logger.warn("Sidewisp manager adoption unavailable; existing manager preserved"));
     const updates = createUpdateScheduler({ stateDir, logger: api.logger, currentVersion: VERSION });
     const auth = createEnrollmentManager({
       endpoint: config.endpoint,
@@ -36,11 +75,48 @@ export default definePluginEntry({
         if (entry?.config && typeof entry.config === "object") delete entry.config.setupToken;
       } }),
     });
+    const ownerSenders = () => new Set((api.runtime.config.current().commands?.ownerAllowFrom ?? [])
+      .flatMap((value) => {
+        const normalized = String(value).trim();
+        return normalized.startsWith("telegram:") ? [normalized.slice("telegram:".length)] : [normalized];
+      }));
+    const deleteTelegramSourceMessage = async ({ accountId, conversationId, messageId }) => {
+      // Legacy channel-code enrollment is optional on split-channel SDKs.
+      // Loading the prompt/tool path must not import a removed Telegram surface.
+      const { resolveTelegramAccount } = await import('openclaw/plugin-sdk/telegram-account');
+      const account = resolveTelegramAccount({ cfg: api.runtime.config.current(), accountId });
+      if (!account.enabled || !account.token) throw new Error("Telegram account unavailable");
+      const body = new URLSearchParams({ chat_id: conversationId, message_id: messageId });
+      const response = await fetch(`https://api.telegram.org/bot${account.token}/deleteMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body,
+      });
+      if (!response.ok) throw new Error("Telegram source deletion failed");
+      const result = await response.json();
+      if (result?.ok !== true) throw new Error("Telegram source deletion rejected");
+    };
+    api.on("before_dispatch", createTelegramEnrollmentHook({
+      auth,
+      expectedEndpoint: config.endpoint,
+      logger: api.logger,
+      deleteSourceMessage: deleteTelegramSourceMessage,
+      isAuthorizedSender: (senderId) => typeof senderId === "string" && ownerSenders().has(senderId),
+    }), { timeoutMs: 20_000 });
     let spool = null;
     const healthy = async () => ({ status: "healthy" });
+    const diagnosticProbes = createOpenClawDiagnosticProbes({
+        stateDir,
+        enrollment: () => auth.canSend(),
+        spool: () => spool?.health(),
+        uploader: () => uploader?.status(),
+        updates: () => updates.status(),
+        configuration: () => api.runtime.config.current(),
+      });
     const registry = createAdapterRegistry([createOpenClawAdapter({
       logger: api.logger,
       version: api.runtime.version,
+      diagnosticProbes,
       probes: {
         process: healthy,
         gateway: healthy,
@@ -60,11 +136,38 @@ export default definePluginEntry({
     let sequence = 0;
     let uploader = null;
     let runtimeDiagnostics = null;
+    let scheduleRunner = null;
+    let usageDelivery = null;
+    let contextDelivery = null;
+    let cronDelivery = null;
     let uploadTimer = null;
+    let uploadPump = null;
+    let authorizationWatch = null;
+    const connectionNotifier = createConnectionNotifier({ stateDir, endpoint: config.endpoint, send: createRuntimeTelegramSender(api), onError: () => api.logger.warn("Sidewisp connection reply unavailable; will retry after next accepted health") });
+    let startupRetry = null, serviceStopping = false, startupFailures = 0;
+    let restartCollector = null, collectorStarting = null, failedCollectorStart = false;
     let healthTimer = null;
     let spoolFailure = null;
     let spoolFailureCount = 0;
-    const preStartEvents = [];
+    const agentEventTelemetry = { observed: 0, emitted: 0, ignored: 0, failed: 0, lastObservedAt: null };
+    const deferredAgentEventIds = new Set();
+    const deferredHookEventIds = new Set();
+    let settleDeferredHook = () => {};
+    let persistDeferredEvent = () => false;
+    const userTaskLifecycle = createOpenClawUserTaskLifecycle({
+      onDeferred(event) {
+        let persisted = false;
+        try { persisted = persistDeferredEvent(event); }
+        catch { persisted = false; }
+        if (persisted && deferredAgentEventIds.delete(event.eventId)) agentEventTelemetry.emitted += 1;
+        if (persisted && deferredHookEventIds.delete(event.eventId)) settleDeferredHook("emitted");
+        return persisted;
+      },
+      onSuppressed(event) {
+        if (deferredAgentEventIds.delete(event.eventId)) agentEventTelemetry.ignored += 1;
+        if (deferredHookEventIds.delete(event.eventId)) settleDeferredHook("ignored");
+      },
+    });
     const recordSpoolFailure = (error) => {
       spoolFailureCount += 1;
       spoolFailure = { code: error.code, at: new Date().toISOString() };
@@ -78,13 +181,16 @@ export default definePluginEntry({
         else api.logger.warn(`Sidewisp ${label} failed; gateway continues`);
       });
     };
-    const persistEvent = async (event) => {
-      if (!spool) {
-        if (preStartEvents.length < 1000) preStartEvents.push(event);
-        return false;
-      }
+    const enqueueAcceptedEvents = (acceptedEvents) => {
+      if (acceptedEvents.length === 0) return true;
+      if (!spool) return false;
       try {
-        spool.enqueueSourceBatch("openclaw-hooks", String(event.sequence), [event]);
+        spool.enqueueSourceBatch(
+          HOOK_EVENT_SOURCE,
+          openClawActiveWorkCursor(acceptedEvents.at(-1).sequence, userTaskLifecycle.activeWork()),
+          acceptedEvents,
+        );
+        uploadPump?.request();
         return true;
       } catch (error) {
         if (!(error instanceof SpoolError)) throw error;
@@ -92,6 +198,23 @@ export default definePluginEntry({
         return false;
       }
     };
+    const enqueueAcceptedEvent = (acceptedEvent) => enqueueAcceptedEvents([acceptedEvent]);
+    persistDeferredEvent = enqueueAcceptedEvent;
+    let persistActiveWork = async () => true;
+    const persistEventDetailed = async (event, source) => {
+      const result = userTaskLifecycle.processDetailed(event);
+      if (result.disposition === "buffered" && source === "agent") deferredAgentEventIds.add(event.eventId);
+      if (result.disposition === "buffered" && source === "hook") deferredHookEventIds.add(event.eventId);
+      if (result.disposition !== "accepted") return result;
+      const emitted = enqueueAcceptedEvent(result.event);
+      if (!emitted) userTaskLifecycle.rollback(result.event);
+      else userTaskLifecycle.commit(result.event);
+      return Object.freeze({
+        disposition: emitted ? "emitted" : "failed",
+        event: result.event,
+      });
+    };
+    const persistEvent = async (event) => (await persistEventDetailed(event)).disposition === "emitted";
     const makeEnvelope = (input, sourceKind = "hook", fallback = "") => {
       const now = new Date().toISOString();
       sequence += 1;
@@ -102,9 +225,47 @@ export default definePluginEntry({
         runtime: { version: api.runtime.version }, source: { kind: sourceKind, adapterVersion: VERSION },
       };
     };
-    const emitHeartbeat = async () => {
-      if (!spool || !auth.canSend()) return;
+    persistActiveWork = async () => {
+      await userTaskLifecycle.flushPending();
+      if (!spool) return true;
+      try {
+        spool.advanceCursor(
+          HOOK_EVENT_SOURCE,
+          openClawActiveWorkCursor(sequence, userTaskLifecycle.activeWork()),
+        );
+        return true;
+      } catch (error) {
+        if (!(error instanceof SpoolError)) throw error;
+        recordSpoolFailure(error);
+        return false;
+      }
+    };
+    const workReconciliation = createOpenClawWorkReconciliation({
+      request: createLocalWorkSnapshotRequest({ stateDir, activeWork: () => userTaskLifecycle.activeWork() }),
+      activeWork: () => userTaskLifecycle.activeWork(),
+      revision: () => agentEventTelemetry.observed + Object.values(hookTelemetry.status().observed).reduce((sum, count) => sum + count, 0),
+      async emit(input) {
+        const normalized = normalizeRuntimeEvent("openclaw", input, makeEnvelope(input, "hook"));
+        return normalized.event ? persistEvent(normalized.event) : false;
+      },
+    });
+    const emitHeartbeat = async (signal) => {
+      if (signal?.aborted) return;
+      if (spool) {
+        await synchronizeCollectorAuthorization({
+          device: createDeviceAuthorizationClient({ endpoint: config.endpoint, stateDir }),
+          auth,
+          onPendingError: () => api.logger.debug?.('Sidewisp device authorization pending or unavailable'),
+        });
+      }
+      if (signal?.aborted || !spool || !auth.canSend()) return;
+      // Reapproval may be completed by an independent helper while we run.
+      // Free the previous binding's quota before persisting the first heartbeat.
+      spool.quarantineOtherInstallations(auth.credential().installationId);
+      await workReconciliation.reconcile();
+      if (signal?.aborted) return;
       const snapshot = await adapter.healthSnapshot();
+      if (signal?.aborted) return;
       const envelope = makeEnvelope({}, "health", `health|${Date.now()}|${crypto.randomUUID()}`);
       await persistEvent(sanitizeTelemetryEvent({
         ...envelope,
@@ -116,18 +277,30 @@ export default definePluginEntry({
       }));
     };
     const hookTelemetry = registerOpenClawHooks(api, {
-      emit: persistEvent,
-      envelopeFactory: (_input, _event, ctx) => ({ ...makeEnvelope(_input), correlation: { sessionId: ctx?.sessionId, turnId: ctx?.runId }, details: {} }),
+      emit: (event) => persistEventDetailed(event, "hook"),
+      envelopeFactory: (_input, _event, ctx) => ({
+        ...makeEnvelope(_input),
+        correlation: { sessionId: ctx?.sessionId ?? ctx?.sessionKey, turnId: ctx?.runId },
+        details: {},
+      }),
       onDiagnostic: () => {},
     });
-    const agentEventTelemetry = { observed: 0, emitted: 0, ignored: 0, failed: 0, lastObservedAt: null };
+    settleDeferredHook = (outcome) => hookTelemetry.settle(outcome);
+    const questions = createOpenClawQuestionObserver({
+      emit(input) {
+        const result = normalizeRuntimeEvent("openclaw", input, makeEnvelope(input, "hook"));
+        if (result.event) return persistEventDetailed(result.event, "agent");
+      },
+    });
     api.agent.events.registerAgentEventSubscription({
       id: "sidewisp-runtime-events",
       description: "Content-free Sidewisp lifecycle and tool failure telemetry",
-      streams: ["lifecycle", "tool"],
+      streams: ["lifecycle", "tool", "approval", "item", "assistant"],
       async handle(event) {
         agentEventTelemetry.observed += 1;
         agentEventTelemetry.lastObservedAt = new Date().toISOString();
+        questions.observe(event);
+        await questions.drain();
         const input = openClawAgentEventInput(event);
         if (!input) {
           agentEventTelemetry.ignored += 1;
@@ -139,8 +312,10 @@ export default definePluginEntry({
             agentEventTelemetry.ignored += 1;
             return;
           }
-          await persistEvent(result.event);
-          agentEventTelemetry.emitted += 1;
+          const persisted = await persistEventDetailed(result.event, "agent");
+          if (persisted.disposition === "emitted") agentEventTelemetry.emitted += 1;
+          else if (persisted.disposition === "failed") agentEventTelemetry.failed += 1;
+          else if (persisted.disposition === "coalesced") agentEventTelemetry.ignored += 1;
         } catch {
           agentEventTelemetry.failed += 1;
         }
@@ -150,29 +325,38 @@ export default definePluginEntry({
     api.registerService({
       id: "sidewisp-collector",
       async start(ctx) {
+        restartCollector = () => this.start(ctx);
+        if (collectorStarting) return collectorStarting;
+        collectorStarting = (async () => {
+        serviceStopping = false;
+        clearTimeout(startupRetry); startupRetry = null;
+        activation.serviceStarted(ctx);
         if (!config.enabled) return;
         try {
+          if (config.endpoint === "https://staging-api.sidewisp.com") {
+            const hostConfig = api.runtime.config.current();
+            const helper = await ensureNativeCronHelper({ endpoint: config.endpoint, workspaces: nativeCronWorkspaces({ config: hostConfig, resolvedWorkspaces: listAgentIds(hostConfig).map(id => resolveAgentWorkspaceDir(hostConfig, id)) }) });
+            if (helper.status === "custom_preserved") ctx.logger.warn("Sidewisp preserved a custom native cron helper; managed helper readiness is unverified");
+          }
           await auth.load();
-          if (setupToken && !auth.canSend()) {
-            try { await auth.enroll(setupToken); }
+          if (setupToken) {
+            try { await auth.applySetupToken(setupToken); }
             catch { ctx.logger.warn("Sidewisp enrollment failed; will retry on restart"); }
-          } else if (setupToken && auth.canSend()) {
-            try { await auth.clearStoredSetupToken(); }
-            catch { ctx.logger.warn("Sidewisp setup-token cleanup pending; will retry on restart"); }
           }
-          spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite") });
-          if (preStartEvents.length > 0) {
-            const installationId = auth.status().installationId;
-            const ready = preStartEvents.splice(0).map((event) => installationId ? { ...event, installationId } : event);
-            spool.enqueueSourceBatch("openclaw-hooks", String(ready.at(-1).sequence), ready);
-          }
+          spool = await openSpool({ file: path.join(stateDir, "sidewisp", "spool.sqlite"), installationId: auth.credential()?.installationId });
+          spoolFailure = null;
+          const previouslyActive = parseOpenClawActiveWorkCursor(spool.cursor(HOOK_EVENT_SOURCE));
+          userTaskLifecycle.restoreActiveWork(previouslyActive);
           const discovery = await discoverOpenClawSources(stateDir, api.runtime.version);
           for (const source of discovery.sources) {
             const stored = spool.cursor(source.file);
             let cursor = null;
             try { cursor = stored ? JSON.parse(stored) : null; } catch { cursor = null; }
             const recovered = await recoverJsonl(source.file, cursor);
-            const events = recovered.facts.map((fact, index) => normalizeRuntimeEvent("openclaw", fact, makeEnvelope(fact, "log", `${source.ino}|${recovered.cursor.offset}|${index}`)).event).filter(Boolean);
+            const events = recovered.facts
+              .filter(isOpenClawHookRecoveryFact)
+              .map((fact, index) => normalizeRuntimeEvent("openclaw", fact, makeEnvelope(fact, "log", `${source.ino}|${recovered.cursor.offset}|${index}`)).event)
+              .filter(Boolean);
             if (events.length > 0) spool.enqueueSourceBatch(source.file, JSON.stringify(recovered.cursor), events);
             else spool.advanceCursor(source.file, JSON.stringify(recovered.cursor));
           }
@@ -180,6 +364,7 @@ export default definePluginEntry({
             spool, endpoint: config.endpoint,
             credentialProvider: { current: async () => auth.credential() },
             onUpdate: (directive) => updates.schedule(directive),
+            onAcknowledged: events => connectionNotifier.acknowledged(events),
           });
           runtimeDiagnostics = createRuntimeDiagnosticsDelivery({
             adapter, spool, endpoint: config.endpoint,
@@ -188,33 +373,94 @@ export default definePluginEntry({
             maxRefreshMs: config.diagnosticsMaxRefreshMs,
           });
           runtimeDiagnostics.start();
-          uploadTimer = setInterval(() => runDetached("upload", () => uploader.drain({ maxAttempts: 1 })), 5_000);
+          scheduleRunner=createScheduleRunner({stateDir,endpoint:config.endpoint,runtime:api.runtime,
+            agentId:api.config?.agents?.list?.find(agent=>agent.default)?.id ?? api.config?.agents?.list?.[0]?.id ?? 'main',
+            credentialProvider:{current:async()=>auth.credential()},canExecute:()=>!activation.required()});
+          scheduleRunner.start();
+          contextDelivery=createContextUsageDelivery({collect:()=>collectOpenClawContext({stateDir}),endpoint:config.endpoint,
+            credentialProvider:{current:async()=>auth.credential()}});
+          contextDelivery.start();
+          cronDelivery = createCronDelivery({ collect: () => collectOpenClawCron({ stateDir, runtimeVersion: api.runtime.version, storePath: api.config?.cron?.store }), subscribe: onChange => watchOpenClawCron({ stateDir, runtimeVersion: api.runtime.version, storePath: api.config?.cron?.store, onChange }), endpoint: config.endpoint, credentialProvider: { current: async () => auth.credential() } });
+          cronDelivery.start();
+          usageDelivery = createUsageDelivery({
+            collect: ({ collectedAtMs }) => collectOpenClawUsage({ stateDir, collectedAtMs }),
+            spool, endpoint: config.endpoint,
+            credentialProvider: { current: async () => auth.credential() },
+            intervalMs: config.usageIntervalMs,
+          });
+          usageDelivery.start();
+          uploadPump = createUploadPump({ upload: () => uploader.drain({ maxAttempts: 1 }),
+            onError: error => { if (error instanceof SpoolError) recordSpoolFailure(error); else api.logger.warn("Sidewisp upload failed; disk queue retained"); } });
+          uploadPump.request();
+          uploadTimer = setInterval(() => uploadPump?.request(), 5_000);
           uploadTimer.unref?.();
           await collector.start();
-          await emitHeartbeat();
-          healthTimer = setInterval(() => runDetached("heartbeat", emitHeartbeat), 30_000);
-          healthTimer.unref?.();
+          healthTimer = createHeartbeatSupervisor({ run: emitHeartbeat,
+            permanent: error => error instanceof SpoolError || permanentHeartbeatFailure(error),
+            onError: error => { if (error instanceof SpoolError) recordSpoolFailure(error); api.logger.warn('Sidewisp heartbeat unavailable; recovery state exposed'); },
+          });
+          healthTimer.start();
+          try { authorizationWatch = watch(path.join(stateDir, "sidewisp"), (_event, filename) => {
+            if (["device-authorization.json", "installation.json"].includes(String(filename))) healthTimer?.request();
+          });
+          authorizationWatch.on("error", () => { authorizationWatch?.close(); authorizationWatch = null; });
+          authorizationWatch.unref?.(); } catch { api.logger.warn("Sidewisp authorization watch unavailable; periodic recovery remains enabled"); }
+          failedCollectorStart = false; startupFailures = 0;
           ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
         } catch (error) {
-          if (!(error instanceof SpoolError)) throw error;
-          recordSpoolFailure(error);
-          if (healthTimer) clearInterval(healthTimer);
+          failedCollectorStart = ![401,403].includes(error?.status ?? error?.statusCode);
+          // Every failed start owns cleanup, not only SQLite failures.
+          if (error instanceof SpoolError) recordSpoolFailure(error);
+          if (scheduleRunner) await scheduleRunner.stop().catch(() => {});
+          scheduleRunner = null;
+          authorizationWatch?.close(); authorizationWatch = null;
+          if (uploadPump) await uploadPump.stop(); uploadPump = null;
+          if (healthTimer) await healthTimer.stop();
           healthTimer = null;
           if (uploadTimer) clearInterval(uploadTimer);
           uploadTimer = null;
           if (runtimeDiagnostics) await runtimeDiagnostics.stop().catch(() => {});
           runtimeDiagnostics = null;
+        diagnosticProbes.dispose();
+          if (cronDelivery) await cronDelivery.stop().catch(() => {});
+          cronDelivery = null;
+          if (contextDelivery) await contextDelivery.stop().catch(() => {});
+          contextDelivery=null;
+          if (usageDelivery) await usageDelivery.stop().catch(() => {});
+          usageDelivery = null;
           if (spool) await spool.close().catch(() => {});
           spool = null;
           uploader = null;
-          ctx.logger.error(`Sidewisp collector disabled after spool failure (${error.code}); gateway continues`);
+          await collector.stop().catch(() => {});
+          if (retryableCollectorStartupFailure(error) && !serviceStopping) {
+            const delayMs = collectorStartupRetryDelay(startupFailures++);
+            ctx.logger.error(`Sidewisp collector startup unavailable (${error.code}); retrying in ${delayMs}ms; gateway continues`);
+            startupRetry = setTimeout(() => {
+              startupRetry = null;
+              if (!serviceStopping) void this.start(ctx).catch(() => ctx.logger.error('Sidewisp collector startup blocked; diagnosis required'));
+            }, delayMs);
+            startupRetry.unref?.();
+            return;
+          }
+          if (!(error instanceof SpoolError)) throw error;
+          ctx.logger.error(`Sidewisp collector unavailable after spool failure (${error.code}); gateway continues`);
         }
+        })();
+        try { return await collectorStarting; } finally { collectorStarting = null; }
       },
       async stop() {
-        if (healthTimer) clearInterval(healthTimer);
+        if (collectorStarting) await collectorStarting.catch(() => {});
+        serviceStopping = true; clearTimeout(startupRetry); startupRetry = null;
+        questions.dispose();
+        if(scheduleRunner) await scheduleRunner.stop().catch(()=>{});
+        scheduleRunner=null;
+        authorizationWatch?.close(); authorizationWatch = null;
+        if (uploadPump) await uploadPump.stop(); uploadPump = null;
+        if (healthTimer) await healthTimer.stop();
         healthTimer = null;
         if (uploadTimer) clearInterval(uploadTimer);
         uploadTimer = null;
+        await persistActiveWork();
         if (uploader) {
           try { await uploader.drain({ maxAttempts: 1 }); }
           catch (error) {
@@ -222,6 +468,7 @@ export default definePluginEntry({
             else api.logger.warn("Sidewisp final upload failed during shutdown");
           }
         }
+        await connectionNotifier.stop();
         uploader = null;
         if (runtimeDiagnostics) {
           try { await runtimeDiagnostics.stop(); }
@@ -231,11 +478,42 @@ export default definePluginEntry({
           }
         }
         runtimeDiagnostics = null;
+        diagnosticProbes.dispose();
+        if (cronDelivery) await cronDelivery.stop().catch(() => {});
+          cronDelivery = null;
+          if (contextDelivery) await contextDelivery.stop().catch(() => {});
+        contextDelivery=null;
+        if (usageDelivery) {
+          try { await usageDelivery.stop(); }
+          catch { api.logger.warn("Sidewisp usage delivery stop failed during shutdown"); }
+        }
+        usageDelivery = null;
         if (spool) await spool.close();
         spool = null;
         await collector.stop();
       },
     });
+
+    const localCollectorReady = async () => config.enabled && !activation.required() && Boolean(spool && uploader && healthTimer)
+      && !spoolFailure && collector.isRunning() && healthTimer.ready();
+    registerConnectTool(api, {
+      endpoint: config.endpoint, stateDir,
+      ready: createCollectorReadiness({ enabled: config.enabled, endpoint: config.endpoint, stateDir,
+        localVersion: VERSION, localReady: localCollectorReady, readGatewayStatus: readServingCollectorStatus }),
+    });
+
+    api.registerGatewayMethod("sidewisp.recover", async ({ params, respond }) => {
+      const saved = await createFileCredentialStore({ stateDir }).read();
+      if (saved?.status !== 'active' || params?.installationId !== saved.installationId
+        || params?.stateId !== await collectorStateId(stateDir) || params?.endpoint !== config.endpoint) {
+        respond(false, undefined, { code: 'INVALID_REQUEST', message: 'Sidewisp recovery binding mismatch' }); return;
+      }
+      if (!config.enabled || (serviceStopping && !failedCollectorStart) || !restartCollector || spool || uploader || healthTimer) {
+        respond(true, { status: 'not_available' }); return;
+      }
+      try { await restartCollector(); respond(true, { status: 'started' }); }
+      catch { respond(true, { status: 'unavailable' }); }
+    }, { scope: "operator.write" });
 
     api.registerGatewayMethod("sidewisp.status", async ({ respond }) => {
       respond(true, {
@@ -245,13 +523,21 @@ export default definePluginEntry({
         configured: auth.canSend(),
         endpoint: config.endpoint,
         mode: "zero-llm",
+        recovery: { sameGeneration: true, available: config.enabled && (!serviceStopping || failedCollectorStart) && Boolean(restartCollector) && !spool && !uploader && !healthTimer },
+        connectionReadiness: { ready: await localCollectorReady(), activationRequired: activation.required(), stateId: await collectorStateId(stateDir) },
         installation: auth.status(),
+        heartbeatSupervisor: healthTimer?.status() ?? { state: 'stopped' },
         spool: spool?.health() ?? { status: config.enabled ? "starting" : "disabled" },
         uploader: uploader?.status() ?? { status: "not-started", sent: 0, remaining: 0, at: null },
         runtimeDiagnostics: runtimeDiagnostics?.status() ?? { status: "not-started", at: null },
+        cronMonitoring: cronDelivery?.status() ?? { status: 'not-started', at: null },
+        contextUsage: contextDelivery?.status() ?? {status:'not-started',at:null},
+        usage: usageDelivery?.status() ?? { status: "not-started", at: null, observations: 0 },
         update: updates.status(),
         hooks: hookTelemetry.status(),
         agentEvents: { ...agentEventTelemetry },
+        userTasks: userTaskLifecycle.status(),
+        workReconciliation: workReconciliation.status(),
         failures: { spool: spoolFailure, spoolCount: spoolFailureCount },
         ...(await collector.status()),
       });

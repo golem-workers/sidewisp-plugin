@@ -1,58 +1,115 @@
-# Sidewisp Plugin v0.2.0
+## 0.2.86 — bounded collector startup recovery
 
-Public open-source release of the Sidewisp collector plugin.
+- Retry allowlisted transient collector initialization failures after cleaning up partially started components, with a 5–60 second backoff and one active attempt. Recovery does not restart Gateway or alter credentials, permissions, binding or settings.
+- Explicit stop cancels retries. Authentication refusal, unsupported state and unknown programming errors remain diagnostic failures rather than restart loops.
+- Includes 0.2.85 boot-time user-service autostart and independent-manager clean-exit supervision. This does not establish or repair the cause of an unreachable agent without host evidence.
 
-## License change
+## 0.2.85
 
-Beginning with this release, Sidewisp Plugin is licensed under the GNU Affero
-General Public License v3.0 (`AGPL-3.0-only`) instead of MIT.
-Commercial use and modification are permitted under AGPLv3. Copyleft and
-corresponding-source obligations apply when covered versions are conveyed or
-AGPLv3 section 13 applies. Earlier releases remain governed by the license
-shipped with those releases.
+- Verify and enable boot-time user-manager lingering for the current account before independent preparation or manager activation. Refuse completion when unavailable; no sudo or cross-user changes.
+- Includes 0.2.84 clean-exit restart supervision fix.
 
-The collector remains free to use, modify, and redistribute under AGPLv3.
-Sidewisp's hosted analysis, alerts, and recovery workflows remain separate
-managed services.
+## 0.2.84
 
-## Documentation
+- Keep the independent OpenClaw manager supervised after a handled SIGTERM (clean exit), not only failures. Explicit systemd stop stays stopped.
+- Explicit manager upgrades safely migrate the recognized legacy restart setting while preserving owner configuration and rolling back policy with code on activation failure.
 
-- Added reproducible OpenClaw and Hermes installation guides.
-- Added Codex and Claude Code command-hook adapters, installers, removal
-  scripts, and runtime guides.
-- Documented the boundary between the plugin and the managed service.
-- Added explicit licensing, security-reporting, and contribution guidance.
-- Added package metadata and package-content gates for public distribution.
+## 0.2.83 — interruption-safe managed updates (Linux OpenClaw)
 
-## Contracts and compatibility
+- Run each profile-scoped updater in a separate systemd service, outside both the manager and Gateway control groups. Stopping either service no longer terminates the worker.
+- Resume the same durable authorized checkpoint after worker death or host restart, including the accepted pre-install phase, without another release event or model task. Keep binding/profile checks, kernel serialization, install budget, terminal failure and policy refusal gates.
+- Defer a pre-mutation Gateway outage until the matched Gateway returns; recover an already staged stopped profile without reinstalling an already committed package.
+- Upgrade the private manager once from the verified archive before assigning this release to an existing cohort. Collector-only installation does not replace an old manager.
+- The verified automatic-update cohort is Linux/user-systemd OpenClaw 2026.9.6/2026.9.8. Hermes, Codex and Claude Code telemetry adapters are unchanged; this release does not claim managed-updater support for them or non-systemd hosts.
+- Credential format, telemetry/privacy contract, spool schema, endpoint, bindings, user settings, mobile UI and APK/OTA remain unchanged. A stopped entire VM cannot execute local recovery until the platform resumes it.
 
-- Telemetry contract: `sidewisp.telemetry.v1`; no raw prompts, responses,
-  files, credentials, or tool payloads.
-- Spool schema: version 1; credentials and pending events are stored outside
-  the package and survive reinstall or rollback.
-- OpenClaw: verified with OpenClaw 2026.7.1-2 and plugin API 2026.7.1.
-- Hermes: verified against the upstream hook, state, crash, and recovery
-  interfaces documented in `COMPATIBILITY.md`.
-- Codex: verified against CLI 0.145.0 and its stable lifecycle-hook contract.
-- Claude Code: verified against the official 2.1.218 lifecycle-hook contract.
+## 0.2.82 — connection handoff and preparation failures
 
-## Upgrade and rollback
+- Preserve the required final handoff acknowledgement instead of ending an ordinary setup turn without a final answer.
+- Report durable-preparation admission failures and pre-inspection failures through the existing proof-bound preparation endpoint; never retry or bypass a refused operation.
+- Return cached terminal preparation failures as `blocked` with their cause.
+- Keep per-invitation preparation proofs separate, import matching legacy proofs, and preserve unrelated requests and active installation credentials.
+- No telemetry/schema, UI, animation, signing or monitoring-permission changes. Tester release; native Android and inaccessible owner-agent hosts remain separate acceptance gates.
 
-Install the immutable release tag:
+# 0.2.81 — silent ordinary connection waits
 
-```bash
-openclaw plugins install git:github.com/golem-workers/sidewisp-plugin@v0.2.0 --force
-```
+- Do not send chat notifications for active work, retained work, or ordinary preparation waiting.
+- Keep preparation progress reporting, idle admission, automatic continuation, and durable real-blocker notices unchanged.
+- Keep the connection confirmation gated on a fresh server-accepted heartbeat and the same authorization binding.
 
-Before changing versions, back up the plugin state directory. Roll back by
-installing the previously pinned release without deleting that directory.
-Rolling back to `v0.1.20` also rolls back to that release's MIT license.
+# 0.2.80 — newest accepted health wins
 
-## Verification
+Supersedes staging candidate 0.2.79 before new-enrollment promotion. Mixed batches of fresh and historical health cannot hide the newest accepted heartbeat from the connection reply. All 0.2.79 queue preservation guarantees remain.
 
-- The release archive is accompanied by `SHA256SUMS`.
-- GitHub Actions signs build provenance for the exact archive using OIDC and
-  Sigstore.
-- Verify provenance with
-  `gh attestation verify <archive> --repo golem-workers/sidewisp-plugin`.
-- Report security concerns privately through the repository Security tab.
+# 0.2.79 — binding-isolated connection queues
+
+Before delivery and the first heartbeat, archive foreign-binding events, diagnostics and usage in a private durable SQLite file, then remove them from the live queue. A failed archive preserves the live data. Source cursors and the current binding remain unchanged. The newest health signal gets priority until the current binding has an acknowledged heartbeat; work-event order is unchanged. Connection success requires fresh, post-authorization acknowledged health. No design, preferences, credentials, cron or push contract changes.
+
+# 0.2.78 — reliable enrollment event delivery
+
+Credential reads no longer re-emit filesystem metadata notifications and recursively schedule heartbeats. Successful acknowledged backlog uploads continue in serialized bounded batches. Existing credential format, privacy allowlists, and spool schema are unchanged.
+
+# 0.2.72 — staging native cron bootstrap
+
+The verified plugin provisions the corrected canonical cron helper into configured OpenClaw agent workspaces on collector start. Fresh setup, manager updates and reconnect use the same idempotent path. Only exact legacy canonical bytes are upgraded, with a retained backup. Custom helpers and instructions remain untouched; unknown custom helpers are explicitly unverified. Non-staging endpoints are unchanged. Credentials, cron stores, pause/filter settings and unrelated work are not reset.
+
+# 0.2.65 — staging service-owned recovery observers
+
+- Require the separate immutable OpenClaw 2026.9.8 reply-observer.5 companion before new tester authorization.
+- Route passive hooks to the live service owner, preserving caller grants, hook metadata, source identity and retirement/stop lifecycle.
+- Existing compatible staging plugins stay 0.2.63; deliver only the runtime through independent helpers after actual host idleness.
+- Retain published .4 unchanged. New .5 has six SHA-256 pinned runtime files, including the optional-at-source owner module; unknown source hashes refuse without mutation.
+- No new telemetry, history reconstruction, credentials, spool format, mobile/APK or production changes.
+
+# 0.2.63 — staging safe work previews
+
+- Allow bounded filtered preview for progress, waiting, resumed, completed, stopped and error; never ordinary started or arbitrary tools.
+- Read only allowlisted user-facing questions/structured answers. Label confirmed termination metadata as event reason, never assistant reply.
+- Existing lifecycle correlation/deduplication, credentials and privacy scanner unchanged. Missing/unsafe text remains absent.
+- Automatic final requires OpenClaw dispatcher forwarding appendBeforeDeliver; runtime 2026.9.8 companion repair is canary-scoped and pin-verified.
+
+## 0.2.62 — activation-only manager recovery
+
+- Persist staged/mutated intent before cold activation of an already installed target, so an interrupted helper can enter the existing recovery path without reinstalling the package.
+- Deliver through an explicit private-manager upgrade from the new archive; upgrading the collector alone does not replace the independent manager. Published 0.2.61 artifacts remain unchanged.
+- Idle admission, terminal-failure revision checks, binding verification and command permissions remain unchanged.
+
+## 0.2.61 — attachment send followed by ordinary automatic final
+
+- A confirmed source `message(send)` without assistant text no longer closes work implicitly. It records progress until the ordinary automatic final arrives; explicit `final=true` and legacy implicit text finals retain their semantics.
+- Completion still uses exact inbound/work correlation and existing terminal deduplication. No event replay, transcript reconstruction, or delivery-derived completion.
+- Message-preview privacy policy is unchanged: sensitive text still completes without a preview; attachments, captions, targets and tool results are not inspected.
+
+## 0.2.60 — exact ordinary automatic-final correlation
+
+- Resolve final reply observers using their captured host inbound message identity when ordinary dispatch has no runId. Never infer completion from message delivery or the latest session task.
+- Preserve work statuses, terminal deduplication, safe preview filtering, binding, cron and notification contracts.
+- Companion scoped OpenClaw hotfix forwards the existing Telegram session key to plugin message-delivery observers; it does not create lifecycle events.
+
+## 0.2.59 — complete ordinary-name/path qualification
+
+- Qualify readable CamelCase identifiers and path components before the opaque-key heuristic; retain known-key, assignment and random-key protection.
+- Supersedes targeted 0.2.58 before working-agent activation.
+
+## 0.2.58 — ordinary reply previews
+
+- Preserve ordinary words, cron names, paths and links in message previews while omitting credential values, known token formats and opaque keys.
+- Keep plugin and API preview policy aligned. Automatic final observation also requires the separately published OpenClaw 2026.9.8 reply-observer hotfix.
+- No work status, binding, cron, or notification changes.
+
+## 0.2.57 — optional safe message preview
+
+Agent activity can include a single-line messagePreview of at most 160 characters. Missing or sensitive messages omit the field. Work statuses, notifications, native cron and connection semantics are unchanged. Requires the compatible API release before activation.
+
+## 0.2.56 — native SQLite cron inventory
+
+- Read the authoritative OpenClaw shared SQLite cron partition read-only, including WAL and runtime state.
+- Preserve legacy JSON support only when SQLite is absent; corrupted or incomplete inventories fail closed.
+- Observe SQLite changes without uploading unrelated shared-state changes.
+- Preserve credentials, binding, scheduler and agent configuration.
+
+# Sidewisp Plugin v0.2.54
+
+Empty release for measuring event-driven automatic update latency.
+Runtime code and behavior are unchanged from immutable v0.2.53.
+Independent update manager remains pinned to v0.2.53; no re-bootstrap is required.

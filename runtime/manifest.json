@@ -1,0 +1,67 @@
+{
+  "schema": "openclaw.reply-observer-hotfix.v1",
+  "version": "2026.9.8-reply-observer.5",
+  "runtimeVersion": "2026.9.8",
+  "sourceBase": "c38bf0ff",
+  "files": [
+    {
+      "path": "dist/dispatch-from-config.finalize-BttBCKPU.mjs",
+      "beforeSha256": "7278bcc042d7e9ea1ba8d4fb35ccb625b80e75be0e6284fe681f4c4b34b992a9",
+      "afterSha256": "7278bcc042d7e9ea1ba8d4fb35ccb625b80e75be0e6284fe681f4c4b34b992a9",
+      "supportedBeforeSha256": [
+        "7278bcc042d7e9ea1ba8d4fb35ccb625b80e75be0e6284fe681f4c4b34b992a9",
+        "d63a80eb2261e992f2f869e539e309f89abe7a0d7485f9f39f35f117dee7452f"
+      ]
+    },
+    {
+      "path": "dist/delivery.runtime-D3Jl_drC.mjs",
+      "beforeSha256": "c5991ed25797b5cd88a27e952eb849fa0438269c3440d4e149d93b8a743806ff",
+      "afterSha256": "c5991ed25797b5cd88a27e952eb849fa0438269c3440d4e149d93b8a743806ff",
+      "supportedBeforeSha256": [
+        "837baaad16103ff0d6c8ec48e1144871a675948768dc2cc970761ae02df3ff15",
+        "837baaad16103ff0d6c8ec48e1144871a675948768dc2cc970761ae02df3ff15"
+      ]
+    },
+    {
+      "path": "dist/package-update-activation-recovery.mjs",
+      "beforeSha256": "abee5ef54c04682c2633b6e137b1e978b74492512e0de7a95b08d27ebf3bb903",
+      "afterSha256": "abee5ef54c04682c2633b6e137b1e978b74492512e0de7a95b08d27ebf3bb903",
+      "supportedBeforeSha256": [
+        "df752055e65824f94abb2f4fc8974a7543f9821540a047c60bd6f84a54608d91",
+        "e08dfc1fb3ba7962f9e01d7a6770117c6cd77406b3fa4f7ba94788a670030ba0"
+      ]
+    },
+    {
+      "path": "dist/hook-runner-global-CwCyBBBr.mjs",
+      "beforeSha256": "80e17f859584f0c34d424e89e1702f60af02b4d0ec39e494ee7bcab1f1ba3ca7",
+      "afterSha256": "5828672c2f8bdd9c7cc61ce94e77fd6ce3c9684cdfe8bbe0ecb82345bcad7798"
+    },
+    {
+      "path": "dist/services-9PyB9Rj_.mjs",
+      "beforeSha256": "c3ba4ca52d793606172b449bfea3b3da735d94fae9b4fcbd99e2789c6943285a",
+      "afterSha256": "083ad5ab2a9c424e5f2edd64468036c39084255d8d964219ab4c48b7ef8a9832"
+    },
+    {
+      "path": "dist/service-hook-owners.mjs",
+      "beforeSha256": null,
+      "afterSha256": "2089847399eac94e136e1d118570c7a12dea9cd2ccf60e611a145fad05484592"
+    }
+  ],
+  "stockFiles": [
+    {
+      "path": "dist/dispatch-from-config.finalize-BttBCKPU.mjs",
+      "beforeSha256": "d63a80eb2261e992f2f869e539e309f89abe7a0d7485f9f39f35f117dee7452f",
+      "afterSha256": "7278bcc042d7e9ea1ba8d4fb35ccb625b80e75be0e6284fe681f4c4b34b992a9"
+    },
+    {
+      "path": "dist/delivery.runtime-D3Jl_drC.mjs",
+      "beforeSha256": "837baaad16103ff0d6c8ec48e1144871a675948768dc2cc970761ae02df3ff15",
+      "afterSha256": "c5991ed25797b5cd88a27e952eb849fa0438269c3440d4e149d93b8a743806ff"
+    },
+    {
+      "path": "dist/package-update-activation-recovery.mjs",
+      "beforeSha256": "e08dfc1fb3ba7962f9e01d7a6770117c6cd77406b3fa4f7ba94788a670030ba0",
+      "afterSha256": "abee5ef54c04682c2633b6e137b1e978b74492512e0de7a95b08d27ebf3bb903"
+    }
+  ]
+}
