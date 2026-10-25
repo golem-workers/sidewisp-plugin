@@ -145,7 +145,7 @@ export default definePluginEntry({
     let authorizationWatch = null;
     const connectionNotifier = createConnectionNotifier({ stateDir, endpoint: config.endpoint, send: createRuntimeTelegramSender(api), onError: () => api.logger.warn("Sidewisp connection reply unavailable; will retry after next accepted health") });
     let startupRetry = null, serviceStopping = false, startupFailures = 0;
-    let restartCollector = null, collectorStarting = null;
+    let restartCollector = null, collectorStarting = null, failedCollectorStart = false;
     let healthTimer = null;
     let spoolFailure = null;
     let spoolFailureCount = 0;
@@ -405,9 +405,10 @@ export default definePluginEntry({
           });
           authorizationWatch.on("error", () => { authorizationWatch?.close(); authorizationWatch = null; });
           authorizationWatch.unref?.(); } catch { api.logger.warn("Sidewisp authorization watch unavailable; periodic recovery remains enabled"); }
-          startupFailures = 0;
+          failedCollectorStart = false; startupFailures = 0;
           ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
         } catch (error) {
+          failedCollectorStart = ![401,403].includes(error?.status ?? error?.statusCode);
           // Every failed start owns cleanup, not only SQLite failures.
           if (error instanceof SpoolError) recordSpoolFailure(error);
           if (scheduleRunner) await scheduleRunner.stop().catch(() => {});
@@ -507,7 +508,7 @@ export default definePluginEntry({
         || params?.stateId !== await collectorStateId(stateDir) || params?.endpoint !== config.endpoint) {
         respond(false, undefined, { code: 'INVALID_REQUEST', message: 'Sidewisp recovery binding mismatch' }); return;
       }
-      if (!config.enabled || serviceStopping || !restartCollector || spool || uploader || healthTimer) {
+      if (!config.enabled || (serviceStopping && !failedCollectorStart) || !restartCollector || spool || uploader || healthTimer) {
         respond(true, { status: 'not_available' }); return;
       }
       try { await restartCollector(); respond(true, { status: 'started' }); }
@@ -522,7 +523,7 @@ export default definePluginEntry({
         configured: auth.canSend(),
         endpoint: config.endpoint,
         mode: "zero-llm",
-        recovery: { sameGeneration: true, available: config.enabled && !serviceStopping && Boolean(restartCollector) && !spool && !uploader && !healthTimer },
+        recovery: { sameGeneration: true, available: config.enabled && (!serviceStopping || failedCollectorStart) && Boolean(restartCollector) && !spool && !uploader && !healthTimer },
         connectionReadiness: { ready: await localCollectorReady(), activationRequired: activation.required(), stateId: await collectorStateId(stateDir) },
         installation: auth.status(),
         heartbeatSupervisor: healthTimer?.status() ?? { state: 'stopped' },
