@@ -35,7 +35,7 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
   };
   const read = async () => {
     const row = JSON.parse(await fs.readFile(file, 'utf8'));
-    if (row.endpoint !== url.origin || !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(row.id)
+    if (!row || row.endpoint !== url.origin || !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(row.id)
       || !/^sw_device_[A-Za-z0-9_-]{43}$/.test(row.deviceSecret)) throw new Error('invalid_device_state');
     return row;
   };
@@ -44,7 +44,10 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       if (!/^sw_pair_[A-Za-z0-9_-]{32}$/.test(id)) throw new Error('invalid_device_request');
       await fs.mkdir(directory, {recursive:true,mode:0o700});
       let state;
-      try { const pending=await read();if(pending.id===id)state=pending; }catch(error){if(error.code!=='ENOENT')throw error;}
+      // Progress belongs to this invitation. Invalid old authorization must
+      // not suppress its failure report; begin/poll still reject that state.
+      try { const pending=await read();if(pending.id===id)state=pending; }
+      catch(error){if(error.code!=='ENOENT' && !(error instanceof SyntaxError) && error.message!=='invalid_device_state')throw error;}
       if(!state)state=(await readPrepared(id))?.row;
       if (state && (state.id!==id || state.endpoint!==url.origin)) state=null;
       if (!state) {

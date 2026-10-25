@@ -38,6 +38,27 @@ test('device client rejects insecure endpoints', () => {
   }
 });
 
+test('new invitation can report a failure despite unrelated invalid authorization state without repairing it', async t => {
+  for (const stale of ['{broken', 'null', JSON.stringify({id:'sw_pair_'+'o'.repeat(32),endpoint:'https://other.example',deviceSecret:'sw_device_'+'o'.repeat(43)})]) {
+    const stateDir=await fs.mkdtemp(path.join(os.tmpdir(),'sw-report-stale-'));
+    t.after(()=>fs.rm(stateDir,{recursive:true,force:true}));
+    const file=path.join(stateDir,'sidewisp/device-authorization.json');
+    await fs.mkdir(path.dirname(file));await fs.writeFile(file,stale,{mode:0o600});
+    const id='sw_pair_'+'n'.repeat(32), sent=[];
+    const client=createDeviceAuthorizationClient({endpoint:'https://example.com',stateDir,fetchImpl:async(url,options)=>{
+      assert.equal(url.pathname,'/v1/device-authorizations/preparation');
+      sent.push(JSON.parse(options.body));return Response.json({});
+    }});
+    await client.reportPreparation({id,stage:'inspecting'});
+    await client.reportPreparation({id,stage:'blocked',reasonCode:'preparation_failed'});
+    assert.deepEqual(sent.map(row=>row.stage),['inspecting','blocked']);
+    assert.equal(sent[0].id,id);assert.equal(sent[0].deviceSecret,sent[1].deviceSecret);
+    assert.equal(await fs.readFile(file,'utf8'),stale);
+    await assert.rejects(client.begin({id,runtime:'openclaw'}));
+    assert.equal(sent.length,2);
+  }
+});
+
 test('rejected old binding can reconnect only after approval; outages and healthy bindings preserve credentials', async () => {
   for (const runtime of ['openclaw', 'hermes']) {
     const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-reconnect-'));
