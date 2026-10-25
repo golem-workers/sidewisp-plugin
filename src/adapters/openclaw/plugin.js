@@ -5,6 +5,7 @@ import { collectOpenClawCron, watchOpenClawCron } from '../../cron/openclaw.js';
 import { createCronDelivery } from '../../delivery/cron.js';
 import { createLocalWorkSnapshotRequest } from "./local-work-snapshot.js";
 import { createOpenClawWorkReconciliation } from "./work-reconciliation.js";
+import { retryableCollectorStartupFailure, collectorStartupRetryDelay } from '../../core/startup-recovery.js';
 import { createHeartbeatSupervisor, permanentHeartbeatFailure } from '../../core/heartbeat-supervisor.js';
 import { createScheduleRunner } from "../../schedules/runner.js";
 import { createActivationReadiness } from './activation-readiness.js';
@@ -141,7 +142,7 @@ export default definePluginEntry({
     let uploadPump = null;
     let authorizationWatch = null;
     const connectionNotifier = createConnectionNotifier({ stateDir, endpoint: config.endpoint, send: createRuntimeTelegramSender(api), onError: () => api.logger.warn("Sidewisp connection reply unavailable; will retry after next accepted health") });
-    let startupRetry = null, serviceStopping = false;
+    let startupRetry = null, serviceStopping = false, startupFailures = 0;
     let healthTimer = null;
     let spoolFailure = null;
     let spoolFailureCount = 0;
@@ -398,6 +399,7 @@ export default definePluginEntry({
           });
           authorizationWatch.on("error", () => { authorizationWatch?.close(); authorizationWatch = null; });
           authorizationWatch.unref?.(); } catch { api.logger.warn("Sidewisp authorization watch unavailable; periodic recovery remains enabled"); }
+          startupFailures = 0;
           ctx.logger.info(`Sidewisp collector ${VERSION} started (${auth.canSend() ? "configured" : "awaiting setup"})`);
         } catch (error) {
           // Every failed start owns cleanup, not only SQLite failures.
@@ -423,12 +425,18 @@ export default definePluginEntry({
           spool = null;
           uploader = null;
           await collector.stop().catch(() => {});
+          if (retryableCollectorStartupFailure(error) && !serviceStopping) {
+            const delayMs = collectorStartupRetryDelay(startupFailures++);
+            ctx.logger.error(`Sidewisp collector startup unavailable (${error.code}); retrying in ${delayMs}ms; gateway continues`);
+            startupRetry = setTimeout(() => {
+              startupRetry = null;
+              if (!serviceStopping) void this.start(ctx).catch(() => ctx.logger.error('Sidewisp collector startup blocked; diagnosis required'));
+            }, delayMs);
+            startupRetry.unref?.();
+            return;
+          }
           if (!(error instanceof SpoolError)) throw error;
           ctx.logger.error(`Sidewisp collector unavailable after spool failure (${error.code}); gateway continues`);
-          if (error.code === 'locked' && !serviceStopping) {
-            startupRetry = setTimeout(() => { startupRetry = null; if (!serviceStopping) void this.start(ctx).catch(() => {}); }, 5000);
-            startupRetry.unref?.();
-          }
         }
       },
       async stop() {
