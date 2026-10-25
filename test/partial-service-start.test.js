@@ -10,7 +10,7 @@ const block=source.slice(source.indexOf('    api.registerService({'),source.inde
 function harness(failure) {
  const running=new Set(),timers=new Set();let service;
  const delivery=name=>({start(){running.add(name)},async stop(){running.delete(name)}});
- const scope={startupRetry:null,serviceStopping:false,startupFailures:0,retryableCollectorStartupFailure,collectorStartupRetryDelay,spoolFailure:null,questions:{dispose(){}},activation:{required:()=>false,serviceStarted(){}},createHeartbeatSupervisor,permanentHeartbeatFailure,adapter:{},api:{runtime:{version:'2026.10.5'},registerService(s){service=s},logger:{warn(){}}},config:{enabled:true,endpoint:'https://example.test'},auth:{load:async()=>{},canSend:()=>true,credential:()=>null},setupToken:null,stateDir:'/test',spool:null,uploader:null,runtimeDiagnostics:null,contextDelivery:null,cronDelivery:null,usageDelivery:null,scheduleRunner:null,healthTimer:null,uploadTimer:null,uploadPump:null,authorizationWatch:null,connectionNotifier:{stop:async()=>{},acknowledged(){}},createUploadPump,watch:()=>({on(){},unref(){},close(){}}),
+ const scope={restartCollector:null,collectorStarting:null,startupRetry:null,serviceStopping:false,startupFailures:0,retryableCollectorStartupFailure,collectorStartupRetryDelay,spoolFailure:null,questions:{dispose(){}},activation:{required:()=>false,serviceStarted(){}},createHeartbeatSupervisor,permanentHeartbeatFailure,adapter:{},api:{runtime:{version:'2026.10.5'},registerService(s){service=s},logger:{warn(){}}},config:{enabled:true,endpoint:'https://example.test'},auth:{load:async()=>{},canSend:()=>true,credential:()=>null},setupToken:null,stateDir:'/test',spool:null,uploader:null,runtimeDiagnostics:null,contextDelivery:null,cronDelivery:null,usageDelivery:null,scheduleRunner:null,healthTimer:null,uploadTimer:null,uploadPump:null,authorizationWatch:null,connectionNotifier:{stop:async()=>{},acknowledged(){}},createUploadPump,watch:()=>({on(){},unref(){},close(){}}),
  openSpool:async()=>({cursor:()=>null,close:async()=>running.delete('spool')}),path:{join:(...p)=>p.join('/')},parseOpenClawActiveWorkCursor:()=>[],userTaskLifecycle:{restoreActiveWork(){}},HOOK_EVENT_SOURCE:'hooks',discoverOpenClawSources:async()=>({sources:[]}),createUploader:()=>({drain:async()=>{}}),createRuntimeDiagnosticsDelivery:()=>delivery('diagnostics'),createContextUsageDelivery:()=>delivery('context'),createCronDelivery:()=>delivery('cron'),collectOpenClawCron(){},watchOpenClawCron(){},createUsageDelivery:()=>delivery('usage'),createScheduleRunner:()=>delivery('schedules'),diagnosticProbes:{dispose(){}},updates:{},collector:{start:async()=>{if(failure==='start')throw Error('transient-start')},stop:async()=>{}},emitHeartbeat:async()=>{if(failure==='heartbeat')throw Error('transient-heartbeat')},setInterval(fn){const t={fn};timers.add(t);return t},clearInterval(t){timers.delete(t)},runDetached(){},SpoolError:class extends Error{},recordSpoolFailure(){},VERSION:'0.2.33',persistActiveWork:async()=>{},collectOpenClawContext(){},collectOpenClawUsage(){}};
  new Function('scope','with(scope){'+block+'}')(scope);
  return {service,running,timers,scope};
@@ -104,4 +104,13 @@ test('authorization refusal and unsupported state do not schedule automatic star
 test('explicit authorization rejection wins over a generic OS-style error code',async()=>{
  const h=harness(null);h.scope.openSpool=async()=>{throw Object.assign(Error('forbidden'),{code:'EACCES',status:403})};
  await assert.rejects(h.service.start({logger:{info(){},error(){}}}),/forbidden/);assert.equal(h.scope.startupRetry,null);
+});
+
+test('same-context recovery after a non-retryable startup failure is single-flight',async()=>{
+ const h=harness(null);let attempts=0;
+ const open=h.scope.openSpool;h.scope.openSpool=async(...args)=>{if(++attempts===1)throw Object.assign(Error('injected transient liveness fault'),{code:'EFAULT'});await new Promise(r=>setImmediate(r));return open(...args);};
+ await assert.rejects(h.service.start({logger:{info(){},error(){}}}),/injected/);
+ await Promise.all([h.scope.restartCollector(),h.scope.restartCollector()]);
+ await new Promise(r=>setImmediate(r));assert.equal(attempts,2);assert.equal(h.timers.size,1);assert.equal(h.scope.healthTimer.ready(),true);
+ await h.service.stop();assert.equal(h.timers.size,0);
 });

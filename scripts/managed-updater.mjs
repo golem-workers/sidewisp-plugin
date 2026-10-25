@@ -4,6 +4,9 @@ import {readFileSync,writeFileSync,renameSync,existsSync} from 'node:fs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
+import {realpathSync} from 'node:fs';
+import {maintenancePlan} from '../src/update/collector-maintenance.js';
 import {fileURLToPath} from 'node:url';
 import {workerActive,startUpdateWorker,recoverableDirective} from '../src/update/worker.js';
 import {createFileCredentialStore} from '../src/auth/credentials.js';
@@ -43,6 +46,17 @@ async function tick(){
  const recovering=!!recovery;
  if(journal&&!recovery&&!['completed','failed'].includes(journal.status))throw Error('UPDATE_RECOVERY_REVIEW_REQUIRED');
  // Already-authorized intent (including pre-mutation) resumes without SSE.
+ // Keep the completed update immutable; a separate profile-scoped worker
+ // maintains the installed plugin even with no new server directive.
+ const maintenanceFile=path.join(directory,'collector-recovery.json');
+ const plan=maintenancePlan({current,attempt,journal,baseline:read(path.join(directory,'manager-baseline.json')),credential,endpoint:config.endpoint,stateId:createHash('sha256').update(realpathSync(config.stateDir)).digest('hex'),state:read(maintenanceFile)??{}});
+ if(!stopping&&!await workerActive({stateDir:config.stateDir,run:exec})){
+  save(maintenanceFile,plan.state);
+  if(plan.due&&!recovery&&(!pendingDirective||!shouldApply({directive:pendingDirective,currentVersion:current?.version,currentReady:!!current?.connectionReadiness?.ready,attempt}))){
+   save(maintenanceFile,{...plan.state,nextAttemptAtMs:Date.now()+180000});
+   await startUpdateWorker({stateDir:config.stateDir,directive:config,helper:fileURLToPath(new URL('./collector-recovery.mjs',import.meta.url)),run:exec});return;
+  }
+ }
  const directive=recovery??pendingDirective;
  if(stopping||(!recovering&&credentialKey(credential)!==streamCredential)||!directive)return;
  if(await workerActive({stateDir:config.stateDir,run:exec}))return;

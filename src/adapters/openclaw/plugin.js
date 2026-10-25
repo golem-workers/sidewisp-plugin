@@ -50,9 +50,10 @@ import {
   recoverJsonl,
   stableOpenClawEventId,
 } from "./recovery.js";
+import { adoptInstalledManager } from '../../update/manager-adoption.js';
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.85";
+const VERSION = "0.2.87";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
@@ -64,6 +65,7 @@ export default definePluginEntry({
     const setupToken = readSetupToken(api.pluginConfig);
     const activation = createActivationReadiness(api.runtime.version);
     const stateDir = api.runtime.state.resolveStateDir();
+    if(config.enabled)void adoptInstalledManager({stateDir,endpoint:config.endpoint}).catch(()=>api.logger.warn("Sidewisp manager adoption unavailable; existing manager preserved"));
     const updates = createUpdateScheduler({ stateDir, logger: api.logger, currentVersion: VERSION });
     const auth = createEnrollmentManager({
       endpoint: config.endpoint,
@@ -143,6 +145,7 @@ export default definePluginEntry({
     let authorizationWatch = null;
     const connectionNotifier = createConnectionNotifier({ stateDir, endpoint: config.endpoint, send: createRuntimeTelegramSender(api), onError: () => api.logger.warn("Sidewisp connection reply unavailable; will retry after next accepted health") });
     let startupRetry = null, serviceStopping = false, startupFailures = 0;
+    let restartCollector = null, collectorStarting = null;
     let healthTimer = null;
     let spoolFailure = null;
     let spoolFailureCount = 0;
@@ -322,6 +325,9 @@ export default definePluginEntry({
     api.registerService({
       id: "sidewisp-collector",
       async start(ctx) {
+        restartCollector = () => this.start(ctx);
+        if (collectorStarting) return collectorStarting;
+        collectorStarting = (async () => {
         serviceStopping = false;
         clearTimeout(startupRetry); startupRetry = null;
         activation.serviceStarted(ctx);
@@ -438,8 +444,11 @@ export default definePluginEntry({
           if (!(error instanceof SpoolError)) throw error;
           ctx.logger.error(`Sidewisp collector unavailable after spool failure (${error.code}); gateway continues`);
         }
+        })();
+        try { return await collectorStarting; } finally { collectorStarting = null; }
       },
       async stop() {
+        if (collectorStarting) await collectorStarting.catch(() => {});
         serviceStopping = true; clearTimeout(startupRetry); startupRetry = null;
         questions.dispose();
         if(scheduleRunner) await scheduleRunner.stop().catch(()=>{});
@@ -492,6 +501,19 @@ export default definePluginEntry({
         localVersion: VERSION, localReady: localCollectorReady, readGatewayStatus: readServingCollectorStatus }),
     });
 
+    api.registerGatewayMethod("sidewisp.recover", async ({ params, respond }) => {
+      const saved = await createFileCredentialStore({ stateDir }).read();
+      if (saved?.status !== 'active' || params?.installationId !== saved.installationId
+        || params?.stateId !== await collectorStateId(stateDir) || params?.endpoint !== config.endpoint) {
+        respond(false, undefined, { code: 'INVALID_REQUEST', message: 'Sidewisp recovery binding mismatch' }); return;
+      }
+      if (!config.enabled || serviceStopping || !restartCollector || spool || uploader || healthTimer) {
+        respond(true, { status: 'not_available' }); return;
+      }
+      try { await restartCollector(); respond(true, { status: 'started' }); }
+      catch { respond(true, { status: 'unavailable' }); }
+    }, { scope: "operator.write" });
+
     api.registerGatewayMethod("sidewisp.status", async ({ respond }) => {
       respond(true, {
         plugin: "sidewisp",
@@ -500,6 +522,7 @@ export default definePluginEntry({
         configured: auth.canSend(),
         endpoint: config.endpoint,
         mode: "zero-llm",
+        recovery: { sameGeneration: true, available: config.enabled && !serviceStopping && Boolean(restartCollector) && !spool && !uploader && !healthTimer },
         connectionReadiness: { ready: await localCollectorReady(), activationRequired: activation.required(), stateId: await collectorStateId(stateDir) },
         installation: auth.status(),
         heartbeatSupervisor: healthTimer?.status() ?? { state: 'stopped' },

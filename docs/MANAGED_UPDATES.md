@@ -35,4 +35,32 @@ remain disabled; the removed 15-minute GitHub timer is not restored.
 
 The external helper obtains `diagnostics.lanes` from the serving OpenClaw Gateway. All host lane and dynamic active/queued counts must be valid zeroes; missing/refused diagnostics fails closed. Collector user-task cursors can retain historical interrupted synthetic requester wakes and are telemetry, not installation authority. The installer and reload still enforce actual retained plugin-generation work; the current setup turn is never subtracted, and no task is stopped or Gateway restarted.
 
-Existing independent managers keep their pinned private code during ordinary enrollment. For an explicitly authorized manager code upgrade, withdraw its signed target and let any helper finish naturally; then run the verified release `scripts/install-update-manager.mjs <endpoint> --upgrade` with the explicit active profile environment. It refuses an active helper lock or an owner-modified entrypoint, preserves the unit/config/credentials, and restarts only the independent manager. A new plugin release alone does not upgrade the manager copy.
+## Continuous recovery (0.2.87)
+
+A fresh, supported signed manager is sufficient to receive a migration-proven
+update even when the collector has stopped reporting. This does not attest
+collector health: completion still requires fresh target collector telemetry,
+correlated manager completion, stability and the expected native reply.
+
+After a successful connection, the manager maintains the already installed
+plugin independently of update directives. After two minutes of failed local
+readiness it queues one profile-scoped recovery worker outside the Gateway and
+manager cgroups. The worker verifies the saved binding and installed version,
+requires real host idleness, and first restarts a failed collector in its original
+service context through a binding-checked local operator RPC. When that path is
+unavailable it uses the supported plugin reload. An explicit
+cold-activation requirement uses the existing suspension-fenced activation.
+It never reinstalls a different package, edits settings, overrides a disabled
+plugin, discards data, reopens a completed journal, or bypasses retained work.
+Failures back off to at most one attempt per fifteen minutes. Failed/interrupted
+update transactions remain separate and are not silently retried.
+
+A delivered 0.2.87 package can upgrade an older canonical independent manager
+without a model task. A separate systemd worker waits for any update helper to
+release its kernel lock, then invokes the existing manager installer. It
+preserves unit customizations, manager configuration and credentials; an
+unrecognized owner entrypoint or restart policy still requires diagnosis.
+Fresh setup continues to install the manager before completing connection.
+
+Both silent channels still require an independent host access path; manager-only
+delivery is not claimed to explain or repair a completely unreachable host.
