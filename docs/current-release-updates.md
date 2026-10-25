@@ -15,3 +15,7 @@ Publish an immutable GitHub tag/archive after the full plugin checks. Verify tha
 The controller uses a full source/runtime/manager cohort, counts stability from first confirmed ready target, resets on loss of readiness, requires a second fresh observation and exact native acceptance reply, and admits bounded batches (default 2, max concurrency 2). Historical quarantined hosts are not silently retried. Offline hosts receive the current release when they return; unsupported/offline/recovery-required is never reported as completion.
 
 The mobile app contract and notification/enrollment code are unchanged. Validate physical phone push separately when a registered test device is available; backend regressions do not establish a visible push on a phone.
+
+Accepted directives now persist in a profile/binding/credential-scoped pending
+release file before worker dispatch. Disconnecting the event stream does not
+erase the pending target. See [sleep/resume behavior](SLEEP_WAKE_UPDATES.md).

@@ -1,3 +1,4 @@
+import {createTransportDeadline} from '../transport/deadline.js';
 import {randomBytes} from 'node:crypto';
 import {signBatch} from '../delivery/uploader.js';
 import {validUpdateDirective,isNewerVersion} from './directive.js';
@@ -8,11 +9,14 @@ export async function updateHeartbeat({endpoint,credential,report,fetchImpl=fetc
  const body=Buffer.from(JSON.stringify({schema:'sidewisp.update-heartbeat.v1',runtime:'openclaw',...report}));
  const timestamp=Math.floor(Date.now()/1000).toString(),nonce=randomBytes(16).toString('base64url');
  const signature=signBatch({secret:credential.secret,timestamp,nonce,body});
- const response=await fetchImpl(url,{method:'POST',redirect:'error',body,signal:AbortSignal.timeout(15000),headers:{'content-type':'application/json',authorization:`Sidewisp ${credential.installationId}:${signature}`,'x-sidewisp-algorithm':'hmac-sha256-v1','x-sidewisp-timestamp':timestamp,'x-sidewisp-nonce':nonce}});
+ const deadline=createTransportDeadline({timeoutMs:15000});
+ try {
+ const response=await fetchImpl(url,{method:'POST',redirect:'error',body,signal:deadline.signal,headers:{'content-type':'application/json',authorization:`Sidewisp ${credential.installationId}:${signature}`,'x-sidewisp-algorithm':'hmac-sha256-v1','x-sidewisp-timestamp':timestamp,'x-sidewisp-nonce':nonce}});
  if(!response.ok)throw Error([401,403].includes(response.status)?'CREDENTIAL_REJECTED':'CONTROL_UNAVAILABLE');
  const result=await response.json();
  if(result.schema!=='sidewisp.update-heartbeat.v1'||result.installationId!==credential.installationId||!(result.update===null||validManagedDirective(result.update)))throw Error('INVALID_CONTROL_RESPONSE');
  return result.update;
+ }finally{deadline.close();}
 }
 export function shouldApply({directive,currentVersion,attempt,active=false,currentReady=true}) {
  if(active||!validManagedDirective(directive))return false;

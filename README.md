@@ -175,3 +175,7 @@ This is an OSI-approved open-source license. Commercial use and modification
 are permitted. Copyleft and corresponding-source obligations apply when
 covered versions are conveyed or AGPLv3 section 13 applies. Earlier MIT
 releases remain governed by the license distributed with those releases.
+
+Sleep/resume transport recovery and durable deferred-release behavior are described in
+[Sleep, reconnect and deferred updates](docs/SLEEP_WAKE_UPDATES.md), including the
+remaining Hermes and real-VM verification gates.

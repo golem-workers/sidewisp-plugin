@@ -1,3 +1,4 @@
+import {createTransportDeadline} from '../transport/deadline.js';
 import {watch,readFileSync} from 'node:fs';
 import path from 'node:path';
 import {randomBytes} from 'node:crypto';
@@ -6,16 +7,16 @@ import {signBatch} from '../delivery/uploader.js';
 import {validManagedDirective} from './manager.js';
 
 // A fresh signed request on each connection; no release/version polling.
-export async function consumeUpdateEvents({endpoint,credential,report,onDirective,signal,fetchImpl=fetch,connectTimeoutMs=15000,idleTimeoutMs=90000}) {
+export async function consumeUpdateEvents({endpoint,credential,report,onDirective,signal,fetchImpl=fetch,connectTimeoutMs=15000,idleTimeoutMs=90000,deadlineFactory=createTransportDeadline}) {
  const url=new URL('/v1/installations/update-events',endpoint);
  if(url.protocol!=='https:'||url.username||url.password)throw Error('INVALID_ENDPOINT');
  const body=Buffer.from(JSON.stringify({schema:'sidewisp.update-heartbeat.v1',runtime:'openclaw',...report}));
  const timestamp=Math.floor(Date.now()/1000).toString(),nonce=randomBytes(16).toString('base64url');
  const signature=signBatch({secret:credential.secret,timestamp,nonce,body});
- const transport=new AbortController();let deadline=setTimeout(()=>transport.abort(),connectTimeoutMs);
- const reset=()=>{clearTimeout(deadline);deadline=setTimeout(()=>transport.abort(),idleTimeoutMs);};
+ const transport=deadlineFactory({timeoutMs:connectTimeoutMs,signal});
+ const reset=()=>transport.reset(idleTimeoutMs);
  try{
- const response=await fetchImpl(url,{method:'POST',redirect:'error',body,signal:signal?AbortSignal.any([signal,transport.signal]):transport.signal,headers:{'content-type':'application/json',accept:'text/event-stream',authorization:`Sidewisp ${credential.installationId}:${signature}`,'x-sidewisp-algorithm':'hmac-sha256-v1','x-sidewisp-timestamp':timestamp,'x-sidewisp-nonce':nonce}});
+ const response=await fetchImpl(url,{method:'POST',redirect:'error',body,signal:transport.signal,headers:{'content-type':'application/json',accept:'text/event-stream',authorization:`Sidewisp ${credential.installationId}:${signature}`,'x-sidewisp-algorithm':'hmac-sha256-v1','x-sidewisp-timestamp':timestamp,'x-sidewisp-nonce':nonce}});
  if(!response.ok)throw Error([401,403].includes(response.status)?'CREDENTIAL_REJECTED':'CONTROL_UNAVAILABLE');
  if(!response.headers.get('content-type')?.startsWith('text/event-stream')||!response.body)throw Error('INVALID_EVENT_STREAM');
  reset();
@@ -32,7 +33,7 @@ export async function consumeUpdateEvents({endpoint,credential,report,onDirectiv
   }
  }
  if(!signal?.aborted)throw Error('CONTROL_DISCONNECTED');
- }finally{clearTimeout(deadline);transport.abort();}
+ }finally{transport.close();}
 }
 
 export async function maintainUpdateEvents({connect,onError=()=>{},signal,sleep=delay}) {
