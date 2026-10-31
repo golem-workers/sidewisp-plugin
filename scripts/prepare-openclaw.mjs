@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {recordPreparationFailure} from '../src/auth/preparation-diagnostics.js';
 import {saveConnectionReply,sendConnectionDelay} from '../src/auth/connection-notice.js';
 import {queuePreparation} from './queue-preparation.mjs';
 import {prepareRuntimeCompanion,finalizeRuntimeCompanion} from '../src/auth/runtime-companion.js';
@@ -27,8 +28,10 @@ const run=args=>execFileSync('openclaw',args,{encoding:'utf8',stdio:['ignore','p
 const jobFile=path.join(stateDir,'sidewisp','prepare-job.json');
 const saveTerminal=status=>{if(options.supervised){const j=JSON.parse(readFileSync(jobFile,'utf8'));writeFileSync(jobFile+'.tmp',JSON.stringify({...j,terminal:status}),{mode:0o600});renameSync(jobFile+'.tmp',jobFile);}};
   const client=createDeviceAuthorizationClient({endpoint:endpoint.origin,stateDir});
-  let reported='',reportedAt=0;
+  let reported='',reportedAt=0,lastStep='queueing';
+  const diagnose=e=>{try{return recordPreparationFailure({stateDir,step:lastStep,error:e});}catch{return {step:lastStep,code:'DIAGNOSTICS_UNAVAILABLE'};}};
   const persist=async s=>{
+   if(s.stage!=='blocked')lastStep=s.stage;
    writeState({status:s.stage,...s});
    const delayReason=s.reasonCode??s.reason;
    if(s.stage==='blocked'&&delayReason)await sendConnectionDelay({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],reason:delayReason}).catch(()=>{});
@@ -51,9 +54,10 @@ if(!options.locked){
  try{
   result=queuePreparation({stateDir,version,sha256:options.sha256,endpoint:endpoint.origin,args:args.filter(a=>!['--enqueue','--preparation-lock'].includes(a)),script:fileURLToPath(import.meta.url)});
  }catch(e){
+  const failure=diagnose(e);
   const reason=/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed';
   // A competing invitation must not overwrite a live job's state or local proof.
-  if(reason!=='another_preparation_pending')await persist({stage:'blocked',reason});
+  if(reason!=='another_preparation_pending')await persist({stage:'blocked',reason,failure});
   console.log(JSON.stringify({status:'blocked',reason}));process.exitCode=1;
  }
  if(result){
@@ -92,7 +96,7 @@ if(!options.locked){
    },
   });
   saveTerminal(result.status);console.log(JSON.stringify(result));
- }catch(e){const result={status:'blocked',reason:isRetainedWork(e)?'host_retained_work':/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed'};await persist({stage:'blocked',reason:result.reason});saveTerminal(result.reason);console.log(JSON.stringify(result));process.exitCode=1;}
+ }catch(e){const failure=diagnose(e);const result={status:'blocked',reason:isRetainedWork(e)?'host_retained_work':/^[a-z_]+$/i.test(e.message)?e.message:'preparation_failed'};await persist({stage:'blocked',reason:result.reason,failure});saveTerminal(result.reason);console.log(JSON.stringify(result));process.exitCode=1;}
 }
 async function runHelper(onProgress){
  const d={schema:'sidewisp.plugin-update.v1',targetVersion:version,targetSpec:`git:github.com/golem-workers/sidewisp-plugin@v${version}`,

@@ -30,7 +30,8 @@ async function fixture({refused=false,updateOnly=false,queueRefused=false}={}) {
   const persisted=JSON.parse(await readFile(path.join(state,'sidewisp/prepare-status.json'),'utf8'));
   let calls=0;try{calls=JSON.parse(await readFile(ledger,'utf8')).calls;}catch(e){if(e.code!=='ENOENT')throw e;}
   let report;try{report=JSON.parse(await readFile(path.join(dir,'report.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
-  return {result,persisted,calls,id,expiresAtMs,report};
+  let diagnostics; if(persisted.failure?.diagnosticId){const {stat}=await import('node:fs/promises');const file=path.join(state,'sidewisp/preparation-diagnostics',persisted.failure.diagnosticId+'.json');diagnostics={body:JSON.parse(await readFile(file,'utf8')),mode:(await stat(file)).mode&0o777};}
+  return {result,persisted,calls,id,expiresAtMs,report,diagnostics};
  }finally{await rm(dir,{recursive:true,force:true});}
 }
 test('real preparation CLI reports approval_pending, not empty success or completed connection',async()=>{
@@ -55,3 +56,5 @@ test('queue admission failure reaches server preparation without begin, fallback
  assert.deepEqual(report,{stage:'blocked',reasonCode:'preparation_failed'});assert.equal(persisted.status,'blocked');assert.equal(calls,0);
  assert.doesNotMatch(result.stdout+result.stderr,/private queue credential material|sw_device_/);
 });
+
+test('failed RPC retains original stderr privately with the failing step, without protocol leakage',async()=>{const f=await fixture({refused:true});assert.equal(f.diagnostics.mode,0o600);assert.equal(f.diagnostics.body.step,'inspecting');assert.equal(f.diagnostics.body.code,'COMMAND_FAILED');assert.match(f.diagnostics.body.stderr,/private credential material/);assert.doesNotMatch(f.result.stdout+f.result.stderr+JSON.stringify(f.report)+JSON.stringify(f.persisted),/private credential material/);});
