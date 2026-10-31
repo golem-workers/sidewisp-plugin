@@ -9,7 +9,7 @@
 1. `node scripts/endpoint-transition.mjs plan /ABS/transition.json`. План содержит endpoints, ID старой установки, hashes файлов; без credentials. Изменение конфигурации/привязки после планирования инвалидирует план. На 3d пока НЕ запускать даже план без доступа/согласованного профиля.
 2. Показать владельцу профиля: старая staging-установка/история остаются; новая production-авторизация создаст **другую** установку. Это не перенос строк истории между базами. Получить явное подтверждение перехода для exact confirmation hash. Не считать прошлое разрешение диагностировать агент таким подтверждением.
 3. Создать свежую production-инструкцию из нужного аккаунта в приложении. `node scripts/endpoint-transition.mjs begin /ABS/transition.json CONFIRMATION REQUEST_ID`. Только это действие начинает независимую авторизацию в candidate-state. Старый secret используется только для подписанной проверки staging, никогда не отправляется production.
-4. Явное Approve в приложении инициирующего аккаунта; затем `poll` до credential_saved и `ready`. Истечение → новая инструкция/новый запрос; никакого автоматического Approve. Нет приватных proofs/codes в CLI/chat. Старые config, credentials, spool/cursors, manager и данные не меняются.
+4. Явное согласие в нужном аккаунте на **новую** production-привязку обязательно: создание свежей autoConnect-инструкции уже фиксирует это согласие; для manual-запроса нужен Approve. Helper не вызывает decision/Approve и не выдумывает согласие. Затем `poll` до credential_saved и `ready`. Истечение → новая инструкция/новый запрос; никакого автоматического Approve. Нет приватных proofs/codes в CLI/chat. Старые config, credentials, spool/cursors, manager и данные не меняются.
 
 ## Последующий host cutover — отдельное явное подтверждение
 
