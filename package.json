@@ -66,7 +66,8 @@
     "runtime/service-hook-owners.ts",
     "scripts/stage-runtime-companion.mjs",
     "src/auth/runtime-companion.js",
-    "scripts/queue-preparation.mjs"
+    "scripts/queue-preparation.mjs",
+    "scripts/endpoint-transition.mjs"
   ],
   "scripts": {
     "test": "node --test",
