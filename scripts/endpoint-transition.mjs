@@ -48,7 +48,7 @@ try {
      for(;;){if(Date.now()>=deadline)throw Error('host_idle_timeout');
       const child=spawnSync(process.execPath,[fileURLToPath(import.meta.url),'activate',file,confirmation],{encoding:'utf8'});
       if(child.status===0){result=JSON.parse(child.stdout);await fs.writeFile(statusFile,JSON.stringify({...result,updatedAtMs:Date.now()}),{mode:0o600});break;}
-      const reason=child.stderr.trim();if(!['host_activation_busy','manager_update_in_progress'].includes(reason))throw Error('transition_activation_failed');
+      const reason=child.stderr.trim().split('\n').at(-1);if(!['host_activation_busy','manager_update_in_progress'].includes(reason)){await fs.writeFile(path.join(path.dirname(plan.candidateStateDir),'activation-error.private.json'),JSON.stringify({exitCode:child.status,stderr:child.stderr,stdout:child.stdout}),{mode:0o600});throw Error('transition_activation_failed');}
       await mark('waiting_for_host_idle','HOST_RETAINED_WORK');await new Promise(r=>setTimeout(r,3000));
      }
     }catch(e){await mark('blocked',['fresh_invitation_required','host_idle_timeout','existing_endpoint_mismatch'].includes(e.message)?e.message:'transition_activation_failed');throw e;}
@@ -57,7 +57,7 @@ try {
   else if(action==='poll')result=await pollEndpointTransition({plan});
   else if(action==='ready')result=await verifyEndpointTransitionReady({plan});
   else if(action==='activate'){
-   if(!extra.includes('--locked')) {
+   if(!process.argv.includes('--locked')) {
     const child=spawnSync('/usr/bin/flock',['--nonblock','--conflict-exit-code','3',path.join(plan.stateDir,'sidewisp/update-status.json.kernel-lock'),process.execPath,fileURLToPath(import.meta.url),...process.argv.slice(2),'--locked'],{stdio:'inherit'});if(child.status===3)console.error('manager_update_in_progress');process.exit(child.status??1);
    }
    const unit='sidewisp-update-manager-'+createHash('sha256').update(plan.stateDir).digest('hex').slice(0,12)+'.service';let manager=false;
