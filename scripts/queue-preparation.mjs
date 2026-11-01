@@ -17,11 +17,12 @@ export function queuePreparation({stateDir,version,sha256,endpoint,args,script,e
   ensureAutostart({run});
   return {status:'preparation_queued',unit,resumed:true};
  }
- if(old?.identity!==identity && !args.includes('--update-only')) {
+ if(old?.identity!==identity && (!args.includes('--update-only') || args.includes('--preparation-endpoint'))) {
   const i=args.indexOf('--expires-at-ms');const expiry=i<0?undefined:Number(args[i+1]);
   if(expiry!==undefined&&(!Number.isSafeInteger(expiry)||expiry<=Date.now()))throw Error('fresh_invitation_required');
  }
  const job=old?.identity===identity?old:{identity,deadlineMs:Date.now()+3600000};
+ if(job.terminal && job.result)return {...job.result,unit};
  if(job.terminal)return ['completed','approval_pending','connection_pending'].includes(job.terminal) ? {status:job.terminal,unit} : {status:'blocked',reason:job.terminal,unit};
  ensureAutostart({run});
  const unitDir=path.join(environment.XDG_CONFIG_HOME??path.join(environment.HOME,'.config'),'systemd','user');mkdirSync(unitDir,{recursive:true});

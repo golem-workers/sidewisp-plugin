@@ -23,19 +23,22 @@ try {
   const plan=JSON.parse(await fs.readFile(file,'utf8'));
   if(path.resolve(process.env.OPENCLAW_STATE_DIR??'')!==plan.stateDir||path.resolve(process.env.OPENCLAW_CONFIG_PATH??'')!==plan.configFile)throw Error('explicit_active_profile_required');
   if(action==='connect'){
+   const expiryIndex=extra.indexOf('--expires-at-ms');
+   const expiresAtMs=expiryIndex<0?undefined:Number(extra[expiryIndex+1]);
+   if(expiryIndex>=0&&(!Number.isSafeInteger(expiresAtMs)||expiresAtMs<=Date.now()))throw Error('fresh_invitation_required');
    if(confirmation!==plan.confirmation)throw Error('explicit_host_confirmation_required');
    if(extra.includes('--enqueue')) {
     const unit='sidewisp-transition-'+createHash('sha256').update(plan.confirmation+requestId).digest('hex').slice(0,16);
     let active=false;try{active=execFileSync('systemctl',['--user','is-active',unit+'.service'],{encoding:'utf8',stdio:'pipe'}).trim()==='active';}catch(e){if(![3,4].includes(e.status))throw e;}
     if(!active){const keys=['HOME','PATH','USER','LOGNAME','LANG','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS','OPENCLAW_STATE_DIR','OPENCLAW_CONFIG_PATH','OPENCLAW_PROFILE','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT','NODE_EXTRA_CA_CERTS'];
-     execFileSync('systemd-run',['--user','--quiet','--collect','--no-block','--unit='+unit,'--property=Type=exec','--property=UMask=0077','--property=RuntimeMaxSec=900',...keys.filter(k=>typeof process.env[k]==='string').map(k=>'--setenv='+k+'='+process.env[k]),'--',process.execPath,fileURLToPath(import.meta.url),'connect',file,confirmation,requestId,'--supervised'],{stdio:'pipe'});
+     execFileSync('systemd-run',['--user','--quiet','--collect','--no-block','--unit='+unit,'--property=Type=exec','--property=UMask=0077','--property=RuntimeMaxSec=900',...keys.filter(k=>typeof process.env[k]==='string').map(k=>'--setenv='+k+'='+process.env[k]),'--',process.execPath,fileURLToPath(import.meta.url),'connect',file,confirmation,requestId,'--supervised',...(expiresAtMs===undefined?[]:['--expires-at-ms',String(expiresAtMs)])],{stdio:'pipe'});
     }
     result={status:'transition_queued',unit,bindingChanged:false};
    }else if(extra.includes('--supervised')){
     const client=createDeviceAuthorizationClient({endpoint:plan.targetEndpoint,stateDir:plan.candidateStateDir});
     const statusFile=path.join(path.dirname(plan.candidateStateDir),'connection-status.json');
     const mark=async(stage,reasonCode)=>{await fs.writeFile(statusFile,JSON.stringify({stage,...(reasonCode?{reasonCode}:{}),updatedAtMs:Date.now()}),{mode:0o600});await client.reportPreparation({id:requestId,stage,...(reasonCode?{reasonCode}:{})}).catch(()=>{});};
-    const deadline=Date.now()+14*60_000;
+    const deadline=Math.min(Date.now()+14*60_000,expiresAtMs??Infinity);
     try {
      if(!await createFileCredentialStore({stateDir:plan.candidateStateDir}).read()) {
       await beginEndpointTransition({plan,confirmation,requestId});
