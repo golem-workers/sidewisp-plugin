@@ -1,0 +1,296 @@
+commit e4390a8edc3fc0d76ae55ff3a210eccc39124bdf
+Author:     fleck301-creator <293122108+fleck301-creator@users.noreply.github.com>
+AuthorDate: Sun Oct 11 02:16:11 2026 +0000
+Commit:     fleck301-creator <293122108+fleck301-creator@users.noreply.github.com>
+CommitDate: Sun Oct 11 02:16:11 2026 +0000
+
+    fix(plugins): retain passive hook callbacks of running service owners
+
+diff --git a/src/agents/command/delivery.ts b/src/agents/command/delivery.ts
+index 0938085e..eee9cacd 100644
+--- a/src/agents/command/delivery.ts
++++ b/src/agents/command/delivery.ts
+@@ -31,7 +31,7 @@ import { formatUnknownChannelMessage } from "../../cli/error-format.js";
+ import { createOutboundSendDeps, type CliDeps } from "../../cli/outbound-send-deps.js";
+ import type { SessionEntry } from "../../config/sessions.js";
+ import type { OpenClawConfig } from "../../config/types.openclaw.js";
+-import { formatErrorMessage, toErrorObject } from "../../infra/errors.js";
++import { toErrorObject } from "../../infra/errors.js";
+ import {
+   resolveAgentDeliveryPlanWithSessionRoute,
+   resolveAgentOutboundTarget,
+@@ -736,7 +736,7 @@ export async function deliverAgentCommandResult(
+       const completion = resolvePendingFinalDeliveryCompletion(payloads);
+       const assertPlatformSendCurrent = createAgentCommandDeliveryGuard(params, completion);
+       const restartAbort = createRestartOnlyAbortSignal(opts.abortSignal);
+-      let send: DurableSendResult;
++      let send: Awaited<ReturnType<typeof sendDurableMessageBatchCore>>;
+       try {
+         const observeFinal = await createRecoveryFinalObserver({
+           cfg,
+diff --git a/src/agents/command/recovery-final-observer.test.ts b/src/agents/command/recovery-final-observer.test.ts
+index 3277cf6b..13c9fa8f 100644
+--- a/src/agents/command/recovery-final-observer.test.ts
++++ b/src/agents/command/recovery-final-observer.test.ts
+@@ -1,9 +1,11 @@
+ import { afterEach, expect, it, vi } from "vitest";
++import type { HookRunner } from "../../plugins/hooks.js";
+ import { createRecoveryFinalObserver } from "./recovery-final-observer.js";
+ const base = {
+   cfg: {},
+   sessionKey: "agent:main:telegram:group:fixture",
+   opts: {
++    message: "Synthetic recovery final",
+     runId: "resumed",
+     inputProvenance: {
+       kind: "internal_system" as const,
+@@ -21,12 +23,13 @@ it("registers only the exact recovery claim and cannot grant another send", asyn
+   let seen = "";
+   const runner = {
+     hasHooks: vi.fn(() => true),
+-    runReplyDispatch: vi.fn(async (_event, ctx) => {
++    runReplyDispatch: vi.fn<HookRunner["runReplyDispatch"]>(async (_event, ctx) => {
+       expect(ctx.dispatcher.sendFinalReply({ text: "duplicate" })).toBe(false);
+       ctx.dispatcher.appendBeforeDeliver?.((payload) => {
+         seen = payload.text ?? "";
+         return { text: "altered" };
+       });
++      return undefined;
+     }),
+   };
+   const observe = await createRecoveryFinalObserver({ ...base, hookRunner: runner });
+@@ -49,8 +52,8 @@ it("bounded observer failure never changes delivery payload or hangs the transpo
+   vi.useFakeTimers();
+   const runner = {
+     hasHooks: () => true,
+-    runReplyDispatch: vi.fn(async (_event, ctx) => {
+-      ctx.dispatcher.appendBeforeDeliver?.(() => new Promise(() => {}), { timeoutMs: 25 });
++    runReplyDispatch: vi.fn<HookRunner["runReplyDispatch"]>(async (_event, ctx) => {
++      ctx.dispatcher.appendBeforeDeliver?.(() => new Promise<never>(() => {}), { timeoutMs: 25 });
+     }),
+   };
+   const observe = await createRecoveryFinalObserver({ ...base, hookRunner: runner });
+diff --git a/src/plugins/hook-runner-global-state.ts b/src/plugins/hook-runner-global-state.ts
+index 66494779..5eac9a70 100644
+--- a/src/plugins/hook-runner-global-state.ts
++++ b/src/plugins/hook-runner-global-state.ts
+@@ -10,6 +10,7 @@ import type {
+ import { getActivePluginRegistry } from "./runtime.js";
+ import { getPluginRuntimeGatewayRequestScope } from "./runtime/gateway-request-scope.js";
+ import { getPluginRuntimeGenerationRegistry } from "./runtime/generation-scope.js";
++import { resolveServiceOwnedHooks } from "./service-hook-owners.js";
+ 
+ type TrustedPolicyHookRunnerRegistry = GlobalHookRunnerRegistry & {
+   trustedToolPolicies?: PluginTrustedToolPolicyRegistryRegistration[];
+@@ -123,12 +124,13 @@ function overlayHookRegistries(
+ function resolveHookRegistry(state: HookRunnerGlobalState): TrustedPolicyHookRunnerRegistry | null {
+   const generationRegistry = getPluginRuntimeGenerationRegistry();
+   if (generationRegistry) {
+-    return generationRegistry;
++    return resolveServiceOwnedHooks(generationRegistry);
+   }
+-  return overlayHookRegistries(
++  const registry = overlayHookRegistries(
+     resolveRootHookRegistry(state),
+     getPluginRuntimeGatewayRequestScope()?.pluginRegistry ?? null,
+   );
++  return registry ? resolveServiceOwnedHooks(registry) : null;
+ }
+ 
+ export function createLiveHookRegistryFacade(
+diff --git a/src/plugins/service-hook-owners.test.ts b/src/plugins/service-hook-owners.test.ts
+new file mode 100644
+index 00000000..0738c230
+--- /dev/null
++++ b/src/plugins/service-hook-owners.test.ts
+@@ -0,0 +1,78 @@
++import { expect, it, vi } from "vitest";
++import { createEmptyPluginRegistry } from "./registry.js";
++import {
++  releaseServiceHookOwner,
++  retainServiceHookOwner,
++  resolveServiceOwnedHooks,
++} from "./service-hook-owners.js";
++
++it("keeps live service observers, not registration-only state, without granting missing or different-source hooks", () => {
++  const live = createEmptyPluginRegistry(),
++    scoped = createEmptyPluginRegistry();
++  const record = {
++    id: "collector",
++    source: "/installed/collector/index.js",
++  } as (typeof live.plugins)[number];
++  live.plugins.push(record);
++  scoped.plugins.push({ ...record });
++  const liveFinal = vi.fn(),
++    scopedFinal = vi.fn();
++  const hook = (handler: () => void) => ({
++    pluginId: "collector",
++    source: record.source,
++    hookName: "reply_dispatch" as const,
++    handler,
++  });
++  live.typedHooks.push({ ...hook(liveFinal), priority: 50 });
++  scoped.typedHooks.push({ ...hook(scopedFinal), priority: 1 });
++  const owner = {};
++  retainServiceHookOwner(owner, live, "collector");
++  try {
++    expect(resolveServiceOwnedHooks(scoped).typedHooks[0].handler).toBe(liveFinal);
++    expect(resolveServiceOwnedHooks(scoped).typedHooks[0].priority).toBe(1);
++    const absent = createEmptyPluginRegistry();
++    absent.plugins.push({ ...record });
++    expect(resolveServiceOwnedHooks(absent).typedHooks).toHaveLength(0);
++    scoped.plugins[0] = { ...record, source: "/other/index.js" };
++    expect(resolveServiceOwnedHooks(scoped).typedHooks[0].handler).toBe(scopedFinal);
++    scoped.plugins[0] = record;
++    releaseServiceHookOwner(owner);
++    expect(resolveServiceOwnedHooks(scoped).typedHooks[0].handler).toBe(scopedFinal);
++  } finally {
++    releaseServiceHookOwner(owner);
++  }
++});
++it("retains multiple handlers and declines ambiguous simultaneous service owners", () => {
++  const live = createEmptyPluginRegistry(),
++    scoped = createEmptyPluginRegistry(),
++    other = createEmptyPluginRegistry();
++  const record = {
++    id: "collector",
++    source: "/installed/index.js",
++  } as (typeof live.plugins)[number];
++  for (const r of [live, scoped, other]) r.plugins.push({ ...record });
++  const hook = (handler: () => void) => ({
++    pluginId: "collector",
++    source: record.source,
++    hookName: "before_dispatch" as const,
++    handler,
++  });
++  const first = vi.fn(),
++    second = vi.fn();
++  live.typedHooks.push(hook(first), hook(second));
++  scoped.typedHooks.push(hook(vi.fn()), hook(vi.fn()));
++  const a = {},
++    b = {};
++  retainServiceHookOwner(a, live, "collector");
++  try {
++    expect(resolveServiceOwnedHooks(scoped).typedHooks.map((h) => h.handler)).toEqual([
++      first,
++      second,
++    ]);
++    retainServiceHookOwner(b, other, "collector");
++    expect(resolveServiceOwnedHooks(scoped)).toBe(scoped);
++  } finally {
++    releaseServiceHookOwner(a);
++    releaseServiceHookOwner(b);
++  }
++});
+diff --git a/src/plugins/service-hook-owners.ts b/src/plugins/service-hook-owners.ts
+new file mode 100644
+index 00000000..45d3e375
+--- /dev/null
++++ b/src/plugins/service-hook-owners.ts
+@@ -0,0 +1,62 @@
++import type { GlobalHookRunnerRegistry } from "./hook-registry.types.js";
++import { isPluginRegistryRetired } from "./registry-lifecycle.js";
++import type { PluginRegistry } from "./registry-types.js";
++
++// A scoped registration can describe the same installed plugin without starting
++// its service. Passive telemetry must reach that service's live state, not a
++// registration-only closure. Never add a hook absent from the caller's registry.
++const ownersKey = Symbol.for("openclaw.plugins.live-service-hook-owners");
++type Owner = { pluginId: string; registry: PluginRegistry };
++const globalOwners = globalThis as typeof globalThis & { [ownersKey]?: Map<object, Owner> };
++const owners = (globalOwners[ownersKey] ??= new Map<object, Owner>());
++const observedHooks = new Set([
++  "before_dispatch",
++  "reply_dispatch",
++  "message_received",
++  "message_sent",
++  "after_tool_call",
++]);
++
++export function retainServiceHookOwner(owner: object, registry: PluginRegistry, pluginId: string) {
++  owners.set(owner, { registry, pluginId });
++}
++export function releaseServiceHookOwner(owner: object) {
++  owners.delete(owner);
++}
++export function resolveServiceOwnedHooks<T extends GlobalHookRunnerRegistry>(registry: T): T {
++  const live = new Map<string, Set<PluginRegistry>>();
++  for (const { pluginId, registry: owned } of owners.values()) {
++    if (isPluginRegistryRetired(owned)) continue;
++    const list = live.get(pluginId) ?? new Set<PluginRegistry>();
++    list.add(owned);
++    live.set(pluginId, list);
++  }
++  let changed = false;
++  const typedHooks = registry.typedHooks.map((hook) => {
++    if (!observedHooks.has(hook.hookName)) return hook;
++    const candidates = live.get(hook.pluginId);
++    if (candidates?.size !== 1) return hook;
++    const owned = candidates.values().next().value!;
++    if (Object.is(owned, registry)) return hook;
++    const scopedRecord = registry.plugins.find((p) => p.id === hook.pluginId);
++    const ownerRecord = owned.plugins.find((p) => p.id === hook.pluginId);
++    if (
++      !scopedRecord ||
++      !ownerRecord ||
++      !("source" in scopedRecord) ||
++      scopedRecord.source !== ownerRecord.source
++    )
++      return hook;
++    const sameKind = (h: typeof hook) =>
++      h.pluginId === hook.pluginId && h.hookName === hook.hookName && h.source === hook.source;
++    const scoped = registry.typedHooks.filter(sameKind);
++    const matches = owned.typedHooks.filter(sameKind);
++    // Preserve each registration and its order, including multiple observers.
++    if (matches.length !== scoped.length) return hook;
++    const replacement = matches[scoped.indexOf(hook)];
++    if (!replacement) return hook;
++    changed = true;
++    return { ...hook, handler: replacement.handler };
++  });
++  return changed ? { ...registry, typedHooks } : registry;
++}
+diff --git a/src/plugins/services.ts b/src/plugins/services.ts
+index cf24e36f..7bc8ff80 100644
+--- a/src/plugins/services.ts
++++ b/src/plugins/services.ts
+@@ -34,6 +34,7 @@ import type { PluginRegistry } from "./registry.js";
+ import { getGatewayContextResolver } from "./runtime/gateway-request-scope.js";
+ import { createPluginServiceCronGetter, type PluginServiceCronHost } from "./service-cron.js";
+ import { createPluginServiceHealthReporter } from "./service-health.js";
++import { retainServiceHookOwner, releaseServiceHookOwner } from "./service-hook-owners.js";
+ import { createPluginServiceNodeInvoker } from "./service-nodes.js";
+ import { encodeStartupTraceSegment } from "./startup-trace-segment.js";
+ import type { OpenClawPluginServiceContext } from "./types.js";
+@@ -242,6 +243,7 @@ async function startPreparedPluginServices({
+     deadline?: number,
+     beforeStop?: Promise<unknown>,
+   ) => {
++    releaseServiceHookOwner(entry);
+     entry.stopRequested = true;
+     entry.stopNodeInvocations?.();
+     const recordFailure = (error: unknown) => {
+@@ -404,6 +406,7 @@ async function startPreparedPluginServices({
+         }
+         for (const entry of selected) {
+           entry.reloading = reloading;
++          releaseServiceHookOwner(entry);
+           entry.stopRequested = true;
+           entry.stopNodeInvocations?.();
+         }
+@@ -449,6 +452,7 @@ async function startPreparedPluginServices({
+         (entry) => !options?.pluginIds || options.pluginIds.has(entry.pluginId),
+       );
+       for (const entry of selected) {
++        releaseServiceHookOwner(entry);
+         entry.stopRequested = true;
+         entry.stopNodeInvocations?.();
+       }
+@@ -659,6 +663,7 @@ async function startPreparedPluginServices({
+         "plugin service startup",
+         `${entry.pluginId}/${id}`,
+       );
++      retainServiceHookOwner(ownedService, registry, entry.pluginId);
+     } catch (err) {
+       failures?.push(err);
+       serviceContext.serviceHealth?.reportFailure(err);

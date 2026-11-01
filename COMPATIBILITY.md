@@ -3,7 +3,7 @@
 | Component | Supported baseline | Behavior outside baseline |
 | --- | --- | --- |
 | Node.js | 22.22.3 or newer | Installation is rejected by package engines. |
-| OpenClaw | 2026.7.x, plugin API 2026.7.1+ | Hooks fail closed; unsupported recovery formats emit a local diagnostic and do not break the agent. |
+| OpenClaw | 2026.9.1 or newer | Telegram enrollment is claimed before model dispatch and exchanges only after deleting the source message. Hooks fail closed; unsupported recovery formats emit a local diagnostic and do not break the agent. |
 | Hermes Agent | Native hook API represented by `hermes/sidewisp/plugin.yaml` | Unknown state schemas are read-only and reported as degraded; no heuristic content scan is attempted. |
 | Codex CLI | 0.145.0+, stable command hooks enabled | New or changed hooks remain inactive until reviewed through `/hooks`; provider failures are reported as a degraded capability because no dedicated hook exists. |
 | Claude Code | 2.1.218+ command-hook schema | Unknown events are ignored; unknown provider errors become bounded `provider.unavailable` facts without retaining error text. |

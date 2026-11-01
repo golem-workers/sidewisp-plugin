@@ -10,6 +10,13 @@
 
 The default installation is per-user and does not use `sudo`.
 
+The sidecar opens each discovered Hermes `state.db` read-only. When
+`session_model_usage` exists it is authoritative, so session totals are not
+added again; this preserves model changes without double counting. Only
+numeric usage/cost fields and bounded opaque session/model/provider labels are
+sent. Conversation messages, tool calls, files and secrets remain local. The
+collector does not call an LLM.
+
 ## Verify the release
 
 Download the release archive and `SHA256SUMS` from GitHub Releases, verify the

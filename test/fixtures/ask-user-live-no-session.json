@@ -1,0 +1,12 @@
+{
+  "runId": "ecd600c0-87e3-4192-aef7-810e75f11efe",
+  "stream": "tool",
+  "seq": 1,
+  "ts": 1791854345802,
+  "data": {
+    "phase": "start",
+    "name": "ask_user",
+    "toolCallId": "exec-bbbb6e65-226a-4bb3-b756-c2bb80452839",
+    "args": {"questions": [{"id": "color", "header": "Цвет", "question": "Какой цвет выбрать?", "options": [{"label": "Синий"}, {"label": "Зелёный"}]}]}
+  }
+}

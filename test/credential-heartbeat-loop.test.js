@@ -1,0 +1,43 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { watch } from 'node:fs';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createFileCredentialStore, createEnrollmentManager } from '../src/auth/credentials.js';
+import { createHeartbeatSupervisor } from '../src/core/heartbeat-supervisor.js';
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+test('real credential reads cannot recursively wake the collector heartbeat; atomic replacement still wakes it', async t => {
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), 'sw-heartbeat-loop-'));
+  t.after(() => fs.rm(stateDir, {recursive:true, force:true}));
+  const store = createFileCredentialStore({stateDir});
+  const original = {installationId:'sw_ins_looptest1234',secret:'sw_secret_'+'a'.repeat(32),status:'active'};
+  await store.write(original);
+  const auth = createEnrollmentManager({endpoint:'https://example.test',store});
+  let calls = 0;
+  const supervisor = createHeartbeatSupervisor({intervalMs:30000,run:async()=>{calls++; await auth.load();}});
+  const watcher = watch(path.join(stateDir,'sidewisp'), (_event, filename) => {
+    if (['installation.json','device-authorization.json'].includes(String(filename))) supervisor.request();
+  });
+  t.after(async()=>{watcher.close(); await supervisor.stop();});
+  supervisor.start();
+  await wait(180);
+  assert.equal(calls,1,'reading credentials must not emit filesystem changes and self-trigger heartbeats');
+  await store.write({...original,secret:'sw_secret_'+'b'.repeat(32)});
+  await wait(180);
+  assert.ok(calls>=2 && calls<=4,'real credential replacement promptly wakes without feedback');
+  assert.equal(auth.credential().secret,'sw_secret_'+'b'.repeat(32));
+  const stable=calls; await wait(100); assert.equal(calls,stable);
+});
+test('credential read still repairs insecure permissions once without changing credential contents',async t=>{
+ const stateDir=await fs.mkdtemp(path.join(os.tmpdir(),'sw-credential-mode-'));
+ t.after(()=>fs.rm(stateDir,{recursive:true,force:true}));
+ const store=createFileCredentialStore({stateDir});
+ const credential={installationId:'sw_ins_modetest1234',secret:'sw_secret_'+'c'.repeat(32),status:'active'};
+ await store.write(credential);const before=await fs.readFile(store.file,'utf8');
+ await fs.chmod(path.dirname(store.file),0o755);await fs.chmod(store.file,0o644);
+ assert.deepEqual(await store.read(),credential);
+ assert.equal((await fs.stat(path.dirname(store.file))).mode&0o777,0o700);
+ assert.equal((await fs.stat(store.file)).mode&0o777,0o600);
+ assert.equal(await fs.readFile(store.file,'utf8'),before);
+});
