@@ -88,6 +88,12 @@ export async function activateEndpointTransition({plan,confirmation,host,fetchIm
   await save({status:'switching',targetInstallationId:ready.targetInstallationId});
   await fs.rename(active,backup);moved=true;
   await createFileCredentialStore({stateDir:plan.stateDir}).write(candidate);
+  const completionFile=path.join(plan.candidateStateDir,'sidewisp/authorization-completed.json');
+  let completion;try{completion=JSON.parse(await fs.readFile(completionFile,'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
+  if(completion?.endpoint===plan.targetEndpoint && completion.installationId===candidate.installationId) {
+   await fs.writeFile(path.join(active,'authorization-completed.json'),JSON.stringify(completion),{mode:0o600});
+   try{const reply=JSON.parse(await fs.readFile(path.join(backup,'connection-reply.json'),'utf8'));if(reply.endpoint===plan.targetEndpoint&&reply.requestId===completion.requestId)await fs.writeFile(path.join(active,'connection-reply.json'),JSON.stringify(reply),{mode:0o600});}catch(e){if(e.code!=='ENOENT')throw e;}
+  }
   config.plugins.entries.sidewisp.config.endpoint=plan.targetEndpoint;
   const tmp=plan.configFile+'.transition.tmp';await fs.writeFile(tmp,JSON.stringify(config,null,2)+'\n',{mode:0o600});await fs.rename(tmp,plan.configFile);
   await host.start(plan.targetEndpoint);

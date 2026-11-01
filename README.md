@@ -197,3 +197,8 @@ interrupted journal requires recovery review rather than blind reactivation.
 Verify both signed channels and a fresh server-accepted heartbeat afterward.
 No actual production or working-agent transition is authorized by this doc.
 The 0.2.88 source artifact is NOT evidence of an official published 0.2.88 release.
+
+For automatic completion after exact host confirmation, use `connect <plan>
+<confirmation> <request-id> --enqueue` and end the setup turn. Its independent
+systemd job polls approval and waits for host-idle admission; no second chat
+command is required. Post-approval activation errors are reportable to the app.
