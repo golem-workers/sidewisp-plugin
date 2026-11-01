@@ -175,3 +175,25 @@ This is an OSI-approved open-source license. Commercial use and modification
 are permitted. Copyleft and corresponding-source obligations apply when
 covered versions are conveyed or AGPLv3 section 13 applies. Earlier MIT
 releases remain governed by the license distributed with those releases.
+
+### Explicit endpoint transition (source candidate)
+
+`node scripts/endpoint-transition.mjs plan /absolute/plan.json [target-origin] [source-origin]`
+records the actual absolute active profile, endpoints and source fingerprints.
+Default origins remain canonical staging → production. Planning does not change
+bindings. Obtain explicit host approval for that exact plan, then use `begin
+<plan> <confirmation> <request-id>`, `poll <plan>`, `ready <plan>`, and **separately**
+`activate <plan> <confirmation>`. Use the same `OPENCLAW_STATE_DIR` and
+`OPENCLAW_CONFIG_PATH` for every step; never point them at archive extraction.
+Preparation may first report `existing_endpoint_mismatch` to the invitation;
+transition reuses only that invitation's proof, not the source credential.
+
+Activation requires the matched managed running Gateway and its idle suspension
+fence. It stops the selected collector/manager, archives the source Sidewisp
+state and config privately, activates a clean destination credential/config and
+restarts the selected services. Old spool, cursors and manager journals are not
+replayed with the new identity. Failed activation restores the source; an
+interrupted journal requires recovery review rather than blind reactivation.
+Verify both signed channels and a fresh server-accepted heartbeat afterward.
+No actual production or working-agent transition is authorized by this doc.
+The 0.2.88 source artifact is NOT evidence of an official published 0.2.88 release.

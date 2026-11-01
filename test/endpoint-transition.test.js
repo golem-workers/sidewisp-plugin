@@ -45,3 +45,45 @@ test('unavailable staging status never authorizes a new request or changes the s
  await assert.rejects(beginEndpointTransition({plan,confirmation:plan.confirmation,requestId:'sw_pair_'+'b'.repeat(32),fetchImpl:async()=>{calls++;throw Error('unavailable');}}),/unavailable/);
  assert.equal(calls,1);await f.assertPreserved();
 });
+
+import {activateEndpointTransition} from '../src/auth/endpoint-transition.js';
+async function staged(t) {
+ const f=await fixture(t),plan=await planEndpointTransition({...f,sourceEndpoint:'https://source.test',targetEndpoint:'https://target.test'}).catch(async()=>{
+  const config=JSON.parse(await fs.readFile(f.configFile));config.plugins.entries.sidewisp.config.endpoint='https://source.test';await fs.writeFile(f.configFile,JSON.stringify(config));return planEndpointTransition({...f,sourceEndpoint:'https://source.test',targetEndpoint:'https://target.test'});
+ });
+ await createFileCredentialStore({stateDir:plan.candidateStateDir}).write({installationId:'sw_ins_new12345678',secret:'sw_secret_'+'n'.repeat(43),status:'active'});
+ const fetchImpl=async u=>({status:200,json:async()=>({schema:'sidewisp.credential-status.v1',status:'active',installationId:u.origin===plan.sourceEndpoint?'sw_ins_old12345678':'sw_ins_new12345678'})});
+ const before=await fs.readFile(f.configFile),credential=await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json'));
+ return {...f,plan,fetchImpl,before,credential};
+}
+test('explicit arbitrary HTTPS endpoint pair is bound to the exact immutable plan',async t=>{
+ const f=await staged(t);assert.equal(f.plan.targetEndpoint,'https://target.test');
+ for(const targetEndpoint of ['http://target.test','https://u:p@target.test','https://target.test/a',f.plan.sourceEndpoint])await assert.rejects(planEndpointTransition({...f,targetEndpoint,sourceEndpoint:f.plan.sourceEndpoint}));
+});
+test('host busy refuses activation before any state is changed',async t=>{
+ const f=await staged(t);let stopped=false;
+ await assert.rejects(activateEndpointTransition({...f,confirmation:f.plan.confirmation,host:{validate:async()=>{},suspend:async()=>{throw Error('busy')},stop:async()=>{stopped=true;}}}),/busy/);
+ assert.equal(stopped,false);assert.deepEqual(await fs.readFile(f.configFile),f.before);assert.deepEqual(await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json')),f.credential);
+});
+test('activation archives source spool/credentials and gives destination a clean store; repeated activation is idempotent',async t=>{
+ const f=await staged(t),events=[];const host={validate:async()=>events.push('validate'),suspend:async()=>{events.push('suspend');return 'lease'},stop:async()=>events.push('stop'),start:async endpoint=>events.push(endpoint)};
+ const options={...f,confirmation:f.plan.confirmation,host};const result=await activateEndpointTransition(options);assert.equal(result.status,'activated');assert.equal(result.sourceArchived,true);
+ const root=path.dirname(f.plan.candidateStateDir);assert.deepEqual(await fs.readFile(path.join(root,'source-sidewisp/installation.json')),f.credential);
+ assert.equal(await fs.readFile(path.join(root,'source-sidewisp/spool.sqlite'),'utf8'),'untouched-backlog-and-cursors');
+ await assert.rejects(fs.access(path.join(f.stateDir,'sidewisp/spool.sqlite')),{code:'ENOENT'});
+ assert.equal((await createFileCredentialStore({stateDir:f.stateDir}).read()).installationId,'sw_ins_new12345678');
+ assert.equal(JSON.parse(await fs.readFile(f.configFile)).other,'keep');assert.equal(events.at(-1),'https://target.test');
+ const n=events.length;await activateEndpointTransition(options);assert.equal(events.length,n);
+});
+test('failed destination start restores original config, credential, spool and source service',async t=>{
+ const f=await staged(t);let restored=false;const host={validate:async()=>{},suspend:async()=> 'lease',stop:async()=>{},start:async endpoint=>{if(endpoint===f.plan.targetEndpoint)throw Error('target_failed');restored=true;}};
+ await assert.rejects(activateEndpointTransition({...f,confirmation:f.plan.confirmation,host}),/target_failed/);assert.equal(restored,true);
+ assert.deepEqual(await fs.readFile(f.configFile),f.before);assert.deepEqual(await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json')),f.credential);
+ assert.equal(await fs.readFile(path.join(f.stateDir,'sidewisp/spool.sqlite'),'utf8'),'untouched-backlog-and-cursors');
+});
+test('an already-reported invitation reuses its proof without copying source credentials',async t=>{
+ const f=await fixture(t),plan=await planEndpointTransition(f),id='sw_pair_'+'p'.repeat(32),proof='sw_device_'+'x'.repeat(43);
+ const dir=path.join(f.stateDir,'sidewisp/prepare-authorizations');await fs.mkdir(dir);await fs.writeFile(path.join(dir,id+'.json'),JSON.stringify({id,runtime:'openclaw',endpoint:plan.targetEndpoint,deviceSecret:proof}));
+ await beginEndpointTransition({plan,confirmation:plan.confirmation,requestId:id,fetchImpl:async(u,o)=>u.pathname.endsWith('credential-status')?{status:200,json:async()=>({schema:'sidewisp.credential-status.v1',status:'active',installationId:plan.sourceInstallationId})}:(assert.equal(JSON.parse(o.body).deviceSecret,proof),{ok:true,json:async()=>({id,userCode:'12345ABCDE'})})});
+ await f.assertPreserved();assert.equal(await createFileCredentialStore({stateDir:plan.candidateStateDir}).read(),null);
+});
