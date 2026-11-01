@@ -206,6 +206,18 @@ command is required. Post-approval activation errors are reportable to the app.
 Before planning a cross-endpoint move, complete pinned plugin/manager maintenance
 on the CURRENT endpoint with `prepare-openclaw.mjs --enqueue --update-only` and
 wait for its independent terminal completion. Existing binding stays unchanged.
+To report progress to a NEW invitation during that maintenance, add
+`--preparation-endpoint <target-origin> --request-id <target-request-id>`;
+`--endpoint` remains the CURRENT origin. The reporting endpoint is allowed only
+with `--update-only` and a valid public request ID. The first `inspecting` report
+precedes source inspection/runtime preparation/upgrade. A separate private
+per-request proof is stored without changing the source authorization or
+installation credential; no signed source credential is sent to the target.
+On cross-endpoint maintenance completion the local result is `completed`, but
+the target invitation remains `blocked/existing_endpoint_mismatch` pending
+explicit confirmation of the transition plan. No begin/poll or cutover is
+performed by update-only. Without a request ID, maintenance remains silent to
+invitations. This is a local candidate interface, not shipped 0.2.88 behavior.
 Activation refuses a source collector that is not the target version and ready.
 
 Native cron-result fallback reads only the bounded `task_runs` receipt projection

@@ -84,3 +84,28 @@ test('reporting a separate failed invitation preserves an earlier preparation pr
  await client.begin({id:oldId,runtime:'openclaw'});await assert.rejects(fs.stat(legacy),{code:'ENOENT'});
  assert.equal(JSON.parse(await fs.readFile(path.join(stateDir,'sidewisp/prepare-authorizations',newId+'.json'),'utf8')).deviceSecret,proofs.get(newId));
 });
+
+
+test('target preparation bypasses only unrelated authorization, keeps proofs and credentials isolated',async t=>{
+ const stateDir=await fs.mkdtemp(path.join(os.tmpdir(),'sw-foreign-prep-'));t.after(()=>fs.rm(stateDir,{recursive:true,force:true}));
+ const source='https://example.com',endpoint=source+':18443',oldId='sw_pair_'+'s'.repeat(32),id='sw_pair_'+'t'.repeat(32);
+ const dir=path.join(stateDir,'sidewisp');await fs.mkdir(dir);
+ const original=JSON.stringify({id:oldId,endpoint:source,runtime:'openclaw',deviceSecret:'sw_device_'+'s'.repeat(43)});
+ const credential=JSON.stringify({installationId:'sw_ins_source12345678',secret:'sw_secret_'+'s'.repeat(43),status:'active'});
+ await fs.writeFile(path.join(dir,'device-authorization.json'),original,{mode:0o600});await fs.writeFile(path.join(dir,'installation.json'),credential,{mode:0o600});
+ const sent=[];const client=createDeviceAuthorizationClient({endpoint,stateDir,fetchImpl:async(u,o)=>{assert.equal(u.origin,endpoint);assert.equal(u.pathname,'/v1/device-authorizations/preparation');assert.equal(o.headers.authorization,undefined);sent.push(JSON.parse(o.body));return Response.json({status:'waiting'});}});
+ await client.reportPreparation({id,stage:'inspecting'});await client.reportPreparation({id,stage:'blocked',reasonCode:'existing_endpoint_mismatch'});
+ assert.equal(sent.length,2);assert.equal(sent[0].deviceSecret,sent[1].deviceSecret);assert.notEqual(sent[0].deviceSecret,JSON.parse(original).deviceSecret);
+ assert.equal(await fs.readFile(path.join(dir,'device-authorization.json'),'utf8'),original);assert.equal(await fs.readFile(path.join(dir,'installation.json'),'utf8'),credential);
+ assert.equal((await fs.stat(path.join(dir,'prepare-authorizations',id+'.json'))).mode&0o777,0o600);
+ // Unrelated source state is not silently accepted by the strict poll path.
+ await assert.rejects(client.poll(),/invalid_device_state/);assert.equal(sent.length,2);
+});
+
+test('preparation still rejects a corrupt proof for the matching request',async t=>{
+ const stateDir=await fs.mkdtemp(path.join(os.tmpdir(),'sw-invalid-prep-'));t.after(()=>fs.rm(stateDir,{recursive:true,force:true}));
+ const id='sw_pair_'+'m'.repeat(32),endpoint='https://example.com',dir=path.join(stateDir,'sidewisp');await fs.mkdir(dir);
+ const bytes=JSON.stringify({id,endpoint,runtime:'openclaw',deviceSecret:'bad-proof'});await fs.writeFile(path.join(dir,'device-authorization.json'),bytes);
+ let sent=0;const client=createDeviceAuthorizationClient({endpoint,stateDir,fetchImpl:async()=>{sent++;}});
+ await assert.rejects(client.reportPreparation({id,stage:'inspecting'}),/invalid_device_state/);assert.equal(sent,0);assert.equal(await fs.readFile(path.join(dir,'device-authorization.json'),'utf8'),bytes);
+});

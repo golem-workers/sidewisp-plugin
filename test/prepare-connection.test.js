@@ -50,3 +50,14 @@ test('app-consented authorization completes preparation without manual approval 
  const f=fixture();f.options.begin=async()=>({id:'sw_pair_'+ 'a'.repeat(32),autoConnect:true,expiresAtMs:Date.now()+60000});
  const result=await prepareConnection(f.options);assert.equal(result.status,'connection_pending');assert.doesNotMatch(JSON.stringify(result),/Approve/);
 });
+
+
+test('request progress precedes source upgrade; update-only keeps binding and never begins target authorization',async()=>{
+ const original={...good,version:'0.2.38',installation:{installationId:'source-binding'}};
+ const ready={...good,installation:original.installation},events=[];let upgraded=false;
+ const f=fixture(original);f.options.updateOnly=true;
+ f.options.persist=async s=>events.push(s.stage);
+ f.options.inspect=async()=>upgraded?ready:original;
+ f.options.upgrade=async()=>{assert.equal(events[0],'inspecting');assert.ok(events.includes('upgrading'));assert.equal(original.installation.installationId,'source-binding');upgraded=true;};
+ const result=await prepareConnection(f.options);assert.equal(upgraded,true);assert.deepEqual(result,{status:'completed'});assert.equal(events.at(-1),'completed');assert.ok(!f.calls.includes('begin'));
+});

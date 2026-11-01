@@ -15,11 +15,18 @@ import {coldActivateOpenClaw} from './cold-activate-openclaw.mjs';
 import {prepareConnection} from '../src/auth/prepare-connection.js';
 import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 const args=process.argv.slice(2);const options={};
-for(let i=0;i<args.length;i++){if(args[i]==='--supervised')options.supervised=true;else if(args[i]==='--preparation-lock')options.locked=true;else if(args[i]==='--enqueue')options.enqueue=true;else if(args[i]==='--update-only')options.updateOnly=true;else if(/^--(archive|sha256|endpoint|request-id|state-dir|expires-at-ms|telegram-target|telegram-account|telegram-thread-id)$/.test(args[i]))options[args[i].slice(2)]=args[++i];else throw new Error('invalid_prepare_argument');}
+for(let i=0;i<args.length;i++){if(args[i]==='--supervised')options.supervised=true;else if(args[i]==='--preparation-lock')options.locked=true;else if(args[i]==='--enqueue')options.enqueue=true;else if(args[i]==='--update-only')options.updateOnly=true;else if(/^--(archive|sha256|endpoint|preparation-endpoint|request-id|state-dir|expires-at-ms|telegram-target|telegram-account|telegram-thread-id)$/.test(args[i]))options[args[i].slice(2)]=args[++i];else throw new Error('invalid_prepare_argument');}
 const version=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
 const stateDir=options['state-dir'];const endpoint=new URL(options.endpoint);
+// Maintenance uses the current endpoint. An optional, public target invitation
+// gets progress only; it never authorizes a rebind or receives source credentials.
+const preparationEndpoint=new URL(options['preparation-endpoint']??options.endpoint);
+const requestId=options['request-id'];
 if(!path.isAbsolute(stateDir??'') || !path.isAbsolute(options.archive??'') || !/^[a-f0-9]{64}$/.test(options.sha256??'')
- || endpoint.protocol!=='https:' || endpoint.origin!==options.endpoint || (!options.updateOnly && !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(options['request-id']??'')))throw new Error('invalid_prepare_input');
+ || endpoint.protocol!=='https:' || endpoint.origin!==options.endpoint
+ || preparationEndpoint.protocol!=='https:' || preparationEndpoint.origin!==(options['preparation-endpoint']??options.endpoint)
+ || ('preparation-endpoint' in options && (!options['preparation-endpoint'] || !options.updateOnly || !requestId))
+ || ((!options.updateOnly || requestId!==undefined) && !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(requestId??'')))throw new Error('invalid_prepare_input');
 if(createHash('sha256').update(readFileSync(options.archive)).digest('hex')!==options.sha256)throw new Error('archive_hash_mismatch');
 if(path.resolve(process.env.OPENCLAW_STATE_DIR??'')!==stateDir || !path.isAbsolute(process.env.OPENCLAW_CONFIG_PATH??''))throw new Error('explicit_active_profile_required');
 const stateFile=path.join(stateDir,'sidewisp','prepare-status.json');mkdirSync(path.dirname(stateFile),{recursive:true,mode:0o700});
@@ -28,6 +35,7 @@ const run=args=>execFileSync('openclaw',args,{encoding:'utf8',stdio:['ignore','p
 const jobFile=path.join(stateDir,'sidewisp','prepare-job.json');
 const saveTerminal=status=>{if(options.supervised){const j=JSON.parse(readFileSync(jobFile,'utf8'));writeFileSync(jobFile+'.tmp',JSON.stringify({...j,terminal:status}),{mode:0o600});renameSync(jobFile+'.tmp',jobFile);}};
   const client=createDeviceAuthorizationClient({endpoint:endpoint.origin,stateDir});
+  const progressClient=preparationEndpoint.origin===endpoint.origin?client:createDeviceAuthorizationClient({endpoint:preparationEndpoint.origin,stateDir});
   let reported='',reportedAt=0,lastStep='queueing';
   const diagnose=e=>{try{return recordPreparationFailure({stateDir,step:lastStep,error:e});}catch{return {step:lastStep,code:'DIAGNOSTICS_UNAVAILABLE'};}};
   const persist=async s=>{
@@ -35,13 +43,18 @@ const saveTerminal=status=>{if(options.supervised){const j=JSON.parse(readFileSy
    writeState({status:s.stage,...s});
    const delayReason=s.reasonCode??s.reason;
    if(s.stage==='blocked'&&delayReason)await sendConnectionDelay({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],reason:delayReason}).catch(()=>{});
-   if(options.updateOnly || ['completed','connection_pending','approval_pending'].includes(s.stage))return;
-   const key=s.stage+':'+(s.reasonCode??s.reason??'');
+   if(!requestId || ['connection_pending','approval_pending'].includes(s.stage))return;
+   // Source maintenance completion is NOT target connection completion. Keep
+   // the invitation visibly blocked until the separately confirmed transition.
+   const progress=s.stage==='completed' && options.updateOnly && preparationEndpoint.origin!==endpoint.origin
+    ? {stage:'blocked',reasonCode:'existing_endpoint_mismatch'} : s;
+   if(progress.stage==='completed')return;
+   const key=progress.stage+':'+(progress.reasonCode??progress.reason??'');
    if(key===reported&&Date.now()-reportedAt<30000)return;
    reported=key;reportedAt=Date.now();
    const allowed=['ACTIVE_WORK','HOST_RETAINED_WORK','IDLE_WINDOW_TIMEOUT','host_idle_timeout','fresh_invitation_required','update_failed','collector_not_ready','existing_endpoint_mismatch','transition_activation_failed','preparation_failed'];
-   const reason=s.reasonCode??s.reason;
-   try{await client.reportPreparation({id:options['request-id'],stage:s.stage,...(reason?{reasonCode:allowed.includes(reason)?reason:'preparation_failed'}:{})});}
+   const reason=progress.reasonCode??progress.reason;
+   try{await progressClient.reportPreparation({id:requestId,stage:progress.stage,...(reason?{reasonCode:allowed.includes(reason)?reason:'preparation_failed'}:{})});}
    catch{writeState({status:s.stage,...s,progressReporting:'unavailable'});}
   };
 

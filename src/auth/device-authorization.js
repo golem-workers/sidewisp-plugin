@@ -33,8 +33,11 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
     }
     return response.json();
   };
-  const read = async () => {
+  const read = async ({ preparationId } = {}) => {
     const row = JSON.parse(await fs.readFile(file, 'utf8'));
+    // Progress for a new invitation must not depend on a different endpoint's
+    // authorization. Ignore only unrelated state here; begin/poll stay strict.
+    if (preparationId && (row.id !== preparationId || row.endpoint !== url.origin)) return null;
     if (row.endpoint !== url.origin || !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(row.id)
       || !/^sw_device_[A-Za-z0-9_-]{43}$/.test(row.deviceSecret)) throw new Error('invalid_device_state');
     return row;
@@ -44,7 +47,7 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       if (!/^sw_pair_[A-Za-z0-9_-]{32}$/.test(id)) throw new Error('invalid_device_request');
       await fs.mkdir(directory, {recursive:true,mode:0o700});
       let state;
-      try { const pending=await read();if(pending.id===id)state=pending; }catch(error){if(error.code!=='ENOENT')throw error;}
+      try { const pending=await read({preparationId:id});if(pending)state=pending; }catch(error){if(error.code!=='ENOENT')throw error;}
       if(!state)state=(await readPrepared(id))?.row;
       if (state && (state.id!==id || state.endpoint!==url.origin)) state=null;
       if (!state) {

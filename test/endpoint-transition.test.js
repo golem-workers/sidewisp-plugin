@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {planEndpointTransition,beginEndpointTransition,pollEndpointTransition,verifyEndpointTransitionReady} from '../src/auth/endpoint-transition.js';
 import {createFileCredentialStore} from '../src/auth/credentials.js';
+import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 async function fixture(t){
  const stateDir=await fs.mkdtemp(path.join(os.tmpdir(),'sw-transition-'));t.after(()=>fs.rm(stateDir,{recursive:true,force:true}));
  const configFile=path.join(stateDir,'openclaw.json');await fs.writeFile(configFile,JSON.stringify({plugins:{entries:{sidewisp:{config:{endpoint:'https://staging-api.sidewisp.com'}}}},other:'keep'}));
@@ -91,4 +92,31 @@ test('a stop-stage failure restores service availability without claiming a comp
  const f=await staged(t);let stops=0,sourceStarted=false;
  const host={validate:async()=>{},suspend:async()=> 'lease',stop:async()=>{if(++stops===1)throw Error('stop_failed');},start:async endpoint=>{assert.equal(endpoint,f.plan.sourceEndpoint);sourceStarted=true;}};
  await assert.rejects(activateEndpointTransition({...f,confirmation:f.plan.confirmation,host}),/stop_failed/);assert.equal(sourceStarted,true);assert.deepEqual(await fs.readFile(f.configFile),f.before);assert.deepEqual(await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json')),f.credential);
+});
+
+
+test('target preparation with foreign authorization cannot bypass confirmation and transfers only its own proof',async t=>{
+ const f=await fixture(t),sourceEndpoint='https://staging-api.sidewisp.com',targetEndpoint=sourceEndpoint+':18443';
+ const id='sw_pair_'+'n'.repeat(32),oldFile=path.join(f.stateDir,'sidewisp/device-authorization.json');
+ const oldBytes=JSON.stringify({id:'sw_pair_'+'o'.repeat(32),runtime:'openclaw',endpoint:sourceEndpoint,deviceSecret:'sw_device_'+'o'.repeat(43)});await fs.writeFile(oldFile,oldBytes,{mode:0o600});
+ let proof;const calls=[];
+ const fetchImpl=async(u,o)=>{
+  calls.push(u.origin+u.pathname);
+  if(u.pathname.endsWith('/credential-status')){assert.equal(u.origin,sourceEndpoint);return Response.json({schema:'sidewisp.credential-status.v1',status:'active',installationId:'sw_ins_old12345678'});}
+  assert.equal(u.origin,targetEndpoint);assert.equal(o.headers.authorization,undefined);
+  const body=JSON.parse(o.body);assert.equal(body.id,id);
+  if(u.pathname.endsWith('/preparation')){proof=body.deviceSecret;return Response.json({status:'waiting'});}
+  assert.equal(u.pathname,'/v1/device-authorizations/begin');assert.equal(body.deviceSecret,proof);
+  return Response.json({id,userCode:'12345ABCDE',autoConnect:true});
+ };
+ await createDeviceAuthorizationClient({endpoint:targetEndpoint,stateDir:f.stateDir,fetchImpl}).reportPreparation({id,stage:'inspecting'});
+ const plan=await planEndpointTransition({...f,sourceEndpoint,targetEndpoint});
+ await assert.rejects(beginEndpointTransition({plan,confirmation:'no',requestId:id,fetchImpl}),/explicit_host_confirmation_required/);
+ await assert.rejects(activateEndpointTransition({plan,confirmation:'no',fetchImpl,host:{validate:()=>assert.fail('must not activate')}}),/explicit_host_confirmation_required/);
+ assert.equal(calls.length,1);await f.assertPreserved();assert.equal(await fs.readFile(oldFile,'utf8'),oldBytes);
+ assert.equal((await beginEndpointTransition({plan,confirmation:plan.confirmation,requestId:id,fetchImpl})).status,'pending');
+ assert.equal(calls.length,3);assert.equal(calls.some(c=>c.endsWith('/poll')),false);
+ await f.assertPreserved();assert.equal(await fs.readFile(oldFile,'utf8'),oldBytes);
+ assert.notEqual(plan.candidateStateDir,f.stateDir);
+ assert.equal(JSON.parse(await fs.readFile(path.join(plan.candidateStateDir,'sidewisp/device-authorization.json'),'utf8')).deviceSecret,proof);
 });
