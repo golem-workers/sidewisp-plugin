@@ -65,6 +65,7 @@ try {
     async validate(){
      const snapshot=JSON.parse(run(['gateway','status','--no-probe','--json']));const s=snapshot.service,e=s?.command?.environment;
      if(s?.loaded!==true||s.runtime?.status!=='running'||s.targetRole==='diagnostic-only'||snapshot.config?.mismatch===true||realpathSync(snapshot.config?.daemon?.path)!==realpathSync(plan.configFile)||realpathSync(e?.OPENCLAW_STATE_DIR??path.dirname(snapshot.config.daemon.path))!==realpathSync(plan.stateDir))throw Error('managed_active_profile_required');
+     const loaded=JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));const targetVersion=JSON.parse(await fs.readFile(new URL('../package.json',import.meta.url),'utf8')).version;if(loaded.version!==targetVersion||!loaded.connectionReadiness?.ready)throw Error('source_preparation_required');
      const f=path.join(plan.stateDir,'sidewisp/manager/config.json');manager=existsSync(f);
      if(manager){const c=JSON.parse(readFileSync(f));if(c.stateDir!==plan.stateDir||c.endpoint!==plan.sourceEndpoint)throw Error('manager_binding_mismatch');}
     },

@@ -202,3 +202,8 @@ For automatic completion after exact host confirmation, use `connect <plan>
 <confirmation> <request-id> --enqueue` and end the setup turn. Its independent
 systemd job polls approval and waits for host-idle admission; no second chat
 command is required. Post-approval activation errors are reportable to the app.
+
+Before planning a cross-endpoint move, complete pinned plugin/manager maintenance
+on the CURRENT endpoint with `prepare-openclaw.mjs --enqueue --update-only` and
+wait for its independent terminal completion. Existing binding stays unchanged.
+Activation refuses a source collector that is not the target version and ready.
