@@ -79,6 +79,7 @@ export async function activateEndpointTransition({plan,confirmation,host,fetchIm
  const save=async value=>{const tmp=receiptFile+'.tmp';await fs.writeFile(tmp,JSON.stringify(value)+'\n',{mode:0o600});await fs.rename(tmp,receiptFile);};
  await host.validate(plan);
  const lease=await host.suspend(); // busy/refused/unavailable: no local mutation
+ await fs.writeFile(path.join(root,'host-lease.json'),JSON.stringify({lease}),{mode:0o600});
  let stopped=false,moved=false;
  try {
   // Revalidate after the fence: never overwrite a concurrently changed profile.

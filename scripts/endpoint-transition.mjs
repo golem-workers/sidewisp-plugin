@@ -70,7 +70,9 @@ try {
     },
     async suspend(){let v;try{v=JSON.parse(run(['gateway','suspend','--request-id','sidewisp-transition-'+randomUUID(),'--json']));}catch(e){try{if(JSON.parse(String(e.stdout)).status==='busy')throw Error('host_activation_busy');}catch(x){if(x.message==='host_activation_busy')throw x;}throw e;}if(v.status==='busy')throw Error('host_activation_busy');if(v.status!=='ready'||!v.suspensionId)throw Error('host_activation_not_prepared');return v.suspensionId;},
     async resume(id){run(['gateway','resume',id,'--json']);},
-    async stop(){if(manager)execFileSync('systemctl',['--user','stop',unit],{stdio:'pipe'});run(['gateway','stop','--json']);},
+    // --force acknowledges only the CLI's non-TTY confirmation after exact plan
+    // confirmation, matched profile and cooperative idle fence; never host-work bypass.
+    async stop(){if(manager)execFileSync('systemctl',['--user','stop',unit],{stdio:'pipe'});run(['gateway','stop','--force','--json']);},
     async start(endpoint){if(manager)installUpdateManager({stateDir:plan.stateDir,endpoint,upgrade:true});run(['gateway','start','--json']);}
    };
    result=await activateEndpointTransition({plan,confirmation,host});

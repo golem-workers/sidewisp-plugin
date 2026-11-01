@@ -87,3 +87,8 @@ test('an already-reported invitation reuses its proof without copying source cre
  await beginEndpointTransition({plan,confirmation:plan.confirmation,requestId:id,fetchImpl:async(u,o)=>u.pathname.endsWith('credential-status')?{status:200,json:async()=>({schema:'sidewisp.credential-status.v1',status:'active',installationId:plan.sourceInstallationId})}:(assert.equal(JSON.parse(o.body).deviceSecret,proof),{ok:true,json:async()=>({id,userCode:'12345ABCDE'})})});
  await f.assertPreserved();assert.equal(await createFileCredentialStore({stateDir:plan.candidateStateDir}).read(),null);
 });
+test('a stop-stage failure restores service availability without claiming a completed cutover',async t=>{
+ const f=await staged(t);let stops=0,sourceStarted=false;
+ const host={validate:async()=>{},suspend:async()=> 'lease',stop:async()=>{if(++stops===1)throw Error('stop_failed');},start:async endpoint=>{assert.equal(endpoint,f.plan.sourceEndpoint);sourceStarted=true;}};
+ await assert.rejects(activateEndpointTransition({...f,confirmation:f.plan.confirmation,host}),/stop_failed/);assert.equal(sourceStarted,true);assert.deepEqual(await fs.readFile(f.configFile),f.before);assert.deepEqual(await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json')),f.credential);
+});
