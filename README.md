@@ -264,3 +264,10 @@ session and explicit successful delivery. It never reads task prompts or guesses
 identity from response text. Startup and replacement bindings establish a new
 baseline (no historical push backfill); receipt/cursor persistence is atomic in
 the Sidewisp spool. Missing native receipt storage stays unsupported, not success.
+
+### Source-review archive compatibility
+
+Build a commit-pinned source archive with `python3 scripts/pack-source.py --ref <full-commit> --output <absolute-file.tgz>`.
+This emits deterministic USTAR + gzip without Git's global PAX comment, which the strict OpenClaw installer rejects.
+Keep the returned full commit and SHA-256 in the external enrollment manifest, never weaken archive admission.
+Source acceptance must exercise `plugins install` from an older supported version through real `--enqueue`; a ready, same-version foreground collector does not test archive installation.
