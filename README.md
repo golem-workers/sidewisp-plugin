@@ -207,3 +207,10 @@ Before planning a cross-endpoint move, complete pinned plugin/manager maintenanc
 on the CURRENT endpoint with `prepare-openclaw.mjs --enqueue --update-only` and
 wait for its independent terminal completion. Existing binding stays unchanged.
 Activation refuses a source collector that is not the target version and ready.
+
+Native cron-result fallback reads only the bounded `task_runs` receipt projection
+from the selected profile's SQLite state, including the exact native cron run
+session and explicit successful delivery. It never reads task prompts or guesses
+identity from response text. Startup and replacement bindings establish a new
+baseline (no historical push backfill); receipt/cursor persistence is atomic in
+the Sidewisp spool. Missing native receipt storage stays unsupported, not success.

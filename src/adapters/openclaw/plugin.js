@@ -1,3 +1,4 @@
+import {collectNativeCronDeliveryReceipts} from '../../cron/delivery-receipts.js';
 import { ensureNativeCronHelper, nativeCronWorkspaces } from "../../bootstrap/native-cron-helper.js";
 import { listAgentIds, resolveAgentWorkspaceDir } from "openclaw/plugin-sdk/agent-runtime";
 import { createOpenClawQuestionObserver } from "./questions.js";
@@ -380,7 +381,7 @@ export default definePluginEntry({
           contextDelivery=createContextUsageDelivery({collect:()=>collectOpenClawContext({stateDir}),endpoint:config.endpoint,
             credentialProvider:{current:async()=>auth.credential()}});
           contextDelivery.start();
-          cronDelivery = createCronDelivery({ collect: () => collectOpenClawCron({ stateDir, runtimeVersion: api.runtime.version, storePath: api.config?.cron?.store }), subscribe: onChange => watchOpenClawCron({ stateDir, runtimeVersion: api.runtime.version, storePath: api.config?.cron?.store, onChange }), endpoint: config.endpoint, credentialProvider: { current: async () => auth.credential() } });
+          cronDelivery = createCronDelivery({ collect: async () => { const receipts=collectNativeCronDeliveryReceipts({stateDir,installationId:auth.status().installationId,storePath:api.config?.cron?.store,spool,envelopeFactory:id=>makeEnvelope({},'state','native-cron-delivery|'+id)});if(receipts.events)uploadPump?.request();return collectOpenClawCron({ stateDir, runtimeVersion: api.runtime.version, storePath: api.config?.cron?.store }); }, subscribe: onChange => watchOpenClawCron({ stateDir, runtimeVersion: api.runtime.version, storePath: api.config?.cron?.store, onChange }), endpoint: config.endpoint, credentialProvider: { current: async () => auth.credential() } });
           cronDelivery.start();
           usageDelivery = createUsageDelivery({
             collect: ({ collectedAtMs }) => collectOpenClawUsage({ stateDir, collectedAtMs }),
