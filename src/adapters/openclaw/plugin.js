@@ -54,7 +54,7 @@ import {
 import { adoptInstalledManager } from '../../update/manager-adoption.js';
 import { createUpdateScheduler } from "../../update/scheduler.js";
 
-const VERSION = "0.2.88";
+const VERSION = "0.2.89";
 const HOOK_EVENT_SOURCE = "openclaw-hooks";
 
 export default definePluginEntry({
