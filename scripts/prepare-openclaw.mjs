@@ -24,7 +24,8 @@ const stateDir=options['state-dir'];const endpoint=new URL(options.endpoint);
 // gets progress only; it never authorizes a rebind or receives source credentials.
 const preparationEndpoint=new URL(options['preparation-endpoint']??options.endpoint);
 const requestId=options['request-id'];
-const reportsInvitation='preparation-endpoint' in options;
+// An explicit invitation is never ordinary maintenance, even on the same origin.
+const reportsInvitation='preparation-endpoint' in options || options.updateOnly && requestId!==undefined;
 const expiresAtMs=options['expires-at-ms']===undefined?undefined:Number(options['expires-at-ms']);
 const targetTransition=reportsInvitation && preparationEndpoint.origin!==endpoint.origin;
 if(!path.isAbsolute(stateDir??'') || !path.isAbsolute(options.archive??'') || !/^[a-f0-9]{64}$/.test(options.sha256??'')
