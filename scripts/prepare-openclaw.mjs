@@ -137,7 +137,10 @@ if(!options.locked){
    },
    ensureManager:async()=>installUpdateManager({stateDir,endpoint:endpoint.origin,upgrade:true}),
    begin:async()=>{
-    return client.begin({id:options['request-id'],runtime:'openclaw'});
+    // One ordinary invitation entrypoint: local Gateway delivery state is not
+    // authority to choose reuse versus new authorization. No fallback on failure.
+    continuation=await client.continueInvitation({id:requestId,runtime:'openclaw',expiresAtMs});
+    return {id:continuation.requestId,expiresAtMs:continuation.expiresAtMs,autoConnect:continuation.status==='connection_pending'};
    },
   });
   if(continuation)result=continuation;

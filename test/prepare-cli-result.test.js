@@ -37,7 +37,7 @@ async function fixture({refused=false,updateOnly=false,queueRefused=false,report
   await writeFile(path.join(bin,'loginctl'),'#!/bin/sh\necho yes\n',{mode:0o700});
   await writeFile(path.join(bin,'systemd-run'),'#!/bin/sh\nexit 0\n',{mode:0o700});
   const preload=path.join(dir,'preload.mjs'),ledger=path.join(dir,'calls.json');
-  await writeFile(preload,`import {writeFileSync} from 'node:fs';let calls=0;const reports=[];globalThis.fetch=async(url,options)=>{if(new URL(url).pathname==='/v1/installations/credential-status'){return Response.json({schema:'sidewisp.credential-status.v1',status:${JSON.stringify(credentialStatus)},installationId:'sw_ins_old12345678'},{status:${credentialStatus==='active'?200:401}});}if(new URL(url).pathname==='/v1/device-authorizations/poll')return Response.json({status:'expired'});if(new URL(url).pathname==='/v1/device-authorizations/reuse'){const b=JSON.parse(options.body);if(!options.headers.authorization?.startsWith('Sidewisp sw_ins_old12345678:')||b.id!==${JSON.stringify(id)}||b.schema!=='sidewisp.authorization-reuse.v1')throw Error('invalid_reuse');writeFileSync(${JSON.stringify(path.join(dir,'reuse.json'))},JSON.stringify({id:b.id,origin:new URL(url).origin,signed:true}));return Response.json(${reuseRejected?"{error:'unsupported'}":`{id:${JSON.stringify(id)},installationId:'sw_ins_old12345678',reusedExistingInstallation:true,status:'completed',expiresAtMs:${expiresAtMs}}`},{status:${reuseRejected?401:200}});}if(new URL(url).pathname==='/v1/device-authorizations/preparation'){if(options.headers.authorization)throw Error('source_credential_leaked');const body=JSON.parse(options.body);reports.push({origin:new URL(url).origin,id:body.id,stage:body.stage,...(body.reasonCode?{reasonCode:body.reasonCode}:{}),proofPresent:/^sw_device_[A-Za-z0-9_-]{43}$/.test(body.deviceSecret)});writeFileSync(${JSON.stringify(path.join(dir,'reports.json'))},JSON.stringify(reports));writeFileSync(${JSON.stringify(path.join(dir,'report.json'))},JSON.stringify({stage:body.stage,reasonCode:body.reasonCode}));return Response.json({});}if(new URL(url).pathname!=='/v1/device-authorizations/begin')throw Error('unexpected_request');const body=JSON.parse(options.body);if(body.id!==${JSON.stringify(id)} || !body.deviceSecret.startsWith('sw_device_'))throw Error('invalid_begin');writeFileSync(${JSON.stringify(ledger)},JSON.stringify({calls:++calls}));return Response.json({id:body.id,userCode:'ABCDEF1234',expiresAtMs:${expiresAtMs}});};`);
+  await writeFile(preload,`import {writeFileSync} from 'node:fs';let calls=0;const reports=[];globalThis.fetch=async(url,options)=>{if(new URL(url).pathname==='/v1/installations/credential-status'){if(${JSON.stringify(credentialStatus)}==='network')throw Error('network_unavailable');return Response.json({schema:'sidewisp.credential-status.v1',status:${JSON.stringify(credentialStatus)},installationId:'sw_ins_old12345678'},{status:${credentialStatus==='active'?200:401}});}if(new URL(url).pathname==='/v1/device-authorizations/poll')return Response.json({status:'expired'});if(new URL(url).pathname==='/v1/device-authorizations/reuse'){const b=JSON.parse(options.body);if(!options.headers.authorization?.startsWith('Sidewisp sw_ins_old12345678:')||b.id!==${JSON.stringify(id)}||b.schema!=='sidewisp.authorization-reuse.v1')throw Error('invalid_reuse');writeFileSync(${JSON.stringify(path.join(dir,'reuse.json'))},JSON.stringify({id:b.id,origin:new URL(url).origin,signed:true}));return Response.json(${reuseRejected?"{error:'unsupported'}":`{id:${JSON.stringify(id)},installationId:'sw_ins_old12345678',reusedExistingInstallation:true,status:'completed',expiresAtMs:${expiresAtMs}}`},{status:${reuseRejected?401:200}});}if(new URL(url).pathname==='/v1/device-authorizations/preparation'){if(options.headers.authorization)throw Error('source_credential_leaked');const body=JSON.parse(options.body);reports.push({origin:new URL(url).origin,id:body.id,stage:body.stage,...(body.reasonCode?{reasonCode:body.reasonCode}:{}),proofPresent:/^sw_device_[A-Za-z0-9_-]{43}$/.test(body.deviceSecret)});writeFileSync(${JSON.stringify(path.join(dir,'reports.json'))},JSON.stringify(reports));writeFileSync(${JSON.stringify(path.join(dir,'report.json'))},JSON.stringify({stage:body.stage,reasonCode:body.reasonCode}));return Response.json({});}if(new URL(url).pathname!=='/v1/device-authorizations/begin')throw Error('unexpected_request');const body=JSON.parse(options.body);if(body.id!==${JSON.stringify(id)} || !body.deviceSecret.startsWith('sw_device_'))throw Error('invalid_begin');writeFileSync(${JSON.stringify(ledger)},JSON.stringify({calls:++calls}));return Response.json({id:body.id,userCode:'ABCDEF1234',expiresAtMs:${expiresAtMs}});};`);
   const result=spawnSync(process.execPath,['--import',preload,path.join(root,'scripts/prepare-openclaw.mjs'),...(queueRefused||queued?['--enqueue']:[]),'--archive',archive,'--sha256',sha256,'--endpoint',status.endpoint,'--state-dir',state,...(updateOnly?['--update-only',...(reportTarget?[...(implicitSameOrigin?[]:['--preparation-endpoint',targetEndpoint]),'--request-id',id,'--expires-at-ms',String(expiresAtMs)]:[])]:['--request-id',id,'--expires-at-ms',String(expiresAtMs)]),...(invitationConsent?['--accept-staging-to-production']:[]),...extraArgs],{env:{...process.env,HOME:dir,XDG_CONFIG_HOME:path.join(dir,'config'),PATH:bin+path.delimiter+process.env.PATH,OPENCLAW_STATE_DIR:state,OPENCLAW_CONFIG_PATH:config},encoding:'utf8',timeout:20000});
   let persisted;try{persisted=JSON.parse(await readFile(path.join(state,'sidewisp/prepare-status.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
   let calls=0;try{calls=JSON.parse(await readFile(ledger,'utf8')).calls;}catch(e){if(e.code!=='ENOENT')throw e;}
@@ -47,13 +47,13 @@ async function fixture({refused=false,updateOnly=false,queueRefused=false,report
   const preserved=foreignAuthorization && (await readFile(path.join(state,'sidewisp/device-authorization.json'),'utf8')===oldAuthorization && await readFile(path.join(state,'sidewisp/installation.json'),'utf8')===oldCredential && await readFile(config,'utf8')===configBytes);
   let proofMode;try{const {stat}=await import('node:fs/promises');proofMode=(await stat(path.join(state,'sidewisp/prepare-authorizations',id+'.json'))).mode&0o777;}catch(e){if(e.code!=='ENOENT')throw e;}
   let reply;try{reply=JSON.parse(await readFile(path.join(state,'sidewisp/connection-reply.json'),'utf8'));}catch(e){if(e.code!=='ENOENT')throw e;}
-  if(exercise)await exercise({stateDir:state,configFile:config,id,expiresAtMs,sourceEndpoint,targetEndpoint,reply,result});
+  if(exercise)await exercise({bin,dir,preload,configBytes,oldCredential,stateDir:state,configFile:config,id,expiresAtMs,sourceEndpoint,targetEndpoint,reply,result});
   return {result,persisted,calls,id,expiresAtMs,report,diagnostics,reports,preserved,proofMode,targetEndpoint,reply};
  }finally{await rm(dir,{recursive:true,force:true});}
 }
 test('real preparation CLI reports approval_pending, not empty success or completed connection',async()=>{
  const {result,persisted,calls,id,expiresAtMs}=await fixture();assert.equal(result.status,0,result.stderr);
- assert.deepEqual(JSON.parse(result.stdout),{status:'approval_pending',requestId:id,expiresAtMs});
+ assert.deepEqual(JSON.parse(result.stdout),{status:'approval_pending',requestId:id,expiresAtMs,bindingPreserved:true});
  assert.equal(persisted.status,'approval_pending');assert.equal(calls,1);
  assert.doesNotMatch(result.stdout,/sw_device_|ABCDEF1234|credential|verificationUri/);
 });
@@ -213,4 +213,43 @@ test('same-origin update with protocol-rejected credential enters normal begin, 
  assert.deepEqual(JSON.parse(f.result.stdout),{status:'approval_pending',requestId:f.id,expiresAtMs:f.expiresAtMs,bindingPreserved:true});
  assert.equal(f.persisted.stage,'approval_pending');assert.equal(f.reply.requestId,f.id);
  assert.doesNotMatch(f.result.stdout+f.result.stderr,/sw_device_|sw_secret_/);
+});
+
+// Same ordinary invocation for active, rejected and unconfigured profiles.
+for(const credentialStatus of ['active','rejected','unavailable','network'])test(`ordinary invitation selects signed ${credentialStatus}, never local delivery status`,async()=>{
+ const f=await fixture({foreignAuthorization:true,credentialStatus,extraArgs:replyArgs,exercise:async f=>{
+  assert.equal(await readFile(path.join(f.stateDir,'sidewisp/installation.json'),'utf8'),f.oldCredential);
+  assert.equal(await readFile(f.configFile,'utf8'),f.configBytes);
+ }});
+ const r=JSON.parse(f.result.stdout);
+ if(['unavailable','network'].includes(credentialStatus)){
+  assert.equal(f.result.status,1,f.result.stderr);assert.equal(r.status,'blocked');assert.equal(f.calls,0);
+ }else{
+  assert.equal(f.result.status,0,f.result.stderr);assert.equal(r.requestId,f.id);assert.equal(r.expiresAtMs,f.expiresAtMs);
+  assert.equal(r.status,credentialStatus==='active'?'connection_pending':'approval_pending');
+  assert.equal(f.calls,credentialStatus==='active'?0:1);
+  assert.equal(r.reusedExistingInstallation,credentialStatus==='active'?true:undefined);
+ }
+ assert.equal(f.reply.requestId,f.id);assert.doesNotMatch(f.result.stdout+f.result.stderr,/sw_device_|sw_secret_/);
+});
+test('ordinary invitation reuse refusal never falls back to begin',async()=>{
+ const f=await fixture({foreignAuthorization:true,credentialStatus:'active',reuseRejected:true});
+ assert.equal(f.result.status,1);assert.equal(JSON.parse(f.result.stdout).reason,'existing_authorization_reuse_failed');assert.equal(f.calls,0);assert.equal(f.preserved,true);
+});
+for(const credentialStatus of ['active','rejected'])test(`ordinary queued invitation resumes same signed ${credentialStatus} decision`,async()=>{
+ await fixture({queued:true,foreignAuthorization:true,credentialStatus,extraArgs:replyArgs,exercise:async f=>{
+  assert.equal(f.result.status,0,f.result.stderr);const queued=JSON.parse(f.result.stdout);assert.equal(queued.status,'preparation_queued');
+  const unit=await readFile(path.join(f.dir,'config/systemd/user',queued.unit),'utf8');
+  const argv=[...unit.match(/^ExecStart=(.*)$/m)[1].matchAll(/"(?:[^"\\]|\\.)*"/g)].map(x=>JSON.parse(x[0]));
+  assert.equal(argv.includes('--update-only'),false);assert.equal(argv.includes('--enqueue'),false);assert.ok(argv.includes('--supervised'));
+  assert.equal(argv[argv.indexOf('--request-id')+1],f.id);assert.equal(Number(argv[argv.indexOf('--expires-at-ms')+1]),f.expiresAtMs);
+  const resumed=spawnSync(argv[0],['--import',f.preload,...argv.slice(1)],{env:{...process.env,HOME:f.dir,XDG_CONFIG_HOME:path.join(f.dir,'config'),PATH:f.bin+path.delimiter+process.env.PATH,OPENCLAW_STATE_DIR:f.stateDir,OPENCLAW_CONFIG_PATH:f.configFile},encoding:'utf8',timeout:20000});
+  assert.equal(resumed.status,0,resumed.stderr);const r=JSON.parse(resumed.stdout);
+  assert.equal(r.status,credentialStatus==='active'?'connection_pending':'approval_pending');assert.equal(r.requestId,f.id);assert.equal(r.expiresAtMs,f.expiresAtMs);
+  if(credentialStatus==='active'){
+   await assert.rejects(readFile(path.join(f.dir,'calls.json')),{code:'ENOENT'});assert.equal(r.reusedExistingInstallation,true);
+  }else assert.equal(JSON.parse(await readFile(path.join(f.dir,'calls.json'),'utf8')).calls,1);
+  assert.equal(await readFile(path.join(f.stateDir,'sidewisp/installation.json'),'utf8'),f.oldCredential);
+  assert.equal(await readFile(f.configFile,'utf8'),f.configBytes);
+ }});
 });
