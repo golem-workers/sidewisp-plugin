@@ -97,14 +97,16 @@ if(!options.locked){
  }
  if(result){
   if(result.status==='blocked'){await persist({stage:'blocked',reason:result.reason});process.exitCode=1;}
-  if(options['telegram-target']&&!options.updateOnly)await saveConnectionReply({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
+  // A destination invitation still needs its own reply intent during source-only maintenance.
+  if(options['telegram-target']&&(!options.updateOnly||reportsInvitation))await saveConnectionReply({stateDir,endpoint:preparationEndpoint.origin,requestId,route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
   console.log(JSON.stringify({...result,...(result.status==='preparation_queued'?{nextAction:options.invitationConsent?'Reply exactly «Подключаюсь к Sidewisp» once as the final handoff acknowledgement. End this setup turn: the independent helper automatically completes this invitation-authorized staging-to-production transition. Do not ask another host-confirmation question, repeat setup or begin, or extend the original expiry. Account authorization and first accepted signal remain required.':'Reply exactly «Подключаюсь к Sidewisp» as the final handoff acknowledgement, once; not an empty final. Independent preparation continues; do not repeat setup or begin. Observe sidewisp/prepare-status.json: on confirm_endpoint_transition show source/target and request explicit host confirmation; only then run scripts/endpoint-transition.mjs connect <planFile> <confirmation> <requestId> --expires-at-ms <original-expiry> --enqueue under the same profile. Never use the plan hash as consent.'}:{})}));
  }
 }else{
  try{
   const job=options.supervised?JSON.parse(readFileSync(jobFile,'utf8')):null;
   if(job?.terminal){if(job.result)console.log(JSON.stringify(job.result));process.exit(0);}
-  if(options['telegram-target']&&!options.updateOnly)await saveConnectionReply({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
+  // A destination invitation still needs its own reply intent during source-only maintenance.
+  if(options['telegram-target']&&(!options.updateOnly||reportsInvitation))await saveConnectionReply({stateDir,endpoint:preparationEndpoint.origin,requestId,route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
   const status=()=>{try{return JSON.parse(run(['gateway','call','sidewisp.status','--params','{}','--json']));}catch(e){if(/unknown method[: ]+sidewisp\.status/i.test(String(e.stderr)+' '+String(e.stdout)))return null;throw e;}};
   if(reportsInvitation && expiresAtMs<=Date.now() && !options.supervised)throw Error('fresh_invitation_required');
   let result=await prepareConnection({targetVersion:version,endpoint:endpoint.origin,updateOnly:options.updateOnly,

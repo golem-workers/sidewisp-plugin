@@ -124,3 +124,15 @@ test('target preparation with foreign authorization cannot bypass confirmation a
  assert.notEqual(plan.candidateStateDir,f.stateDir);
  assert.equal(JSON.parse(await fs.readFile(path.join(plan.candidateStateDir,'sidewisp/device-authorization.json'),'utf8')).deviceSecret,proof);
 });
+
+import {recordAuthorizationCompletion,createConnectionNotifier,saveConnectionReply} from '../src/auth/connection-notice.js';
+for(const variant of ['old-request','wrong-endpoint','missing'])test(`activation does not inherit an unrelated reply intent: ${variant}`,async t=>{
+ const f=await staged(t),requestId='sw_pair_'+'n'.repeat(32),installationId='sw_ins_new12345678';
+ await recordAuthorizationCompletion({stateDir:f.plan.candidateStateDir,endpoint:f.plan.targetEndpoint,requestId,installationId});
+ if(variant!=='missing')await saveConnectionReply({stateDir:f.stateDir,endpoint:variant==='wrong-endpoint'?f.plan.sourceEndpoint:f.plan.targetEndpoint,requestId:variant==='old-request'?'sw_pair_'+'o'.repeat(32):requestId,route:{channel:'telegram',to:'999'}});
+ const host={validate:async()=>{},suspend:async()=>'lease',stop:async()=>{},start:async()=>{}};
+ await activateEndpointTransition({...f,confirmation:f.plan.confirmation,host});
+ await assert.rejects(fs.access(path.join(f.stateDir,'sidewisp/connection-reply.json')),{code:'ENOENT'});
+ let sent=0;const notifier=createConnectionNotifier({stateDir:f.stateDir,endpoint:f.plan.targetEndpoint,send:async()=>{sent++;return{messageId:'unexpected'};}});
+ await notifier.acknowledged([{type:'health.snapshot',installationId,occurredAt:new Date().toISOString()}]);await notifier.stop();assert.equal(sent,0);
+});
