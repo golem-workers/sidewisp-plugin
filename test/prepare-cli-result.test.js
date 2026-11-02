@@ -104,7 +104,7 @@ test('explicit staging-production invitation auto-enqueues transition without ho
  const f=await fixture({updateOnly:true,reportTarget:true,foreignAuthorization:true,invitationConsent:true});
  assert.equal(f.result.status,0,f.result.stderr);const result=JSON.parse(f.result.stdout);
  assert.equal(result.status,'transition_queued');assert.equal(result.nextAction.type,'automatic_transition');
- assert.equal(f.persisted.stage,'connection_pending');assert.equal(f.preserved,true);assert.equal(f.calls,0);
+ assert.equal(f.persisted.stage,'connection_pending');assert.equal(f.persisted.status,'connection_pending');assert.equal(f.preserved,true);assert.equal(f.calls,0);
  assert.equal(f.reports.some(r=>r.reasonCode==='existing_endpoint_mismatch'),false);
  assert.doesNotMatch(f.result.stdout,/confirm_endpoint_transition|sw_device_|sw_secret_/);
 });

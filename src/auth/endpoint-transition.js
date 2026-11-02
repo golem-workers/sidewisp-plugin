@@ -110,8 +110,8 @@ export async function activateEndpointTransition({plan,confirmation,host,fetchIm
   // From this boundary the destination may write data. Never restore old state
   // over it, even if start or the final receipt fails. Recovery is non-destructive.
   if(plan.invitation?.expiresAtMs<=Date.now())throw Error('fresh_invitation_required');
-  destinationStarting=true;
   await save({status:'starting_target',targetInstallationId:ready.targetInstallationId,sourceInstallationId:plan.sourceInstallationId});
+  destinationStarting=true;
   await host.start(plan.targetEndpoint);
   await save({status:'activated',targetInstallationId:ready.targetInstallationId,sourceInstallationId:plan.sourceInstallationId});
   return {status:'activated',targetInstallationId:ready.targetInstallationId,bindingChanged:true,sourceArchived:true};

@@ -56,7 +56,7 @@ const saveTerminal=(status,result)=>{if(options.supervised){const j=JSON.parse(r
      await bindInvitationTransitionPlan({consent,planFile:action.planFile,plan});
      const queued=JSON.parse(execFileSync(process.execPath,[fileURLToPath(new URL('./endpoint-transition.mjs',import.meta.url)),'connect',action.planFile,action.confirmation,requestId,'--expires-at-ms',String(expiresAtMs),'--invitation-consent',consent.file,'--enqueue'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));
      continuation={...queued,bindingPreserved:true,nextAction:{type:'automatic_transition',requestId,expiresAtMs}};
-     s={stage:'connection_pending',...continuation};
+     s={...continuation,status:'connection_pending',stage:'connection_pending'};
     }else {
     if(options['telegram-target']){try{await notifyPreparationContinuation({stateDir,requestId,action:continuation.nextAction,route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});continuation.confirmationDelivery='sent';}catch{continuation.confirmationDelivery='unavailable';}}
     s={...continuation,stage:'blocked',reasonCode:continuation.reason};
