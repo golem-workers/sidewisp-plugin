@@ -92,7 +92,7 @@ export function createConnectionNotifier({stateDir,endpoint,send=sendTelegramCon
 }
 
 export async function sendConnectionDelay({stateDir,endpoint,requestId,reason,send=sendTelegramConnectionReply}) {
- const messages={fresh_invitation_required:'Заявка истекла. Создайте новую в Sidewisp и отправьте агенту свежую инструкцию.',host_idle_timeout:'Подготовка остановлена: агент не освободился. Завершите текущую работу и повторите подключение в Sidewisp.',collector_not_ready:'Не удалось запустить мониторинг. Проверяю запуск; настройки сохранены.'};
+ const messages={existing_invitation_not_accessible:'Приглашение недоступно для текущего подключения агента. Проверьте аккаунт и рабочее пространство в Sidewisp. Прежнее подключение сохранено; смена аккаунта требует отдельного подтверждённого переноса, повтор приглашения это не исправит.',fresh_invitation_required:'Заявка истекла. Создайте новую в Sidewisp и отправьте агенту свежую инструкцию.',host_idle_timeout:'Подготовка остановлена: агент не освободился. Завершите текущую работу и повторите подключение в Sidewisp.',collector_not_ready:'Не удалось запустить мониторинг. Проверяю запуск; настройки сохранены.'};
  if(!messages[reason])return;
  try {const file=path.join(stateDir,'sidewisp','connection-reply.json');const reply=JSON.parse(await fs.readFile(file,'utf8'));
   if(reply.requestId!==requestId||reply.endpoint!==endpoint)return;

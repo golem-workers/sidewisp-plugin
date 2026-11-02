@@ -77,7 +77,14 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
         const response = await fetchImpl(new URL('/v1/device-authorizations/reuse',url),{method:'POST',redirect:'error',body,signal:AbortSignal.timeout(15000),
           headers:{'content-type':'application/json',authorization:`Sidewisp ${existing.installationId}:${signature}`,'x-sidewisp-algorithm':'hmac-sha256-v1','x-sidewisp-timestamp':timestamp,'x-sidewisp-nonce':nonce}});
         const result = await response.json().catch(()=>null);
-        if (!response.ok) throw Object.assign(Error('existing_authorization_reuse_failed'),{status:response.status,reason:result?.error});
+        if (!response.ok) {
+          // A typed refusal is not a revoked credential or permission to re-enroll.
+          // 404 deliberately does not distinguish a missing request from another
+          // account/workspace; preserve that privacy boundary in the public reason.
+          const reason = response.status === 404 && result?.error === 'authorization_not_found'
+            ? 'existing_invitation_not_accessible' : 'existing_authorization_reuse_failed';
+          throw Object.assign(Error(reason), {status:response.status,reason:result?.error});
+        }
         if (result?.id !== id || result.installationId !== existing.installationId || result.reusedExistingInstallation !== true
           || result.expiresAtMs !== expiresAtMs || !['approved','completed'].includes(result.status)) throw Error('invalid_device_response');
         if (result.status === 'completed') {

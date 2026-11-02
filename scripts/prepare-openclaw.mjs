@@ -81,7 +81,7 @@ const saveTerminal=(status,result)=>{if(options.supervised){const j=JSON.parse(r
    const key=progress.stage+':'+(progress.reasonCode??progress.reason??'');
    if(key===reported&&Date.now()-reportedAt<30000)return;
    reported=key;reportedAt=Date.now();
-   const allowed=['ACTIVE_WORK','HOST_RETAINED_WORK','IDLE_WINDOW_TIMEOUT','host_idle_timeout','fresh_invitation_required','update_failed','collector_not_ready','existing_endpoint_mismatch','transition_activation_failed','preparation_failed'];
+   const allowed=['ACTIVE_WORK','HOST_RETAINED_WORK','IDLE_WINDOW_TIMEOUT','host_idle_timeout','fresh_invitation_required','update_failed','collector_not_ready','existing_endpoint_mismatch','existing_invitation_not_accessible','transition_activation_failed','preparation_failed'];
    const reason=progress.reasonCode??progress.reason;
    try{await progressClient.reportPreparation({id:requestId,stage:progress.stage,...(reason?{reasonCode:allowed.includes(reason)?reason:'preparation_failed'}:{})});}
    catch{writeState({status:s.stage,...s,progressReporting:'unavailable'});}

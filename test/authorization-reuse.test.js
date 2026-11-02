@@ -14,3 +14,21 @@ for(const variant of ['wrong-request','wrong-installation','wrong-expiry','unsup
  if(variant!=='credential-changed')assert.equal(await fs.readFile(path.join(f.directory,'installation.json'),'utf8'),before);
  if(['expired','wrong-proof-endpoint'].includes(variant))assert.equal(calls,0);
 }));
+
+for(const [status,error,expected] of [[404,'authorization_not_found','existing_invitation_not_accessible'],[404,'not_found','existing_authorization_reuse_failed'],[401,'authorization_not_found','existing_authorization_reuse_failed'],[403,'authorization_owner_unavailable','existing_authorization_reuse_failed'],[500,'authorization_not_found','existing_authorization_reuse_failed']])test(`reuse refusal keeps typed boundary ${status}/${error}`,async()=>fixture(async f=>{
+ const before=await fs.readFile(path.join(f.directory,'installation.json'),'utf8'),calls=[];
+ const client=createDeviceAuthorizationClient({endpoint:'https://same.test',stateDir:f.stateDir,fetchImpl:async u=>{calls.push(u.pathname);return Response.json({error},{status});}});
+ await assert.rejects(client.reuseExisting({id:f.id,runtime:'openclaw',expiresAtMs:f.expiresAtMs,now:()=>1000}),e=>e.message===expected&&e.status===status&&e.reason===error);
+ assert.deepEqual(calls,['/v1/device-authorizations/reuse']);assert.equal(await fs.readFile(path.join(f.directory,'installation.json'),'utf8'),before);
+ await assert.rejects(fs.stat(path.join(f.directory,'authorization-completed.json')),{code:'ENOENT'});
+}));
+test('account-access refusal sends one actionable notice only to the initiating route',async()=>fixture(async f=>{
+ const {saveConnectionReply,sendConnectionDelay}=await import('../src/auth/connection-notice.js');
+ await saveConnectionReply({stateDir:f.stateDir,endpoint:'https://same.test',requestId:f.id,route:{channel:'telegram',to:'-100123',accountId:'fixture',threadId:'9'}});
+ const sent=[],send=async(route,text)=>{sent.push({route,text});return{messageId:'notice-1'};};
+ const options={stateDir:f.stateDir,endpoint:'https://same.test',requestId:f.id,reason:'existing_invitation_not_accessible',send};
+ await sendConnectionDelay({...options,requestId:'sw_pair_'+'z'.repeat(32)});assert.equal(sent.length,0);
+ await sendConnectionDelay(options);await sendConnectionDelay(options);assert.equal(sent.length,1);
+ assert.deepEqual(sent[0].route,{channel:'telegram',target:'-100123',accountId:'fixture',threadId:'9'});
+ assert.match(sent[0].text,/аккаунт и рабочее пространство/);assert.match(sent[0].text,/сохранено/);
+}));
