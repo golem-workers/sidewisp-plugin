@@ -271,3 +271,12 @@ Build a commit-pinned source archive with `python3 scripts/pack-source.py --ref 
 This emits deterministic USTAR + gzip without Git's global PAX comment, which the strict OpenClaw installer rejects.
 Keep the returned full commit and SHA-256 in the external enrollment manifest, never weaken archive admission.
 Source acceptance must exercise `plugins install` from an older supported version through real `--enqueue`; a ready, same-version foreground collector does not test archive installation.
+
+### User-invited ordinary staging → production
+
+The explicit `--accept-staging-to-production` preparation flag authorizes only
+`https://staging-api.sidewisp.com` → `https://api.sidewisp.com` for this current
+profile and invitation. It replaces the separate host-confirmation exchange in
+that branch only; all other transitions retain the confirmation flow above.
+See [the CLI, consent, retry and recovery contract](docs/invitation-transition-contract.md).
+No artifact in this source PR is an official published release.

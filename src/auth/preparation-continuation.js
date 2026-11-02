@@ -5,10 +5,10 @@ import {planEndpointTransition} from './endpoint-transition.js';
 
 // Planning is local and read-only with respect to the active binding. Neither
 // this function nor its returned action constitutes host/account approval.
-export async function preparationContinuation({stateDir,configFile,sourceEndpoint,targetEndpoint,requestId,expiresAtMs,now=Date.now}) {
+export async function preparationContinuation({stateDir,configFile,sourceEndpoint,targetEndpoint,requestId,expiresAtMs,invitationConsent=false,now=Date.now}) {
  const base={status:'blocked',bindingPreserved:true,sourceUpdate:'completed'};
  if(!Number.isSafeInteger(expiresAtMs)||expiresAtMs<=now())return {...base,reason:'fresh_invitation_required',nextAction:{type:'fresh_invitation_required'}};
- const plan=await planEndpointTransition({stateDir,configFile,sourceEndpoint,targetEndpoint});
+ const plan=await planEndpointTransition({stateDir,configFile,sourceEndpoint,targetEndpoint,...(invitationConsent?{invitation:{requestId,expiresAtMs}}:{})});
  const directory=path.dirname(plan.candidateStateDir);
  await fs.mkdir(directory,{recursive:true,mode:0o700});
  const planFile=path.join(directory,'plan.json');

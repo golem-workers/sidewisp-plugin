@@ -76,11 +76,15 @@ test('activation archives source spool/credentials and gives destination a clean
  assert.equal(JSON.parse(await fs.readFile(f.configFile)).other,'keep');assert.equal(events.at(-1),'https://target.test');
  const n=events.length;await activateEndpointTransition(options);assert.equal(events.length,n);
 });
-test('failed destination start restores original config, credential, spool and source service',async t=>{
- const f=await staged(t);let restored=false;const host={validate:async()=>{},suspend:async()=> 'lease',stop:async()=>{},start:async endpoint=>{if(endpoint===f.plan.targetEndpoint)throw Error('target_failed');restored=true;}};
- await assert.rejects(activateEndpointTransition({...f,confirmation:f.plan.confirmation,host}),/target_failed/);assert.equal(restored,true);
- assert.deepEqual(await fs.readFile(f.configFile),f.before);assert.deepEqual(await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json')),f.credential);
- assert.equal(await fs.readFile(path.join(f.stateDir,'sidewisp/spool.sqlite'),'utf8'),'untouched-backlog-and-cursors');
+test('late destination failure retains new data and source archive; retry cannot overwrite either',async t=>{
+ const f=await staged(t);let starts=0;
+ const host={validate:async()=>{},suspend:async()=> 'lease',stop:async()=>{},start:async endpoint=>{starts++;assert.equal(endpoint,f.plan.targetEndpoint);await fs.writeFile(path.join(f.stateDir,'sidewisp/new-data'),'accepted destination data');throw Error('target_failed');}};
+ const options={...f,confirmation:f.plan.confirmation,host};
+ await assert.rejects(activateEndpointTransition(options),/transition_recovery_required/);
+ assert.equal(JSON.parse(await fs.readFile(f.configFile)).plugins.entries.sidewisp.config.endpoint,f.plan.targetEndpoint);
+ assert.equal(await fs.readFile(path.join(f.stateDir,'sidewisp/new-data'),'utf8'),'accepted destination data');
+ assert.deepEqual(await fs.readFile(path.join(path.dirname(f.plan.candidateStateDir),'source-sidewisp/installation.json')),f.credential);
+ await assert.rejects(activateEndpointTransition(options),/transition_recovery_required/);assert.equal(starts,1);
 });
 test('an already-reported invitation reuses its proof without copying source credentials',async t=>{
  const f=await fixture(t),plan=await planEndpointTransition(f),id='sw_pair_'+'p'.repeat(32),proof='sw_device_'+'x'.repeat(43);

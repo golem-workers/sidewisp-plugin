@@ -20,8 +20,9 @@ async function source({stateDir, configFile, sourceEndpoint=sourceOrigin}) {
 export async function planEndpointTransition(options) {
  const sourceEndpoint=origin(options.sourceEndpoint??sourceOrigin),targetEndpoint=origin(options.targetEndpoint??destinationOrigin);
  if(sourceEndpoint===targetEndpoint)throw Error('identical_transition_endpoints');
+ if(options.invitation && (!/^sw_pair_[A-Za-z0-9_-]{32}$/.test(options.invitation.requestId??'')||!Number.isSafeInteger(options.invitation.expiresAtMs)||options.invitation.expiresAtMs<=Date.now()))throw Error('fresh_invitation_required');
  const original=await source({...options,sourceEndpoint});
- const plan={schema:'sidewisp.endpoint-transition.v1',stateDir:options.stateDir,configFile:options.configFile,sourceEndpoint,targetEndpoint,sourceInstallationId:original.credential.installationId,sourceFingerprint:original.sourceFingerprint,configFingerprint:original.configFingerprint};
+ const plan={schema:'sidewisp.endpoint-transition.v1',stateDir:options.stateDir,configFile:options.configFile,sourceEndpoint,targetEndpoint,sourceInstallationId:original.credential.installationId,sourceFingerprint:original.sourceFingerprint,configFingerprint:original.configFingerprint,...(options.invitation?{invitation:{requestId:options.invitation.requestId,expiresAtMs:options.invitation.expiresAtMs}}:{})};
  const confirmation=hash(JSON.stringify(plan));
  return {...plan,confirmation,candidateStateDir:path.join(options.stateDir,'sidewisp-transitions',confirmation,'candidate')};
 }
@@ -31,7 +32,8 @@ async function verify(plan) {
  if (current.confirmation!==plan.confirmation || current.candidateStateDir!==plan.candidateStateDir) throw Error('source_profile_changed');
  return current;
 }
-export async function beginEndpointTransition({plan,confirmation,requestId,fetchImpl=globalThis.fetch}) {
+export async function beginEndpointTransition({plan,confirmation,requestId,expiresAtMs,fetchImpl=globalThis.fetch}) {
+ if(plan.invitation && (requestId!==plan.invitation.requestId||expiresAtMs!==plan.invitation.expiresAtMs))throw Error('invitation_transition_consent_mismatch');
  await verify(plan);
  if (confirmation!==plan.confirmation) throw Error('explicit_host_confirmation_required');
  const current=await source(plan);
@@ -41,7 +43,10 @@ export async function beginEndpointTransition({plan,confirmation,requestId,fetch
  const client=createDeviceAuthorizationClient({endpoint:plan.targetEndpoint,stateDir:plan.candidateStateDir,fetchImpl});
  const prepared=path.join(plan.stateDir,'sidewisp','prepare-authorizations',requestId+'.json');
  try {const row=JSON.parse(await fs.readFile(prepared,'utf8'));if(row.id===requestId&&row.endpoint===plan.targetEndpoint){const dest=path.join(plan.candidateStateDir,'sidewisp','prepare-authorizations');await fs.mkdir(dest,{recursive:true,mode:0o700});await fs.writeFile(path.join(dest,requestId+'.json'),JSON.stringify(row),{mode:0o600,flag:'wx'});}}catch(e){if(!['ENOENT','EEXIST'].includes(e.code))throw e;}
- return client.begin({id:requestId,runtime:'openclaw'});
+ if(expiresAtMs!==undefined&&(!Number.isSafeInteger(expiresAtMs)||expiresAtMs<=Date.now()))throw Error('fresh_invitation_required');
+ const result=await client.begin({id:requestId,runtime:'openclaw'});
+ if(expiresAtMs!==undefined&&result.expiresAtMs!==expiresAtMs)throw Error('invitation_expiry_mismatch');
+ return result;
 }
 export async function pollEndpointTransition({plan,fetchImpl=globalThis.fetch}) {
  await verify(plan);
@@ -51,6 +56,10 @@ export async function verifyEndpointTransitionReady({plan,fetchImpl=globalThis.f
  await verify(plan);
  const candidate=await createFileCredentialStore({stateDir:plan.candidateStateDir}).read();
  if (!candidate || candidate.installationId===plan.sourceInstallationId || await inspectCredential({endpoint:plan.targetEndpoint,credential:candidate,fetchImpl})!=='active')throw Error('new_production_authorization_required');
+ if(plan.invitation){
+  const completion=JSON.parse(await fs.readFile(path.join(plan.candidateStateDir,'sidewisp/authorization-completed.json'),'utf8'));
+  if(completion.requestId!==plan.invitation.requestId||completion.endpoint!==plan.targetEndpoint||completion.installationId!==candidate.installationId)throw Error('new_production_authorization_required');
+ }
  // Readiness is not activation. This module deliberately cannot write active
  // configuration, installation.json, spool, cursors, manager state or old data.
  return {status:'ready_for_confirmed_host_cutover',sourceInstallationId:plan.sourceInstallationId,targetInstallationId:candidate.installationId,bindingChanged:false};
@@ -80,11 +89,12 @@ export async function activateEndpointTransition({plan,confirmation,host,fetchIm
  await host.validate(plan);
  const lease=await host.suspend(); // busy/refused/unavailable: no local mutation
  await fs.writeFile(path.join(root,'host-lease.json'),JSON.stringify({lease}),{mode:0o600});
- let stopped=false,moved=false;
+ let stopped=false,moved=false,destinationStarting=false;
  try {
   // Revalidate after the fence: never overwrite a concurrently changed profile.
   await verify(plan);
   stopped=true;await host.stop();
+  if(plan.invitation?.expiresAtMs<=Date.now())throw Error('fresh_invitation_required');
   await fs.writeFile(path.join(root,'source-config.json'),configBytes,{mode:0o600,flag:'wx'});
   await save({status:'switching',targetInstallationId:ready.targetInstallationId});
   await fs.rename(active,backup);moved=true;
@@ -97,10 +107,16 @@ export async function activateEndpointTransition({plan,confirmation,host,fetchIm
   }
   config.plugins.entries.sidewisp.config.endpoint=plan.targetEndpoint;
   const tmp=plan.configFile+'.transition.tmp';await fs.writeFile(tmp,JSON.stringify(config,null,2)+'\n',{mode:0o600});await fs.rename(tmp,plan.configFile);
+  // From this boundary the destination may write data. Never restore old state
+  // over it, even if start or the final receipt fails. Recovery is non-destructive.
+  if(plan.invitation?.expiresAtMs<=Date.now())throw Error('fresh_invitation_required');
+  destinationStarting=true;
+  await save({status:'starting_target',targetInstallationId:ready.targetInstallationId,sourceInstallationId:plan.sourceInstallationId});
   await host.start(plan.targetEndpoint);
   await save({status:'activated',targetInstallationId:ready.targetInstallationId,sourceInstallationId:plan.sourceInstallationId});
   return {status:'activated',targetInstallationId:ready.targetInstallationId,bindingChanged:true,sourceArchived:true};
  } catch(error) {
+  if(destinationStarting){await save({status:'recovery_required',targetInstallationId:ready.targetInstallationId,sourceInstallationId:plan.sourceInstallationId}).catch(()=>{});throw Error('transition_recovery_required');}
   if(stopped) {
    try {
     await host.stop();

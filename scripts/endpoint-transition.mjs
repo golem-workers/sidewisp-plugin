@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 import {createFileCredentialStore} from '../src/auth/credentials.js';
 import {installUpdateManager} from './install-update-manager.mjs';
+import {invitationTransitionConsent} from '../src/auth/invitation-transition.js';
 import { planEndpointTransition,beginEndpointTransition,pollEndpointTransition,verifyEndpointTransitionReady,activateEndpointTransition } from '../src/auth/endpoint-transition.js';
 try {
  const [action,file,confirmation,requestId,...extra]=process.argv.slice(2);
@@ -26,12 +27,19 @@ try {
    const expiryIndex=extra.indexOf('--expires-at-ms');
    const expiresAtMs=expiryIndex<0?undefined:Number(extra[expiryIndex+1]);
    if(expiryIndex>=0&&(!Number.isSafeInteger(expiresAtMs)||expiresAtMs<=Date.now()))throw Error('fresh_invitation_required');
+   const consentIndex=extra.indexOf('--invitation-consent');
+   if(consentIndex>=0){
+    if(expiresAtMs===undefined)throw Error('original_invitation_expiry_required');
+    const consent=await invitationTransitionConsent({stateDir:plan.stateDir,configFile:plan.configFile,sourceEndpoint:plan.sourceEndpoint,targetEndpoint:plan.targetEndpoint,requestId,expiresAtMs});
+    if(consent.file!==extra[consentIndex+1]||consent.record.planFile!==file)throw Error('invitation_transition_consent_mismatch');
+    if(consent.result){console.log(JSON.stringify(consent.result));process.exit(0);}
+   }
    if(confirmation!==plan.confirmation)throw Error('explicit_host_confirmation_required');
    if(extra.includes('--enqueue')) {
     const unit='sidewisp-transition-'+createHash('sha256').update(plan.confirmation+requestId).digest('hex').slice(0,16);
     let active=false;try{active=execFileSync('systemctl',['--user','is-active',unit+'.service'],{encoding:'utf8',stdio:'pipe'}).trim()==='active';}catch(e){if(![3,4].includes(e.status))throw e;}
     if(!active){const keys=['HOME','PATH','USER','LOGNAME','LANG','XDG_RUNTIME_DIR','DBUS_SESSION_BUS_ADDRESS','OPENCLAW_STATE_DIR','OPENCLAW_CONFIG_PATH','OPENCLAW_PROFILE','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT','NODE_EXTRA_CA_CERTS'];
-     execFileSync('systemd-run',['--user','--quiet','--collect','--no-block','--unit='+unit,'--property=Type=exec','--property=UMask=0077','--property=RuntimeMaxSec=900',...keys.filter(k=>typeof process.env[k]==='string').map(k=>'--setenv='+k+'='+process.env[k]),'--',process.execPath,fileURLToPath(import.meta.url),'connect',file,confirmation,requestId,'--supervised',...(expiresAtMs===undefined?[]:['--expires-at-ms',String(expiresAtMs)])],{stdio:'pipe'});
+     execFileSync('systemd-run',['--user','--quiet','--collect','--no-block','--unit='+unit,'--property=Type=exec','--property=UMask=0077','--property=RuntimeMaxSec=900',...keys.filter(k=>typeof process.env[k]==='string').map(k=>'--setenv='+k+'='+process.env[k]),'--',process.execPath,fileURLToPath(import.meta.url),'connect',file,confirmation,requestId,'--supervised',...(expiresAtMs===undefined?[]:['--expires-at-ms',String(expiresAtMs)]),...(consentIndex<0?[]:['--invitation-consent',extra[consentIndex+1]])],{stdio:'pipe'});
     }
     result={status:'transition_queued',unit,bindingChanged:false};
    }else if(extra.includes('--supervised')){
@@ -41,7 +49,7 @@ try {
     const deadline=Math.min(Date.now()+14*60_000,expiresAtMs??Infinity);
     try {
      if(!await createFileCredentialStore({stateDir:plan.candidateStateDir}).read()) {
-      await beginEndpointTransition({plan,confirmation,requestId});
+      await beginEndpointTransition({plan,confirmation,requestId,...(consentIndex<0?{}:{expiresAtMs})});
       // Retain only this request's proof for post-ACK progress reports.
       const proof=await fs.readFile(path.join(plan.candidateStateDir,'sidewisp/device-authorization.json'));
       const dir=path.join(plan.candidateStateDir,'sidewisp/prepare-authorizations');await fs.mkdir(dir,{recursive:true,mode:0o700});await fs.writeFile(path.join(dir,requestId+'.json'),proof,{mode:0o600});

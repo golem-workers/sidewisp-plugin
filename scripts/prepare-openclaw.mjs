@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {invitationTransitionConsent,bindInvitationTransitionPlan} from '../src/auth/invitation-transition.js';
 import {preparationContinuation,notifyPreparationContinuation} from '../src/auth/preparation-continuation.js';
 import {recordPreparationFailure} from '../src/auth/preparation-diagnostics.js';
 import {saveConnectionReply,sendConnectionDelay} from '../src/auth/connection-notice.js';
@@ -16,7 +17,7 @@ import {coldActivateOpenClaw} from './cold-activate-openclaw.mjs';
 import {prepareConnection} from '../src/auth/prepare-connection.js';
 import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 const args=process.argv.slice(2);const options={};
-for(let i=0;i<args.length;i++){if(args[i]==='--supervised')options.supervised=true;else if(args[i]==='--preparation-lock')options.locked=true;else if(args[i]==='--enqueue')options.enqueue=true;else if(args[i]==='--update-only')options.updateOnly=true;else if(/^--(archive|sha256|endpoint|preparation-endpoint|request-id|state-dir|expires-at-ms|telegram-target|telegram-account|telegram-thread-id)$/.test(args[i]))options[args[i].slice(2)]=args[++i];else throw new Error('invalid_prepare_argument');}
+for(let i=0;i<args.length;i++){if(args[i]==='--accept-staging-to-production')options.invitationConsent=true;else if(args[i]==='--supervised')options.supervised=true;else if(args[i]==='--preparation-lock')options.locked=true;else if(args[i]==='--enqueue')options.enqueue=true;else if(args[i]==='--update-only')options.updateOnly=true;else if(/^--(archive|sha256|endpoint|preparation-endpoint|request-id|state-dir|expires-at-ms|telegram-target|telegram-account|telegram-thread-id)$/.test(args[i]))options[args[i].slice(2)]=args[++i];else throw new Error('invalid_prepare_argument');}
 const version=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8')).version;
 const stateDir=options['state-dir'];const endpoint=new URL(options.endpoint);
 // Maintenance uses the current endpoint. An optional, public target invitation
@@ -34,6 +35,9 @@ if(!path.isAbsolute(stateDir??'') || !path.isAbsolute(options.archive??'') || !/
  || ((!options.updateOnly || requestId!==undefined) && !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(requestId??'')))throw new Error('invalid_prepare_input');
 if(createHash('sha256').update(readFileSync(options.archive)).digest('hex')!==options.sha256)throw new Error('archive_hash_mismatch');
 if(path.resolve(process.env.OPENCLAW_STATE_DIR??'')!==stateDir || !path.isAbsolute(process.env.OPENCLAW_CONFIG_PATH??''))throw new Error('explicit_active_profile_required');
+if(options.invitationConsent && (!targetTransition || !options.updateOnly))throw Error('invitation_transition_endpoint_refused');
+const consent=options.invitationConsent?await invitationTransitionConsent({stateDir,configFile:process.env.OPENCLAW_CONFIG_PATH,sourceEndpoint:options.endpoint,targetEndpoint:options['preparation-endpoint'],requestId,expiresAtMs}):null;
+if(consent?.result){console.log(JSON.stringify(consent.result));process.exit(0);}
 const stateFile=path.join(stateDir,'sidewisp','prepare-status.json');mkdirSync(path.dirname(stateFile),{recursive:true,mode:0o700});
 const writeState=s=>{writeFileSync(stateFile+'.tmp',JSON.stringify({...s,targetVersion:version,updatedAt:new Date().toISOString()}),{mode:0o600});renameSync(stateFile+'.tmp',stateFile);};
 const run=args=>execFileSync('openclaw',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:120000});
@@ -46,9 +50,17 @@ const saveTerminal=(status,result)=>{if(options.supervised){const j=JSON.parse(r
   let continuation;
   const persist=async s=>{
    if(s.stage==='completed' && targetTransition){
-    continuation=await preparationContinuation({stateDir,configFile:process.env.OPENCLAW_CONFIG_PATH,sourceEndpoint:endpoint.origin,targetEndpoint:preparationEndpoint.origin,requestId,expiresAtMs});
+    continuation=await preparationContinuation({stateDir,configFile:process.env.OPENCLAW_CONFIG_PATH,sourceEndpoint:endpoint.origin,targetEndpoint:preparationEndpoint.origin,requestId,expiresAtMs,invitationConsent:!!consent});
+    if(consent && continuation.nextAction.type==='confirm_endpoint_transition'){
+     const action=continuation.nextAction;const plan=JSON.parse(readFileSync(action.planFile,'utf8'));
+     await bindInvitationTransitionPlan({consent,planFile:action.planFile,plan});
+     const queued=JSON.parse(execFileSync(process.execPath,[fileURLToPath(new URL('./endpoint-transition.mjs',import.meta.url)),'connect',action.planFile,action.confirmation,requestId,'--expires-at-ms',String(expiresAtMs),'--invitation-consent',consent.file,'--enqueue'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}));
+     continuation={...queued,bindingPreserved:true,nextAction:{type:'automatic_transition',requestId,expiresAtMs}};
+     s={stage:'connection_pending',...continuation};
+    }else {
     if(options['telegram-target']){try{await notifyPreparationContinuation({stateDir,requestId,action:continuation.nextAction,route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});continuation.confirmationDelivery='sent';}catch{continuation.confirmationDelivery='unavailable';}}
     s={...continuation,stage:'blocked',reasonCode:continuation.reason};
+    }
    }else if(reportsInvitation && expiresAtMs<=Date.now()){
     s={...s,stage:'blocked',reason:'fresh_invitation_required',reasonCode:'fresh_invitation_required'};
    }
@@ -86,7 +98,7 @@ if(!options.locked){
  if(result){
   if(result.status==='blocked'){await persist({stage:'blocked',reason:result.reason});process.exitCode=1;}
   if(options['telegram-target']&&!options.updateOnly)await saveConnectionReply({stateDir,endpoint:endpoint.origin,requestId:options['request-id'],route:{channel:'telegram',to:options['telegram-target'],accountId:options['telegram-account'],threadId:options['telegram-thread-id']}});
-  console.log(JSON.stringify({...result,...(result.status==='preparation_queued'?{nextAction:'Reply exactly «Подключаюсь к Sidewisp» as the final handoff acknowledgement, once; not an empty final. Independent preparation continues; do not repeat setup or begin. Observe sidewisp/prepare-status.json: on confirm_endpoint_transition show source/target and request explicit host confirmation; only then run scripts/endpoint-transition.mjs connect <planFile> <confirmation> <requestId> --expires-at-ms <original-expiry> --enqueue under the same profile. Never use the plan hash as consent.'}:{})}));
+  console.log(JSON.stringify({...result,...(result.status==='preparation_queued'?{nextAction:options.invitationConsent?'Reply exactly «Подключаюсь к Sidewisp» once as the final handoff acknowledgement. End this setup turn: the independent helper automatically completes this invitation-authorized staging-to-production transition. Do not ask another host-confirmation question, repeat setup or begin, or extend the original expiry. Account authorization and first accepted signal remain required.':'Reply exactly «Подключаюсь к Sidewisp» as the final handoff acknowledgement, once; not an empty final. Independent preparation continues; do not repeat setup or begin. Observe sidewisp/prepare-status.json: on confirm_endpoint_transition show source/target and request explicit host confirmation; only then run scripts/endpoint-transition.mjs connect <planFile> <confirmation> <requestId> --expires-at-ms <original-expiry> --enqueue under the same profile. Never use the plan hash as consent.'}:{})}));
  }
 }else{
  try{
