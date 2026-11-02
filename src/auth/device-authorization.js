@@ -92,6 +92,25 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       }
       throw Error('fresh_invitation_required');
     },
+    // Continue a fresh same-origin invitation after preparation, not from a
+    // cached uploader error. Never reset a binding or fall back after reuse fails.
+    async continueInvitation({ id, runtime, expiresAtMs, now = Date.now, ...reuseOptions }) {
+      const checkExpiry = () => {
+        if (!/^sw_pair_[A-Za-z0-9_-]{32}$/.test(id ?? '') || runtime !== 'openclaw'
+          || !Number.isSafeInteger(expiresAtMs) || expiresAtMs <= now()) throw Error('fresh_invitation_required');
+      };
+      checkExpiry();
+      const status = await inspectCredential({ endpoint: url, credential: await credentials.read(), fetchImpl });
+      checkExpiry();
+      if (status === 'active') return this.reuseExisting({ id, runtime, expiresAtMs, now, ...reuseOptions });
+      // Only the signed-status protocol's explicit rejected response (or no
+      // credential) permits begin. begin and poll independently recheck the old
+      // credential, retaining it until the new account authorization is issued.
+      if (!['rejected', 'unconfigured'].includes(status)) throw Error('installation_status_unavailable');
+      const result = await this.begin({ id, runtime });
+      return { status: result.autoConnect ? 'connection_pending' : 'approval_pending',
+        requestId: result.id, expiresAtMs: result.expiresAtMs, bindingPreserved: true };
+    },
     async status() {
       return { status: await inspectCredential({ endpoint: url, credential: await credentials.read(), fetchImpl }) };
     },

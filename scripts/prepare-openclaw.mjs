@@ -64,9 +64,10 @@ const saveTerminal=(status,result)=>{if(options.supervised){const j=JSON.parse(r
     }
    }else if(s.stage==='completed' && reportsInvitation){
     // Same-origin maintenance is not completion of the new invitation.
-    // Keep existing credentials and correlate using signed installation + current proof.
-    continuation=await progressClient.reuseExisting({id:requestId,runtime:'openclaw',expiresAtMs});
-    s={...continuation,stage:'connection_pending'};
+    // Active credentials use signed reuse; a protocol-confirmed rejected
+    // credential uses normal re-enrollment without deleting local state.
+    continuation=await progressClient.continueInvitation({id:requestId,runtime:'openclaw',expiresAtMs});
+    s={...continuation,stage:continuation.status};
    }else if(reportsInvitation && expiresAtMs<=Date.now()){
     s={...s,stage:'blocked',reason:'fresh_invitation_required',reasonCode:'fresh_invitation_required'};
    }
