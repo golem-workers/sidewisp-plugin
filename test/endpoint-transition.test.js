@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {planEndpointTransition,beginEndpointTransition,pollEndpointTransition,verifyEndpointTransitionReady} from '../src/auth/endpoint-transition.js';
 import {createFileCredentialStore} from '../src/auth/credentials.js';
+import {createDeviceAuthorizationClient} from '../src/auth/device-authorization.js';
 async function fixture(t){
  const stateDir=await fs.mkdtemp(path.join(os.tmpdir(),'sw-transition-'));t.after(()=>fs.rm(stateDir,{recursive:true,force:true}));
  const configFile=path.join(stateDir,'openclaw.json');await fs.writeFile(configFile,JSON.stringify({plugins:{entries:{sidewisp:{config:{endpoint:'https://staging-api.sidewisp.com'}}}},other:'keep'}));
@@ -44,4 +45,94 @@ test('unavailable staging status never authorizes a new request or changes the s
  const f=await fixture(t),plan=await planEndpointTransition(f);let calls=0;
  await assert.rejects(beginEndpointTransition({plan,confirmation:plan.confirmation,requestId:'sw_pair_'+'b'.repeat(32),fetchImpl:async()=>{calls++;throw Error('unavailable');}}),/unavailable/);
  assert.equal(calls,1);await f.assertPreserved();
+});
+
+import {activateEndpointTransition} from '../src/auth/endpoint-transition.js';
+async function staged(t) {
+ const f=await fixture(t),plan=await planEndpointTransition({...f,sourceEndpoint:'https://source.test',targetEndpoint:'https://target.test'}).catch(async()=>{
+  const config=JSON.parse(await fs.readFile(f.configFile));config.plugins.entries.sidewisp.config.endpoint='https://source.test';await fs.writeFile(f.configFile,JSON.stringify(config));return planEndpointTransition({...f,sourceEndpoint:'https://source.test',targetEndpoint:'https://target.test'});
+ });
+ await createFileCredentialStore({stateDir:plan.candidateStateDir}).write({installationId:'sw_ins_new12345678',secret:'sw_secret_'+'n'.repeat(43),status:'active'});
+ const fetchImpl=async u=>({status:200,json:async()=>({schema:'sidewisp.credential-status.v1',status:'active',installationId:u.origin===plan.sourceEndpoint?'sw_ins_old12345678':'sw_ins_new12345678'})});
+ const before=await fs.readFile(f.configFile),credential=await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json'));
+ return {...f,plan,fetchImpl,before,credential};
+}
+test('explicit arbitrary HTTPS endpoint pair is bound to the exact immutable plan',async t=>{
+ const f=await staged(t);assert.equal(f.plan.targetEndpoint,'https://target.test');
+ for(const targetEndpoint of ['http://target.test','https://u:p@target.test','https://target.test/a',f.plan.sourceEndpoint])await assert.rejects(planEndpointTransition({...f,targetEndpoint,sourceEndpoint:f.plan.sourceEndpoint}));
+});
+test('host busy refuses activation before any state is changed',async t=>{
+ const f=await staged(t);let stopped=false;
+ await assert.rejects(activateEndpointTransition({...f,confirmation:f.plan.confirmation,host:{validate:async()=>{},suspend:async()=>{throw Error('busy')},stop:async()=>{stopped=true;}}}),/busy/);
+ assert.equal(stopped,false);assert.deepEqual(await fs.readFile(f.configFile),f.before);assert.deepEqual(await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json')),f.credential);
+});
+test('activation archives source spool/credentials and gives destination a clean store; repeated activation is idempotent',async t=>{
+ const f=await staged(t),events=[];const host={validate:async()=>events.push('validate'),suspend:async()=>{events.push('suspend');return 'lease'},stop:async()=>events.push('stop'),start:async endpoint=>events.push(endpoint)};
+ const options={...f,confirmation:f.plan.confirmation,host};const result=await activateEndpointTransition(options);assert.equal(result.status,'activated');assert.equal(result.sourceArchived,true);
+ const root=path.dirname(f.plan.candidateStateDir);assert.deepEqual(await fs.readFile(path.join(root,'source-sidewisp/installation.json')),f.credential);
+ assert.equal(await fs.readFile(path.join(root,'source-sidewisp/spool.sqlite'),'utf8'),'untouched-backlog-and-cursors');
+ await assert.rejects(fs.access(path.join(f.stateDir,'sidewisp/spool.sqlite')),{code:'ENOENT'});
+ assert.equal((await createFileCredentialStore({stateDir:f.stateDir}).read()).installationId,'sw_ins_new12345678');
+ assert.equal(JSON.parse(await fs.readFile(f.configFile)).other,'keep');assert.equal(events.at(-1),'https://target.test');
+ const n=events.length;await activateEndpointTransition(options);assert.equal(events.length,n);
+});
+test('late destination failure retains new data and source archive; retry cannot overwrite either',async t=>{
+ const f=await staged(t);let starts=0;
+ const host={validate:async()=>{},suspend:async()=> 'lease',stop:async()=>{},start:async endpoint=>{starts++;assert.equal(endpoint,f.plan.targetEndpoint);await fs.writeFile(path.join(f.stateDir,'sidewisp/new-data'),'accepted destination data');throw Error('target_failed');}};
+ const options={...f,confirmation:f.plan.confirmation,host};
+ await assert.rejects(activateEndpointTransition(options),/transition_recovery_required/);
+ assert.equal(JSON.parse(await fs.readFile(f.configFile)).plugins.entries.sidewisp.config.endpoint,f.plan.targetEndpoint);
+ assert.equal(await fs.readFile(path.join(f.stateDir,'sidewisp/new-data'),'utf8'),'accepted destination data');
+ assert.deepEqual(await fs.readFile(path.join(path.dirname(f.plan.candidateStateDir),'source-sidewisp/installation.json')),f.credential);
+ await assert.rejects(activateEndpointTransition(options),/transition_recovery_required/);assert.equal(starts,1);
+});
+test('an already-reported invitation reuses its proof without copying source credentials',async t=>{
+ const f=await fixture(t),plan=await planEndpointTransition(f),id='sw_pair_'+'p'.repeat(32),proof='sw_device_'+'x'.repeat(43);
+ const dir=path.join(f.stateDir,'sidewisp/prepare-authorizations');await fs.mkdir(dir);await fs.writeFile(path.join(dir,id+'.json'),JSON.stringify({id,runtime:'openclaw',endpoint:plan.targetEndpoint,deviceSecret:proof}));
+ await beginEndpointTransition({plan,confirmation:plan.confirmation,requestId:id,fetchImpl:async(u,o)=>u.pathname.endsWith('credential-status')?{status:200,json:async()=>({schema:'sidewisp.credential-status.v1',status:'active',installationId:plan.sourceInstallationId})}:(assert.equal(JSON.parse(o.body).deviceSecret,proof),{ok:true,json:async()=>({id,userCode:'12345ABCDE'})})});
+ await f.assertPreserved();assert.equal(await createFileCredentialStore({stateDir:plan.candidateStateDir}).read(),null);
+});
+test('a stop-stage failure restores service availability without claiming a completed cutover',async t=>{
+ const f=await staged(t);let stops=0,sourceStarted=false;
+ const host={validate:async()=>{},suspend:async()=> 'lease',stop:async()=>{if(++stops===1)throw Error('stop_failed');},start:async endpoint=>{assert.equal(endpoint,f.plan.sourceEndpoint);sourceStarted=true;}};
+ await assert.rejects(activateEndpointTransition({...f,confirmation:f.plan.confirmation,host}),/stop_failed/);assert.equal(sourceStarted,true);assert.deepEqual(await fs.readFile(f.configFile),f.before);assert.deepEqual(await fs.readFile(path.join(f.stateDir,'sidewisp/installation.json')),f.credential);
+});
+
+
+test('target preparation with foreign authorization cannot bypass confirmation and transfers only its own proof',async t=>{
+ const f=await fixture(t),sourceEndpoint='https://staging-api.sidewisp.com',targetEndpoint=sourceEndpoint+':18443';
+ const id='sw_pair_'+'n'.repeat(32),oldFile=path.join(f.stateDir,'sidewisp/device-authorization.json');
+ const oldBytes=JSON.stringify({id:'sw_pair_'+'o'.repeat(32),runtime:'openclaw',endpoint:sourceEndpoint,deviceSecret:'sw_device_'+'o'.repeat(43)});await fs.writeFile(oldFile,oldBytes,{mode:0o600});
+ let proof;const calls=[];
+ const fetchImpl=async(u,o)=>{
+  calls.push(u.origin+u.pathname);
+  if(u.pathname.endsWith('/credential-status')){assert.equal(u.origin,sourceEndpoint);return Response.json({schema:'sidewisp.credential-status.v1',status:'active',installationId:'sw_ins_old12345678'});}
+  assert.equal(u.origin,targetEndpoint);assert.equal(o.headers.authorization,undefined);
+  const body=JSON.parse(o.body);assert.equal(body.id,id);
+  if(u.pathname.endsWith('/preparation')){proof=body.deviceSecret;return Response.json({status:'waiting'});}
+  assert.equal(u.pathname,'/v1/device-authorizations/begin');assert.equal(body.deviceSecret,proof);
+  return Response.json({id,userCode:'12345ABCDE',autoConnect:true});
+ };
+ await createDeviceAuthorizationClient({endpoint:targetEndpoint,stateDir:f.stateDir,fetchImpl}).reportPreparation({id,stage:'inspecting'});
+ const plan=await planEndpointTransition({...f,sourceEndpoint,targetEndpoint});
+ await assert.rejects(beginEndpointTransition({plan,confirmation:'no',requestId:id,fetchImpl}),/explicit_host_confirmation_required/);
+ await assert.rejects(activateEndpointTransition({plan,confirmation:'no',fetchImpl,host:{validate:()=>assert.fail('must not activate')}}),/explicit_host_confirmation_required/);
+ assert.equal(calls.length,1);await f.assertPreserved();assert.equal(await fs.readFile(oldFile,'utf8'),oldBytes);
+ assert.equal((await beginEndpointTransition({plan,confirmation:plan.confirmation,requestId:id,fetchImpl})).status,'pending');
+ assert.equal(calls.length,3);assert.equal(calls.some(c=>c.endsWith('/poll')),false);
+ await f.assertPreserved();assert.equal(await fs.readFile(oldFile,'utf8'),oldBytes);
+ assert.notEqual(plan.candidateStateDir,f.stateDir);
+ assert.equal(JSON.parse(await fs.readFile(path.join(plan.candidateStateDir,'sidewisp/device-authorization.json'),'utf8')).deviceSecret,proof);
+});
+
+import {recordAuthorizationCompletion,createConnectionNotifier,saveConnectionReply} from '../src/auth/connection-notice.js';
+for(const variant of ['old-request','wrong-endpoint','missing'])test(`activation does not inherit an unrelated reply intent: ${variant}`,async t=>{
+ const f=await staged(t),requestId='sw_pair_'+'n'.repeat(32),installationId='sw_ins_new12345678';
+ await recordAuthorizationCompletion({stateDir:f.plan.candidateStateDir,endpoint:f.plan.targetEndpoint,requestId,installationId});
+ if(variant!=='missing')await saveConnectionReply({stateDir:f.stateDir,endpoint:variant==='wrong-endpoint'?f.plan.sourceEndpoint:f.plan.targetEndpoint,requestId:variant==='old-request'?'sw_pair_'+'o'.repeat(32):requestId,route:{channel:'telegram',to:'999'}});
+ const host={validate:async()=>{},suspend:async()=>'lease',stop:async()=>{},start:async()=>{}};
+ await activateEndpointTransition({...f,confirmation:f.plan.confirmation,host});
+ await assert.rejects(fs.access(path.join(f.stateDir,'sidewisp/connection-reply.json')),{code:'ENOENT'});
+ let sent=0;const notifier=createConnectionNotifier({stateDir:f.stateDir,endpoint:f.plan.targetEndpoint,send:async()=>{sent++;return{messageId:'unexpected'};}});
+ await notifier.acknowledged([{type:'health.snapshot',installationId,occurredAt:new Date().toISOString()}]);await notifier.stop();assert.equal(sent,0);
 });

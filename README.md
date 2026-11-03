@@ -175,3 +175,108 @@ This is an OSI-approved open-source license. Commercial use and modification
 are permitted. Copyleft and corresponding-source obligations apply when
 covered versions are conveyed or AGPLv3 section 13 applies. Earlier MIT
 releases remain governed by the license distributed with those releases.
+
+### Explicit endpoint transition (source candidate)
+
+`node scripts/endpoint-transition.mjs plan /absolute/plan.json [target-origin] [source-origin]`
+records the actual absolute active profile, endpoints and source fingerprints.
+Default origins remain canonical staging → production. Planning does not change
+bindings. Obtain explicit host approval for that exact plan, then use `begin
+<plan> <confirmation> <request-id>`, `poll <plan>`, `ready <plan>`, and **separately**
+`activate <plan> <confirmation>`. Use the same `OPENCLAW_STATE_DIR` and
+`OPENCLAW_CONFIG_PATH` for every step; never point them at archive extraction.
+Preparation may first report `existing_endpoint_mismatch` to the invitation;
+transition reuses only that invitation's proof, not the source credential.
+
+Activation requires the matched managed running Gateway and its idle suspension
+fence. It stops the selected collector/manager, archives the source Sidewisp
+state and config privately, activates a clean destination credential/config and
+restarts the selected services. Old spool, cursors and manager journals are not
+replayed with the new identity. Failed activation restores the source; an
+interrupted journal requires recovery review rather than blind reactivation.
+Verify both signed channels and a fresh server-accepted heartbeat afterward.
+No actual production or working-agent transition is authorized by this doc.
+The 0.2.88 source artifact is NOT evidence of an official published 0.2.88 release.
+
+For automatic completion after exact host confirmation, use `connect <plan>
+<confirmation> <request-id> --enqueue` and end the setup turn. Its independent
+systemd job polls approval and waits for host-idle admission; no second chat
+command is required. Post-approval activation errors are reportable to the app.
+
+Before planning a cross-endpoint move, complete pinned plugin/manager maintenance
+on the CURRENT endpoint with `prepare-openclaw.mjs --enqueue --update-only` and
+wait for its independent terminal completion. Existing binding stays unchanged.
+To report progress to a NEW invitation during that maintenance, add
+`--preparation-endpoint <target-origin> --request-id <target-request-id>
+--expires-at-ms <original-invitation-expiry>`;
+`--endpoint` remains the CURRENT origin. The reporting endpoint is allowed only
+with `--update-only` and a valid public request ID. The first `inspecting` report
+precedes source inspection/runtime preparation/upgrade. A separate private
+per-request proof is stored without changing the source authorization or
+installation credential; no signed source credential is sent to the target.
+On cross-endpoint maintenance completion a read-only, fingerprint-bound plan is
+created automatically at `sidewisp-transitions/<plan-hash>/plan.json` (0600).
+Both the local result and the target report become
+`blocked/existing_endpoint_mismatch`; the local result records
+`sourceUpdate=completed`, `bindingPreserved=true` and a structured
+`nextAction.type=confirm_endpoint_transition` with source/target, planFile,
+request ID, original expiry and exact plan confirmation. Completion is NOT a
+successful target connection. No begin/poll or cutover is performed by update-only.
+
+The expiry is the integer Unix epoch timestamp in milliseconds from the original
+invitation, NOT `Date.now()+600000` at helper start. It is mandatory with the
+reporting flag. Expired new jobs cannot enqueue. An already-running supervised
+source maintenance may finish after expiry, but cannot create a target transition;
+its final blocker is `fresh_invitation_required`. The invitation is never extended.
+
+For a Telegram caller, additionally supply `--telegram-target <initiating-chat-id>`
+and optionally `--telegram-account <account>` / `--telegram-thread-id <thread>`.
+The worker sends a deduplicated safe source-to-target confirmation question to
+that explicitly supplied route, without codes, proof or the plan confirmation
+hash. A failed send is recorded as `confirmationDelivery=unavailable`, never as
+consent or connection success. The old connection-reply record is not replaced.
+Without an outbound route the trusted caller MUST observe `prepare-status.json`
+and surface `nextAction`; enqueue returning is not a confirmation-delivery receipt.
+The app uses the existing `blocked/existing_endpoint_mismatch` projection, not
+an indefinite inspecting spinner: explain that the old binding is retained and
+that confirmation in the agent chat is required; expiry offers a fresh invitation.
+
+Only AFTER the user explicitly confirms the exact source-to-target change, run
+under the same active profile, using values from that local nextAction:
+
+```sh
+node "<verified-candidate>/scripts/endpoint-transition.mjs" connect \
+  "<planFile>" "<confirmation>" "<requestId>" \
+  --expires-at-ms "<original-expiry-ms>" --enqueue
+```
+
+Generating or reading the plan hash is NOT consent. The independent confirmed
+transition checks the original expiry, begins the isolated target request, polls
+its existing account-approval protocol and activates only through the host idle
+gate. After approval no additional setup command is needed. Neither the reporter
+nor the worker automatically invokes this command before host confirmation. Without a request ID, maintenance remains silent to
+invitations. This is a local candidate interface, not shipped 0.2.88 behavior.
+Activation refuses a source collector that is not the target version and ready.
+
+Native cron-result fallback reads only the bounded `task_runs` receipt projection
+from the selected profile's SQLite state, including the exact native cron run
+session and explicit successful delivery. It never reads task prompts or guesses
+identity from response text. Startup and replacement bindings establish a new
+baseline (no historical push backfill); receipt/cursor persistence is atomic in
+the Sidewisp spool. Missing native receipt storage stays unsupported, not success.
+
+### Source-review archive compatibility
+
+Build a commit-pinned source archive with `python3 scripts/pack-source.py --ref <full-commit> --output <absolute-file.tgz>`.
+This emits deterministic USTAR + gzip without Git's global PAX comment, which the strict OpenClaw installer rejects.
+Keep the returned full commit and SHA-256 in the external enrollment manifest, never weaken archive admission.
+Source acceptance must exercise `plugins install` from an older supported version through real `--enqueue`; a ready, same-version foreground collector does not test archive installation.
+
+### User-invited ordinary staging → production
+
+The explicit `--accept-staging-to-production` preparation flag authorizes only
+`https://staging-api.sidewisp.com` → `https://api.sidewisp.com` for this current
+profile and invitation. It replaces the separate host-confirmation exchange in
+that branch only; all other transitions retain the confirmation flow above.
+See [the CLI, consent, retry and recovery contract](docs/invitation-transition-contract.md).
+No artifact in this source PR is an official published release.

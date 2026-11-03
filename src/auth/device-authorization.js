@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { signBatch } from '../delivery/uploader.js';
 import { randomBytes } from 'node:crypto';
 import { createFileCredentialStore } from './credentials.js';
 import { recordAuthorizationCompletion } from './connection-notice.js';
@@ -33,8 +34,11 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
     }
     return response.json();
   };
-  const read = async () => {
+  const read = async ({ preparationId } = {}) => {
     const row = JSON.parse(await fs.readFile(file, 'utf8'));
+    // Progress for a new invitation must not depend on a different endpoint's
+    // authorization. Ignore only unrelated state here; begin/poll stay strict.
+    if (preparationId && (row.id !== preparationId || row.endpoint !== url.origin)) return null;
     if (row.endpoint !== url.origin || !/^sw_pair_[A-Za-z0-9_-]{32}$/.test(row.id)
       || !/^sw_device_[A-Za-z0-9_-]{43}$/.test(row.deviceSecret)) throw new Error('invalid_device_state');
     return row;
@@ -44,7 +48,7 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       if (!/^sw_pair_[A-Za-z0-9_-]{32}$/.test(id)) throw new Error('invalid_device_request');
       await fs.mkdir(directory, {recursive:true,mode:0o700});
       let state;
-      try { const pending=await read();if(pending.id===id)state=pending; }catch(error){if(error.code!=='ENOENT')throw error;}
+      try { const pending=await read({preparationId:id});if(pending)state=pending; }catch(error){if(error.code!=='ENOENT')throw error;}
       if(!state)state=(await readPrepared(id))?.row;
       if (state && (state.id!==id || state.endpoint!==url.origin)) state=null;
       if (!state) {
@@ -55,6 +59,57 @@ export function createDeviceAuthorizationClient({ endpoint, stateDir, fetchImpl 
       }
       if(!/^sw_device_[A-Za-z0-9_-]{43}$/.test(state.deviceSecret??''))throw Error('invalid_device_state');
       return request('/v1/device-authorizations/preparation',{id,deviceSecret:state.deviceSecret,runtime:'openclaw',stage,...(reasonCode?{reasonCode}:{})});
+    },
+    async reuseExisting({ id, runtime, expiresAtMs, sleep = ms => new Promise(resolve => setTimeout(resolve,ms)), now = Date.now }) {
+      if (!/^sw_pair_[A-Za-z0-9_-]{32}$/.test(id) || runtime !== 'openclaw'
+        || !Number.isSafeInteger(expiresAtMs) || expiresAtMs <= now()) throw Error('fresh_invitation_required');
+      const existing = await credentials.read();
+      if (!existing || existing.status !== 'active') throw Error('existing_plugin_required');
+      const prepared = (await readPrepared(id))?.row;
+      if (!prepared || prepared.runtime !== runtime || !/^sw_device_[A-Za-z0-9_-]{43}$/.test(prepared.deviceSecret ?? '')) throw Error('current_preparation_proof_required');
+      while (now() < expiresAtMs) {
+        const current = await credentials.read();
+        if (current?.installationId !== existing.installationId || current.secret !== existing.secret || current.status !== 'active') throw Error('existing_binding_changed');
+        // Body schema binds this signature to reuse, not another signed operation.
+        const body = Buffer.from(JSON.stringify({schema:'sidewisp.authorization-reuse.v1',id,runtime,deviceSecret:prepared.deviceSecret}));
+        const timestamp = Math.floor(now()/1000).toString(), nonce = randomBytes(16).toString('base64url');
+        const signature = signBatch({secret:existing.secret,timestamp,nonce,body});
+        const response = await fetchImpl(new URL('/v1/device-authorizations/reuse',url),{method:'POST',redirect:'error',body,signal:AbortSignal.timeout(15000),
+          headers:{'content-type':'application/json',authorization:`Sidewisp ${existing.installationId}:${signature}`,'x-sidewisp-algorithm':'hmac-sha256-v1','x-sidewisp-timestamp':timestamp,'x-sidewisp-nonce':nonce}});
+        const result = await response.json().catch(()=>null);
+        if (!response.ok) throw Object.assign(Error('existing_authorization_reuse_failed'),{status:response.status,reason:result?.error});
+        if (result?.id !== id || result.installationId !== existing.installationId || result.reusedExistingInstallation !== true
+          || result.expiresAtMs !== expiresAtMs || !['approved','completed'].includes(result.status)) throw Error('invalid_device_response');
+        if (result.status === 'completed') {
+          const finalCredential = await credentials.read();
+          if (finalCredential?.installationId !== existing.installationId || finalCredential.secret !== existing.secret || finalCredential.status !== 'active') throw Error('existing_binding_changed');
+          let completion; try {completion = JSON.parse(await fs.readFile(path.join(directory,'authorization-completed.json'),'utf8'));} catch(error) {if(error.code !== 'ENOENT')throw error;}
+          if (completion?.requestId !== id || completion.endpoint !== url.origin || completion.installationId !== existing.installationId)
+            await recordAuthorizationCompletion({stateDir,endpoint:url.origin,requestId:id,installationId:existing.installationId});
+          return {status:'connection_pending',requestId:id,expiresAtMs,installationId:existing.installationId,bindingPreserved:true,reusedExistingInstallation:true};
+        }
+        await sleep(Math.min(2000,Math.max(1,expiresAtMs-now())));
+      }
+      throw Error('fresh_invitation_required');
+    },
+    // Continue a fresh same-origin invitation after preparation, not from a
+    // cached uploader error. Never reset a binding or fall back after reuse fails.
+    async continueInvitation({ id, runtime, expiresAtMs, now = Date.now, ...reuseOptions }) {
+      const checkExpiry = () => {
+        if (!/^sw_pair_[A-Za-z0-9_-]{32}$/.test(id ?? '') || runtime !== 'openclaw'
+          || !Number.isSafeInteger(expiresAtMs) || expiresAtMs <= now()) throw Error('fresh_invitation_required');
+      };
+      checkExpiry();
+      const status = await inspectCredential({ endpoint: url, credential: await credentials.read(), fetchImpl });
+      checkExpiry();
+      if (status === 'active') return this.reuseExisting({ id, runtime, expiresAtMs, now, ...reuseOptions });
+      // Only the signed-status protocol's explicit rejected response (or no
+      // credential) permits begin. begin and poll independently recheck the old
+      // credential, retaining it until the new account authorization is issued.
+      if (!['rejected', 'unconfigured'].includes(status)) throw Error('installation_status_unavailable');
+      const result = await this.begin({ id, runtime });
+      return { status: result.autoConnect ? 'connection_pending' : 'approval_pending',
+        requestId: result.id, expiresAtMs: result.expiresAtMs, bindingPreserved: true };
     },
     async status() {
       return { status: await inspectCredential({ endpoint: url, credential: await credentials.read(), fetchImpl }) };
